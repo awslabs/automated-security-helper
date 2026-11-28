@@ -1,0 +1,409 @@
+{
+  "about": "Samples that tell Python's re.search apart from a careless JavaScript translation of the same pattern. Each group names a pattern by its Python source and says where the data block holds its translation: in its patterns map, or at env.referencePattern. A sample is the text and whether Python's re.search finds the pattern in it. The translation must give the same answer for every sample. The hazards are the ones the schema's patterns meet: a word character beyond ASCII, a trailing newline that $ accepts in Python and not in JavaScript, a carriage return or a line separator that Python's dot accepts and JavaScript's dot does not, and a combining mark that is not a word character in either.",
+  "groups": [
+    {
+      "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+      "samples": [
+        {
+          "match": true,
+          "note": "plain reference",
+          "text": "${FOO}"
+        },
+        {
+          "match": true,
+          "note": "explicit tag",
+          "text": "!ENV ${FOO}"
+        },
+        {
+          "match": true,
+          "note": "default value",
+          "text": "${FOO:bar}"
+        },
+        {
+          "match": true,
+          "note": "empty default",
+          "text": "${FOO:}"
+        },
+        {
+          "match": true,
+          "note": "colon inside the default",
+          "text": "${FOO:a:b}"
+        },
+        {
+          "match": true,
+          "note": "closing brace inside the default",
+          "text": "${FOO:bar}}"
+        },
+        {
+          "match": true,
+          "note": "underscore and digit",
+          "text": "${_1}"
+        },
+        {
+          "match": true,
+          "note": "non-ASCII letters are word characters",
+          "text": "${\u00c4\u00d6}"
+        },
+        {
+          "match": true,
+          "note": "a full-width digit is a word character",
+          "text": "${\uff19}"
+        },
+        {
+          "match": true,
+          "note": "one trailing newline, as a block scalar leaves",
+          "text": "${FOO}\n"
+        },
+        {
+          "match": true,
+          "note": "a carriage return inside the default: the dot accepts it",
+          "text": "${FOO:a\rb}"
+        },
+        {
+          "match": true,
+          "note": "a line separator inside the default: the dot accepts it",
+          "text": "${FOO:a\u2028b}"
+        },
+        {
+          "match": false,
+          "note": "a newline inside the default: the dot refuses it",
+          "text": "${FOO:a\nb}"
+        },
+        {
+          "match": false,
+          "note": "two trailing newlines: only one is forgiven",
+          "text": "${FOO}\n\n"
+        },
+        {
+          "match": false,
+          "note": "a trailing carriage return",
+          "text": "${FOO}\r"
+        },
+        {
+          "match": false,
+          "note": "trailing space",
+          "text": "${FOO} "
+        },
+        {
+          "match": false,
+          "note": "leading space",
+          "text": " ${FOO}"
+        },
+        {
+          "match": false,
+          "note": "no closing brace",
+          "text": "${FOO"
+        },
+        {
+          "match": false,
+          "note": "no braces",
+          "text": "$FOO"
+        },
+        {
+          "match": false,
+          "note": "no name",
+          "text": "${}"
+        },
+        {
+          "match": false,
+          "note": "a hyphen is not a word character",
+          "text": "${FOO-BAR}"
+        },
+        {
+          "match": false,
+          "note": "a space is not a word character",
+          "text": "${FOO BAR}"
+        },
+        {
+          "match": false,
+          "note": "the tag needs its space",
+          "text": "!ENV${FOO}"
+        },
+        {
+          "match": false,
+          "note": "the tag is case sensitive",
+          "text": "!env ${FOO}"
+        },
+        {
+          "match": false,
+          "note": "a second closing brace with no default",
+          "text": "${FOO}}"
+        },
+        {
+          "match": false,
+          "note": "a combining mark is not a word character",
+          "text": "${e\u0301}"
+        },
+        {
+          "match": false,
+          "note": "empty text",
+          "text": ""
+        }
+      ],
+      "source": "patterns"
+    },
+    {
+      "pattern": "^[a-zA-Z][\\w-]+$",
+      "samples": [
+        {
+          "match": true,
+          "note": "a plugin name",
+          "text": "bandit"
+        },
+        {
+          "match": true,
+          "note": "hyphen",
+          "text": "cdk-nag"
+        },
+        {
+          "match": true,
+          "note": "shortest name",
+          "text": "ab"
+        },
+        {
+          "match": true,
+          "note": "digit",
+          "text": "a1"
+        },
+        {
+          "match": true,
+          "note": "underscore",
+          "text": "a_"
+        },
+        {
+          "match": true,
+          "note": "trailing hyphen",
+          "text": "a-"
+        },
+        {
+          "match": true,
+          "note": "a non-ASCII letter after the first character",
+          "text": "na\u00efve"
+        },
+        {
+          "match": true,
+          "note": "a precomposed letter",
+          "text": "a\u00e9"
+        },
+        {
+          "match": true,
+          "note": "an Arabic-Indic digit is a word character",
+          "text": "a\u0660"
+        },
+        {
+          "match": true,
+          "note": "one trailing newline",
+          "text": "ab\n"
+        },
+        {
+          "match": false,
+          "note": "one character is too short",
+          "text": "a"
+        },
+        {
+          "match": false,
+          "note": "empty text",
+          "text": ""
+        },
+        {
+          "match": false,
+          "note": "starts with a digit",
+          "text": "1ab"
+        },
+        {
+          "match": false,
+          "note": "starts with a hyphen",
+          "text": "-ab"
+        },
+        {
+          "match": false,
+          "note": "starts with an underscore",
+          "text": "_ab"
+        },
+        {
+          "match": false,
+          "note": "the first character must be an ASCII letter",
+          "text": "\uff41\uff42"
+        },
+        {
+          "match": false,
+          "note": "two trailing newlines",
+          "text": "ab\n\n"
+        },
+        {
+          "match": false,
+          "note": "a trailing carriage return",
+          "text": "ab\r"
+        },
+        {
+          "match": false,
+          "note": "a trailing line separator",
+          "text": "ab\u2028"
+        },
+        {
+          "match": false,
+          "note": "a space",
+          "text": "ab c"
+        },
+        {
+          "match": false,
+          "note": "a dot",
+          "text": "ab.c"
+        },
+        {
+          "match": false,
+          "note": "a combining mark is not a word character",
+          "text": "nae\u0301"
+        }
+      ],
+      "source": "patterns"
+    },
+    {
+      "pattern": "^[0-9a-fA-F]{64}$",
+      "samples": [
+        {
+          "match": true,
+          "note": "64 lower-case hex digits",
+          "text": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        },
+        {
+          "match": true,
+          "note": "64 upper-case hex digits",
+          "text": "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF"
+        },
+        {
+          "match": true,
+          "note": "mixed case",
+          "text": "0123456789abcdef0123456789ABCDEF0123456789abcdef0123456789ABCDEF"
+        },
+        {
+          "match": true,
+          "note": "one trailing newline",
+          "text": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n"
+        },
+        {
+          "match": false,
+          "note": "63 digits",
+          "text": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde"
+        },
+        {
+          "match": false,
+          "note": "65 digits",
+          "text": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0"
+        },
+        {
+          "match": false,
+          "note": "a digit that is not hex",
+          "text": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdeg"
+        },
+        {
+          "match": false,
+          "note": "two trailing newlines",
+          "text": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n\n"
+        },
+        {
+          "match": false,
+          "note": "a trailing carriage return",
+          "text": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\r"
+        },
+        {
+          "match": false,
+          "note": "a leading space",
+          "text": " 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        },
+        {
+          "match": false,
+          "note": "a full-width digit is not in 0-9",
+          "text": "\uff10123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        },
+        {
+          "match": false,
+          "note": "empty text",
+          "text": ""
+        }
+      ],
+      "source": "patterns"
+    },
+    {
+      "pattern": "^\\${(\\w+)(:?)([^}\\r\\n]*)}",
+      "samples": [
+        {
+          "match": true,
+          "note": "plain reference",
+          "text": "${FOO}"
+        },
+        {
+          "match": true,
+          "note": "default value",
+          "text": "${FOO:bar}"
+        },
+        {
+          "match": true,
+          "note": "empty default",
+          "text": "${FOO:}"
+        },
+        {
+          "match": true,
+          "note": "a space in the default",
+          "text": "${FOO:bar baz}"
+        },
+        {
+          "match": true,
+          "note": "a prefix match: nothing is required after the brace",
+          "text": "${FOO} and more"
+        },
+        {
+          "match": true,
+          "note": "the first closing brace ends the reference",
+          "text": "${FOO:a}b}"
+        },
+        {
+          "match": true,
+          "note": "non-ASCII letters are word characters",
+          "text": "${\u00c4\u00d6}"
+        },
+        {
+          "match": true,
+          "note": "text after the reference",
+          "text": "${FOO}\n"
+        },
+        {
+          "match": false,
+          "note": "no closing brace",
+          "text": "${FOO"
+        },
+        {
+          "match": false,
+          "note": "a newline inside the default",
+          "text": "${FOO:ba\nr}"
+        },
+        {
+          "match": false,
+          "note": "a carriage return inside the default",
+          "text": "${FOO:ba\rr}"
+        },
+        {
+          "match": false,
+          "note": "the reference must start the text",
+          "text": "x${FOO}"
+        },
+        {
+          "match": false,
+          "note": "no name",
+          "text": "${}"
+        },
+        {
+          "match": false,
+          "note": "no braces",
+          "text": "$FOO"
+        },
+        {
+          "match": false,
+          "note": "empty text",
+          "text": ""
+        }
+      ],
+      "source": "env.referencePattern"
+    }
+  ]
+}

@@ -1,0 +1,4764 @@
+{
+  "about": "Cases for the configuration editor's validator. Each case is checked against Python's jsonschema Draft202012Validator and against validate.js. A case in cases names a field of editor-data.json by path (the empty path is the whole document) and validates the instance against that field's schema. A case in keywordCases carries its own schema, for the keywords editor-data.json's schema does not use. valid is the schema's verdict. keyword and pointer name the one failure: the keyword that failed and the JSON pointer, inside the instance, of the value it failed at. An invalid case has exactly one (pointer, keyword) pair, so a mutated instance breaks one assertion once. The optional editor object records where the editor deliberately differs from the schema: the verdict it shows and the findings its divergence table adds or replaces.",
+  "cases": [
+    {
+      "id": "project-name-text-ok",
+      "instance": "ash-scan",
+      "keyword": null,
+      "path": "project_name",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "project-name-empty-text-ok",
+      "instance": "",
+      "keyword": null,
+      "path": "project_name",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "project-name-reference-ok",
+      "instance": "${ASH_PROJECT_NAME}",
+      "keyword": null,
+      "path": "project_name",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "project-name-number-bad",
+      "instance": 5,
+      "keyword": "anyOf",
+      "path": "project_name",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "project-name-null-bad",
+      "instance": null,
+      "keyword": "anyOf",
+      "path": "project_name",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "project-name-boolean-bad",
+      "instance": true,
+      "keyword": "anyOf",
+      "path": "project_name",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "project-name-list-bad",
+      "instance": [
+        "x"
+      ],
+      "keyword": "anyOf",
+      "path": "project_name",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "fail-on-findings-true-ok",
+      "instance": true,
+      "keyword": null,
+      "path": "fail_on_findings",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "fail-on-findings-false-ok",
+      "instance": false,
+      "keyword": null,
+      "path": "fail_on_findings",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "reference-in-typed-field",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "fail-on-findings-reference-ok",
+      "instance": "${CI_STRICT}",
+      "keyword": null,
+      "path": "fail_on_findings",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "reference-in-typed-field",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "fail-on-findings-reference-default-ok",
+      "instance": "${CI_STRICT:true}",
+      "keyword": null,
+      "path": "fail_on_findings",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "reference-in-typed-field",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "fail-on-findings-explicit-tag-ok",
+      "instance": "!ENV ${CI_STRICT}",
+      "keyword": null,
+      "path": "fail_on_findings",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "reference-in-typed-field",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "fail-on-findings-reference-carriage-return-ok",
+      "instance": "${CI_STRICT:a\rb}",
+      "keyword": null,
+      "path": "fail_on_findings",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "fail-on-findings-word-bad",
+      "instance": "yes",
+      "keyword": "anyOf",
+      "path": "fail_on_findings",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "fail-on-findings-true-word-bad",
+      "instance": "true",
+      "keyword": "anyOf",
+      "path": "fail_on_findings",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "fail-on-findings-one-bad",
+      "instance": 1,
+      "keyword": "anyOf",
+      "path": "fail_on_findings",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "fail-on-findings-zero-bad",
+      "instance": 0,
+      "keyword": "anyOf",
+      "path": "fail_on_findings",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "fail-on-findings-null-bad",
+      "instance": null,
+      "keyword": "anyOf",
+      "path": "fail_on_findings",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "fail-on-findings-bare-dollar-bad",
+      "instance": "$CI_STRICT",
+      "keyword": "anyOf",
+      "path": "fail_on_findings",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "fail-on-findings-empty-name-bad",
+      "instance": "${}",
+      "keyword": "anyOf",
+      "path": "fail_on_findings",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "output-formats-list-ok",
+      "instance": [
+        "sarif",
+        "html"
+      ],
+      "keyword": null,
+      "path": "output_formats",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "output-formats-empty-list-ok",
+      "instance": [],
+      "keyword": null,
+      "path": "output_formats",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "output-formats-single-ok",
+      "instance": "json",
+      "keyword": null,
+      "path": "output_formats",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "output-formats-null-ok",
+      "instance": null,
+      "keyword": null,
+      "path": "output_formats",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "output-formats-unknown-format-bad",
+      "instance": [
+        "pdf"
+      ],
+      "keyword": "anyOf",
+      "path": "output_formats",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "output-formats-wrong-case-bad",
+      "instance": "SARIF",
+      "keyword": "anyOf",
+      "path": "output_formats",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "comma-separated-output-formats",
+            "severity": "warning"
+          }
+        ],
+        "valid": true
+      },
+      "id": "output-formats-comma-string-bad",
+      "instance": "sarif,html",
+      "keyword": "anyOf",
+      "path": "output_formats",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "comma-separated-output-formats",
+            "severity": "warning"
+          }
+        ],
+        "valid": true
+      },
+      "id": "output-formats-comma-string-spaced-bad",
+      "instance": "sarif, html",
+      "keyword": "anyOf",
+      "path": "output_formats",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "comma-separated-output-formats",
+            "severity": "warning"
+          }
+        ],
+        "valid": true
+      },
+      "id": "output-formats-trailing-comma-bad",
+      "instance": "sarif,html,",
+      "keyword": "anyOf",
+      "path": "output_formats",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "comma-separated-output-formats",
+            "severity": "warning"
+          }
+        ],
+        "valid": true
+      },
+      "id": "output-formats-empty-piece-bad",
+      "instance": "sarif,,html",
+      "keyword": "anyOf",
+      "path": "output_formats",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "comma-separated-output-formats",
+            "severity": "warning"
+          }
+        ],
+        "valid": true
+      },
+      "id": "output-formats-empty-string-bad",
+      "instance": "",
+      "keyword": "anyOf",
+      "path": "output_formats",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "comma-separated-output-formats",
+            "severity": "warning"
+          }
+        ],
+        "valid": true
+      },
+      "id": "output-formats-leading-space-bad",
+      "instance": " sarif",
+      "keyword": "anyOf",
+      "path": "output_formats",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "comma-separated-output-formats",
+            "severity": "warning"
+          }
+        ],
+        "valid": true
+      },
+      "id": "output-formats-list-leading-space-bad",
+      "instance": [
+        " sarif"
+      ],
+      "keyword": "anyOf",
+      "path": "output_formats",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "comma-separated-output-formats",
+            "severity": "warning"
+          }
+        ],
+        "valid": true
+      },
+      "id": "output-formats-list-trailing-space-bad",
+      "instance": [
+        "sarif ",
+        "html"
+      ],
+      "keyword": "anyOf",
+      "path": "output_formats",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "comma-separated-output-formats",
+            "severity": "warning"
+          }
+        ],
+        "valid": true
+      },
+      "id": "document-comma-output-formats-bad",
+      "instance": {
+        "output_formats": "sarif,html"
+      },
+      "keyword": "anyOf",
+      "path": "",
+      "pointer": "/output_formats",
+      "valid": false
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "comma-separated-output-formats",
+            "severity": "warning"
+          }
+        ],
+        "valid": true
+      },
+      "id": "document-list-output-formats-bad",
+      "instance": {
+        "output_formats": [
+          " sarif",
+          "html "
+        ]
+      },
+      "keyword": "anyOf",
+      "path": "",
+      "pointer": "/output_formats",
+      "valid": false
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "reference-in-typed-field",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "document-reference-in-typed-field-ok",
+      "instance": {
+        "fail_on_findings": "${CI_STRICT}"
+      },
+      "keyword": null,
+      "path": "",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "reference-in-typed-field",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "document-reference-carriage-return-ok",
+      "instance": {
+        "fail_on_findings": "${CI_STRICT:a\rb}"
+      },
+      "keyword": null,
+      "path": "",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "reference-in-typed-field",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "section-options-reference-ok",
+      "instance": {
+        "online_audits": "${ASH_ONLINE}"
+      },
+      "keyword": null,
+      "path": "scanners.zizmor.options",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "unquoted-date",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "expires-unquoted-date-ok",
+      "instance": {
+        "global_settings": {
+          "suppressions": [
+            {
+              "expires": "2030-01-01",
+              "path": "a",
+              "reason": "b"
+            }
+          ]
+        }
+      },
+      "keyword": null,
+      "options": {
+        "unquotedDates": [
+          "/global_settings/suppressions/0/expires"
+        ]
+      },
+      "path": "",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "unquoted-date",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "project-name-unquoted-date-ok",
+      "instance": {
+        "project_name": "2030-01-01"
+      },
+      "keyword": null,
+      "options": {
+        "unquotedDates": [
+          "/project_name"
+        ]
+      },
+      "path": "",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "unquoted-date",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "project-name-unquoted-datetime-ok",
+      "instance": {
+        "project_name": "2030-01-01 10:00:00"
+      },
+      "keyword": null,
+      "options": {
+        "unquotedDates": [
+          "/project_name"
+        ]
+      },
+      "path": "",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "unquoted-date",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "ash-plugin-modules-unquoted-date-ok",
+      "instance": {
+        "ash_plugin_modules": [
+          "2030-01-01"
+        ]
+      },
+      "keyword": null,
+      "options": {
+        "unquotedDates": [
+          "/ash_plugin_modules/0"
+        ]
+      },
+      "path": "",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "unquoted-date",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "extends-unquoted-date-ok",
+      "instance": {
+        "extends": "2030-01-01"
+      },
+      "keyword": null,
+      "options": {
+        "unquotedDates": [
+          "/extends"
+        ]
+      },
+      "path": "",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "unquoted-date",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "extends-list-unquoted-date-ok",
+      "instance": {
+        "extends": [
+          "base.yaml",
+          "2030-01-01"
+        ]
+      },
+      "keyword": null,
+      "options": {
+        "unquotedDates": [
+          "/extends/1"
+        ]
+      },
+      "path": "",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "unquoted-date",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "extends-field-unquoted-date-ok",
+      "instance": "2030-01-01",
+      "keyword": null,
+      "options": {
+        "unquotedDates": [
+          ""
+        ]
+      },
+      "path": "extends",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "unquoted-date",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "ash-plugin-modules-field-unquoted-date-ok",
+      "instance": [
+        "plugins.example",
+        "2030-01-01"
+      ],
+      "keyword": null,
+      "options": {
+        "unquotedDates": [
+          "/1"
+        ]
+      },
+      "path": "ash_plugin_modules",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "output-formats-comma-string-unknown-bad",
+      "instance": "sarif,pdf",
+      "keyword": "anyOf",
+      "path": "output_formats",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "output-formats-number-bad",
+      "instance": 3,
+      "keyword": "anyOf",
+      "path": "output_formats",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "output-formats-mixed-list-bad",
+      "instance": [
+        "sarif",
+        1
+      ],
+      "keyword": "anyOf",
+      "path": "output_formats",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "output-formats-mapping-bad",
+      "instance": {},
+      "keyword": "anyOf",
+      "path": "output_formats",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "extends-text-ok",
+      "instance": "base.ash.yaml",
+      "keyword": null,
+      "path": "extends",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "extends-list-ok",
+      "instance": [
+        "a.yaml",
+        "b.yaml"
+      ],
+      "keyword": null,
+      "path": "extends",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "extends-empty-list-ok",
+      "instance": [],
+      "keyword": null,
+      "path": "extends",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "extends-null-ok",
+      "instance": null,
+      "keyword": null,
+      "path": "extends",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "extends-number-bad",
+      "instance": 5,
+      "keyword": "anyOf",
+      "path": "extends",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "extends-list-of-numbers-bad",
+      "instance": [
+        1
+      ],
+      "keyword": "anyOf",
+      "path": "extends",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "extends-mapping-bad",
+      "instance": {},
+      "keyword": "anyOf",
+      "path": "extends",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "extends-boolean-bad",
+      "instance": true,
+      "keyword": "anyOf",
+      "path": "extends",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "plugin-modules-empty-ok",
+      "instance": [],
+      "keyword": null,
+      "path": "ash_plugin_modules",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "plugin-modules-names-ok",
+      "instance": [
+        "automated_security_helper.plugin_modules.ash_snyk_plugins"
+      ],
+      "keyword": null,
+      "path": "ash_plugin_modules",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "plugin-modules-text-bad",
+      "instance": "x",
+      "keyword": "type",
+      "path": "ash_plugin_modules",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "plugin-modules-null-bad",
+      "instance": null,
+      "keyword": "type",
+      "path": "ash_plugin_modules",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "plugin-modules-mapping-bad",
+      "instance": {},
+      "keyword": "type",
+      "path": "ash_plugin_modules",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "plugin-modules-number-item-bad",
+      "instance": [
+        "a",
+        1
+      ],
+      "keyword": "type",
+      "path": "ash_plugin_modules",
+      "pointer": "/1",
+      "valid": false
+    },
+    {
+      "id": "plugin-modules-null-item-bad",
+      "instance": [
+        null
+      ],
+      "keyword": "type",
+      "path": "ash_plugin_modules",
+      "pointer": "/0",
+      "valid": false
+    },
+    {
+      "id": "patch-list-ok",
+      "instance": [
+        {}
+      ],
+      "keyword": null,
+      "path": "patch",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "patch-empty-list-ok",
+      "instance": [],
+      "keyword": null,
+      "path": "patch",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "patch-null-ok",
+      "instance": null,
+      "keyword": null,
+      "path": "patch",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "patch-mapping-bad",
+      "instance": {},
+      "keyword": "anyOf",
+      "path": "patch",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "patch-text-item-bad",
+      "instance": [
+        "x"
+      ],
+      "keyword": "anyOf",
+      "path": "patch",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "patch-nested-list-item-bad",
+      "instance": [
+        []
+      ],
+      "keyword": "anyOf",
+      "path": "patch",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "patch-text-bad",
+      "instance": "x",
+      "keyword": "anyOf",
+      "path": "patch",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "global-settings-empty-ok",
+      "instance": {},
+      "keyword": null,
+      "path": "global_settings",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "global-settings-threshold-ok",
+      "instance": {
+        "severity_threshold": "HIGH"
+      },
+      "keyword": null,
+      "path": "global_settings",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "global-settings-suppressions-empty-ok",
+      "instance": {
+        "suppressions": []
+      },
+      "keyword": null,
+      "path": "global_settings",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "global-settings-full-ok",
+      "instance": {
+        "severity_threshold": "${ASH_DEFAULT_SEVERITY_LEVEL}",
+        "suppressions": [
+          {
+            "path": "a.py",
+            "reason": "r"
+          }
+        ]
+      },
+      "keyword": null,
+      "path": "global_settings",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "global-settings-unknown-key-bad",
+      "instance": {
+        "severity": "HIGH"
+      },
+      "keyword": "additionalProperties",
+      "path": "global_settings",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "global-settings-bad-threshold-bad",
+      "instance": {
+        "severity_threshold": "NONE"
+      },
+      "keyword": "anyOf",
+      "path": "global_settings",
+      "pointer": "/severity_threshold",
+      "valid": false
+    },
+    {
+      "id": "global-settings-list-bad",
+      "instance": [],
+      "keyword": "type",
+      "path": "global_settings",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "global-settings-null-bad",
+      "instance": null,
+      "keyword": "type",
+      "path": "global_settings",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "global-settings-text-bad",
+      "instance": "x",
+      "keyword": "type",
+      "path": "global_settings",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "global-settings-suppressions-mapping-bad",
+      "instance": {
+        "suppressions": {}
+      },
+      "keyword": "type",
+      "path": "global_settings",
+      "pointer": "/suppressions",
+      "valid": false
+    },
+    {
+      "id": "global-settings-empty-suppression-bad",
+      "instance": {
+        "suppressions": [
+          {}
+        ]
+      },
+      "keyword": "required",
+      "path": "global_settings",
+      "pointer": "/suppressions/0",
+      "valid": false
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "unknown-key-in-list-entry",
+            "severity": "warning"
+          }
+        ],
+        "valid": true
+      },
+      "id": "global-settings-suppression-unknown-key-bad",
+      "instance": {
+        "suppressions": [
+          {
+            "path": "a",
+            "reason": "b",
+            "ruleId": "x"
+          }
+        ]
+      },
+      "keyword": "additionalProperties",
+      "path": "global_settings",
+      "pointer": "/suppressions/0",
+      "valid": false
+    },
+    {
+      "id": "severity-threshold-all-ok",
+      "instance": "ALL",
+      "keyword": null,
+      "path": "global_settings.severity_threshold",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "severity-threshold-medium-ok",
+      "instance": "MEDIUM",
+      "keyword": null,
+      "path": "global_settings.severity_threshold",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "severity-threshold-critical-ok",
+      "instance": "CRITICAL",
+      "keyword": null,
+      "path": "global_settings.severity_threshold",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "severity-threshold-reference-ok",
+      "instance": "${ASH_DEFAULT_SEVERITY_LEVEL}",
+      "keyword": null,
+      "path": "global_settings.severity_threshold",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "severity-threshold-lower-case-bad",
+      "instance": "high",
+      "keyword": "anyOf",
+      "path": "global_settings.severity_threshold",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "severity-threshold-unknown-bad",
+      "instance": "NONE",
+      "keyword": "anyOf",
+      "path": "global_settings.severity_threshold",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "severity-threshold-number-bad",
+      "instance": 3,
+      "keyword": "anyOf",
+      "path": "global_settings.severity_threshold",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "severity-threshold-null-bad",
+      "instance": null,
+      "keyword": "anyOf",
+      "path": "global_settings.severity_threshold",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "severity-threshold-empty-bad",
+      "instance": "",
+      "keyword": "anyOf",
+      "path": "global_settings.severity_threshold",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "suppressions-empty-ok",
+      "instance": [],
+      "keyword": null,
+      "path": "global_settings.suppressions",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "suppressions-entry-ok",
+      "instance": [
+        {
+          "path": "src/a.py",
+          "reason": "accepted"
+        }
+      ],
+      "keyword": null,
+      "path": "global_settings.suppressions",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "suppressions-nulls-ok",
+      "instance": [
+        {
+          "expires": null,
+          "path": "a",
+          "reason": "b",
+          "rule_id": null
+        }
+      ],
+      "keyword": null,
+      "path": "global_settings.suppressions",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "suppressions-full-entry-ok",
+      "instance": [
+        {
+          "expires": "2027-01-01",
+          "path": "a",
+          "reason": "b",
+          "rule_id": "B101"
+        }
+      ],
+      "keyword": null,
+      "path": "global_settings.suppressions",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "suppressions-mapping-bad",
+      "instance": {},
+      "keyword": "type",
+      "path": "global_settings.suppressions",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "suppressions-text-bad",
+      "instance": "x",
+      "keyword": "type",
+      "path": "global_settings.suppressions",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "suppressions-null-bad",
+      "instance": null,
+      "keyword": "type",
+      "path": "global_settings.suppressions",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "suppressions-missing-reason-bad",
+      "instance": [
+        {
+          "path": "a"
+        }
+      ],
+      "keyword": "required",
+      "path": "global_settings.suppressions",
+      "pointer": "/0",
+      "valid": false
+    },
+    {
+      "id": "suppressions-missing-path-bad",
+      "instance": [
+        {
+          "reason": "x"
+        }
+      ],
+      "keyword": "required",
+      "path": "global_settings.suppressions",
+      "pointer": "/0",
+      "valid": false
+    },
+    {
+      "id": "suppressions-empty-path-bad",
+      "instance": [
+        {
+          "path": "",
+          "reason": "x"
+        }
+      ],
+      "keyword": "minLength",
+      "path": "global_settings.suppressions",
+      "pointer": "/0/path",
+      "valid": false
+    },
+    {
+      "id": "suppressions-empty-reason-bad",
+      "instance": [
+        {
+          "path": "a",
+          "reason": ""
+        }
+      ],
+      "keyword": "minLength",
+      "path": "global_settings.suppressions",
+      "pointer": "/0/reason",
+      "valid": false
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "unknown-key-in-list-entry",
+            "severity": "warning"
+          }
+        ],
+        "valid": true
+      },
+      "id": "suppressions-unknown-key-bad",
+      "instance": [
+        {
+          "path": "a",
+          "reason": "b",
+          "ruleId": "x"
+        }
+      ],
+      "keyword": "additionalProperties",
+      "path": "global_settings.suppressions",
+      "pointer": "/0",
+      "valid": false
+    },
+    {
+      "id": "suppressions-text-entry-bad",
+      "instance": [
+        "x"
+      ],
+      "keyword": "type",
+      "path": "global_settings.suppressions",
+      "pointer": "/0",
+      "valid": false
+    },
+    {
+      "id": "suppressions-number-expires-bad",
+      "instance": [
+        {
+          "expires": 5,
+          "path": "a",
+          "reason": "b"
+        }
+      ],
+      "keyword": "anyOf",
+      "path": "global_settings.suppressions",
+      "pointer": "/0/expires",
+      "valid": false
+    },
+    {
+      "id": "suppressions-number-path-bad",
+      "instance": [
+        {
+          "path": 1,
+          "reason": "b"
+        }
+      ],
+      "keyword": "type",
+      "path": "global_settings.suppressions",
+      "pointer": "/0/path",
+      "valid": false
+    },
+    {
+      "id": "suppressions-number-rule-id-bad",
+      "instance": [
+        {
+          "path": "a",
+          "reason": "b",
+          "rule_id": 5
+        }
+      ],
+      "keyword": "anyOf",
+      "path": "global_settings.suppressions",
+      "pointer": "/0/rule_id",
+      "valid": false
+    },
+    {
+      "id": "suppression-path-glob-ok",
+      "instance": "src/**",
+      "keyword": null,
+      "path": "global_settings.suppressions[].path",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "suppression-path-empty-bad",
+      "instance": "",
+      "keyword": "minLength",
+      "path": "global_settings.suppressions[].path",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "suppression-path-number-bad",
+      "instance": 5,
+      "keyword": "type",
+      "path": "global_settings.suppressions[].path",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "suppression-path-null-bad",
+      "instance": null,
+      "keyword": "type",
+      "path": "global_settings.suppressions[].path",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "suppression-path-list-bad",
+      "instance": [
+        "a"
+      ],
+      "keyword": "type",
+      "path": "global_settings.suppressions[].path",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "suppression-rule-id-text-ok",
+      "instance": "B101",
+      "keyword": null,
+      "path": "global_settings.suppressions[].rule_id",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "suppression-rule-id-empty-ok",
+      "instance": "",
+      "keyword": null,
+      "path": "global_settings.suppressions[].rule_id",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "suppression-rule-id-null-ok",
+      "instance": null,
+      "keyword": null,
+      "path": "global_settings.suppressions[].rule_id",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "suppression-rule-id-number-bad",
+      "instance": 5,
+      "keyword": "anyOf",
+      "path": "global_settings.suppressions[].rule_id",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "suppression-rule-id-list-bad",
+      "instance": [],
+      "keyword": "anyOf",
+      "path": "global_settings.suppressions[].rule_id",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "suppression-reason-text-ok",
+      "instance": "accepted risk",
+      "keyword": null,
+      "path": "global_settings.suppressions[].reason",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "suppression-reason-empty-bad",
+      "instance": "",
+      "keyword": "minLength",
+      "path": "global_settings.suppressions[].reason",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "suppression-reason-number-bad",
+      "instance": 7,
+      "keyword": "type",
+      "path": "global_settings.suppressions[].reason",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "suppression-expires-text-ok",
+      "instance": "2027-01-01",
+      "keyword": null,
+      "path": "global_settings.suppressions[].expires",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "suppression-expires-null-ok",
+      "instance": null,
+      "keyword": null,
+      "path": "global_settings.suppressions[].expires",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "suppression-expires-number-bad",
+      "instance": 20270101,
+      "keyword": "anyOf",
+      "path": "global_settings.suppressions[].expires",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "suppression-expires-boolean-bad",
+      "instance": true,
+      "keyword": "anyOf",
+      "path": "global_settings.suppressions[].expires",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "scanners-empty-ok",
+      "instance": {},
+      "keyword": null,
+      "path": "scanners",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "scanners-declared-section-ok",
+      "instance": {
+        "bandit": {
+          "enabled": true
+        }
+      },
+      "keyword": null,
+      "path": "scanners",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "scanners-undeclared-section-ok",
+      "instance": {
+        "cdk-nag": {
+          "enabled": true
+        }
+      },
+      "keyword": null,
+      "path": "scanners",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "scanners-undeclared-number-ok",
+      "instance": {
+        "anything": 5
+      },
+      "keyword": null,
+      "path": "scanners",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "scanners-undeclared-text-ok",
+      "instance": {
+        "cdk-nag": "text"
+      },
+      "keyword": null,
+      "path": "scanners",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "scanners-text-bad",
+      "instance": "x",
+      "keyword": "type",
+      "path": "scanners",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "scanners-null-bad",
+      "instance": null,
+      "keyword": "type",
+      "path": "scanners",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "scanners-list-bad",
+      "instance": [],
+      "keyword": "type",
+      "path": "scanners",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "scanners-enabled-text-bad",
+      "instance": {
+        "bandit": {
+          "enabled": "yes"
+        }
+      },
+      "keyword": "type",
+      "path": "scanners",
+      "pointer": "/bandit/enabled",
+      "valid": false
+    },
+    {
+      "id": "scanners-section-number-bad",
+      "instance": {
+        "bandit": 5
+      },
+      "keyword": "type",
+      "path": "scanners",
+      "pointer": "/bandit",
+      "valid": false
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "plugin-section-spelling",
+            "severity": "note"
+          }
+        ],
+        "valid": true
+      },
+      "id": "scanners-spelling-variant-ok",
+      "instance": {
+        "Bandit": {
+          "enabled": false
+        }
+      },
+      "keyword": null,
+      "path": "scanners",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "plugin-section-spelling",
+            "severity": "note"
+          }
+        ],
+        "valid": true
+      },
+      "id": "scanners-type-word-variant-ok",
+      "instance": {
+        "BanditScanner": {
+          "enabled": false
+        }
+      },
+      "keyword": null,
+      "path": "scanners",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "plugin-section-spelling",
+            "severity": "note"
+          }
+        ],
+        "valid": true
+      },
+      "id": "scanners-declared-and-variant-ok",
+      "instance": {
+        "Bandit": {
+          "enabled": false
+        },
+        "bandit": {
+          "enabled": true
+        }
+      },
+      "keyword": null,
+      "path": "scanners",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "ambiguous-plugin-spellings",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "scanners-two-variants-ok",
+      "instance": {
+        "BANDIT": {},
+        "ban-dit": {}
+      },
+      "keyword": null,
+      "path": "scanners",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "variant-section-contents",
+            "severity": "error"
+          },
+          {
+            "row": "plugin-section-spelling",
+            "severity": "note"
+          }
+        ],
+        "valid": false
+      },
+      "id": "scanners-variant-enabled-text-ok",
+      "instance": {
+        "Bandit": {
+          "enabled": "yes"
+        }
+      },
+      "keyword": null,
+      "path": "scanners",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "variant-section-contents",
+            "severity": "error"
+          },
+          {
+            "row": "plugin-section-spelling",
+            "severity": "note"
+          }
+        ],
+        "valid": false
+      },
+      "id": "scanners-variant-number-ok",
+      "instance": {
+        "Bandit": 5
+      },
+      "keyword": null,
+      "path": "scanners",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "plugin-section-spelling",
+            "severity": "note"
+          }
+        ],
+        "valid": true
+      },
+      "id": "scanners-variant-overridden-by-declared-ok",
+      "instance": {
+        "Bandit": {
+          "enabled": "yes"
+        },
+        "bandit": {
+          "enabled": true
+        }
+      },
+      "keyword": null,
+      "path": "scanners",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "reference-in-typed-field",
+            "severity": "error"
+          },
+          {
+            "row": "plugin-section-spelling",
+            "severity": "note"
+          }
+        ],
+        "valid": false
+      },
+      "id": "scanners-variant-reference-in-typed-field-ok",
+      "instance": {
+        "Bandit": {
+          "options": {
+            "scan_timeout": "${ASH_SCAN_TIMEOUT}"
+          }
+        }
+      },
+      "keyword": null,
+      "path": "scanners",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "variant-section-contents",
+            "severity": "error"
+          },
+          {
+            "row": "plugin-section-spelling",
+            "severity": "note"
+          }
+        ],
+        "valid": false
+      },
+      "id": "converters-variant-enabled-word-ok",
+      "instance": {
+        "Archive": {
+          "enabled": "no"
+        }
+      },
+      "keyword": null,
+      "path": "converters",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "variant-section-contents",
+            "severity": "error"
+          },
+          {
+            "row": "plugin-section-spelling",
+            "severity": "note"
+          }
+        ],
+        "valid": false
+      },
+      "id": "document-variant-enabled-text-ok",
+      "instance": {
+        "scanners": {
+          "Bandit": {
+            "enabled": "yes"
+          }
+        }
+      },
+      "keyword": null,
+      "path": "",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "bandit-empty-ok",
+      "instance": {},
+      "keyword": null,
+      "path": "scanners.bandit",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "bandit-disabled-ok",
+      "instance": {
+        "enabled": false
+      },
+      "keyword": null,
+      "path": "scanners.bandit",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "bandit-options-ok",
+      "instance": {
+        "enabled": true,
+        "options": {
+          "confidence_level": "high",
+          "scan_timeout": 30
+        }
+      },
+      "keyword": null,
+      "path": "scanners.bandit",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "bandit-unknown-key-bad",
+      "instance": {
+        "enable": true
+      },
+      "keyword": "additionalProperties",
+      "path": "scanners.bandit",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "bandit-enabled-text-bad",
+      "instance": {
+        "enabled": "yes"
+      },
+      "keyword": "type",
+      "path": "scanners.bandit",
+      "pointer": "/enabled",
+      "valid": false
+    },
+    {
+      "id": "bandit-text-bad",
+      "instance": "x",
+      "keyword": "type",
+      "path": "scanners.bandit",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "bandit-zero-timeout-bad",
+      "instance": {
+        "options": {
+          "scan_timeout": 0
+        }
+      },
+      "keyword": "anyOf",
+      "path": "scanners.bandit",
+      "pointer": "/options/scan_timeout",
+      "valid": false
+    },
+    {
+      "id": "bandit-options-number-bad",
+      "instance": {
+        "options": 3
+      },
+      "keyword": "type",
+      "path": "scanners.bandit",
+      "pointer": "/options",
+      "valid": false
+    },
+    {
+      "id": "bandit-options-unknown-key-bad",
+      "instance": {
+        "options": {
+          "timeout": 3
+        }
+      },
+      "keyword": "additionalProperties",
+      "path": "scanners.bandit",
+      "pointer": "/options",
+      "valid": false
+    },
+    {
+      "id": "bandit-enabled-true-ok",
+      "instance": true,
+      "keyword": null,
+      "path": "scanners.bandit.enabled",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "bandit-enabled-false-ok",
+      "instance": false,
+      "keyword": null,
+      "path": "scanners.bandit.enabled",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "bandit-enabled-word-bad",
+      "instance": "true",
+      "keyword": "type",
+      "path": "scanners.bandit.enabled",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "bandit-enabled-one-bad",
+      "instance": 1,
+      "keyword": "type",
+      "path": "scanners.bandit.enabled",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "bandit-enabled-zero-bad",
+      "instance": 0,
+      "keyword": "type",
+      "path": "scanners.bandit.enabled",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "bandit-enabled-null-bad",
+      "instance": null,
+      "keyword": "type",
+      "path": "scanners.bandit.enabled",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "bandit-options-empty-ok",
+      "instance": {},
+      "keyword": null,
+      "path": "scanners.bandit.options",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "bandit-options-null-timeout-ok",
+      "instance": {
+        "scan_timeout": null
+      },
+      "keyword": null,
+      "path": "scanners.bandit.options",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "bandit-options-typo-bad",
+      "instance": {
+        "scan_timeouts": 1
+      },
+      "keyword": "additionalProperties",
+      "path": "scanners.bandit.options",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "bandit-options-list-bad",
+      "instance": [],
+      "keyword": "type",
+      "path": "scanners.bandit.options",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "bandit-options-null-bad",
+      "instance": null,
+      "keyword": "type",
+      "path": "scanners.bandit.options",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "confidence-level-all-ok",
+      "instance": "all",
+      "keyword": null,
+      "path": "scanners.bandit.options.confidence_level",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "confidence-level-medium-ok",
+      "instance": "medium",
+      "keyword": null,
+      "path": "scanners.bandit.options.confidence_level",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "confidence-level-reference-ok",
+      "instance": "${ASH_CONFIDENCE}",
+      "keyword": null,
+      "path": "scanners.bandit.options.confidence_level",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "confidence-level-upper-case-bad",
+      "instance": "ALL",
+      "keyword": "anyOf",
+      "path": "scanners.bandit.options.confidence_level",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "confidence-level-unknown-bad",
+      "instance": "none",
+      "keyword": "anyOf",
+      "path": "scanners.bandit.options.confidence_level",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "confidence-level-number-bad",
+      "instance": 1,
+      "keyword": "anyOf",
+      "path": "scanners.bandit.options.confidence_level",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "scan-timeout-one-ok",
+      "instance": 1,
+      "keyword": null,
+      "path": "scanners.bandit.options.scan_timeout",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "scan-timeout-large-ok",
+      "instance": 300,
+      "keyword": null,
+      "path": "scanners.bandit.options.scan_timeout",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "scan-timeout-integral-float-ok",
+      "instance": 5.0,
+      "keyword": null,
+      "path": "scanners.bandit.options.scan_timeout",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "scan-timeout-null-ok",
+      "instance": null,
+      "keyword": null,
+      "path": "scanners.bandit.options.scan_timeout",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "reference-in-typed-field",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "scan-timeout-reference-ok",
+      "instance": "${ASH_SCAN_TIMEOUT:60}",
+      "keyword": null,
+      "path": "scanners.bandit.options.scan_timeout",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "reference-in-typed-field",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "scan-timeout-reference-carriage-return-ok",
+      "instance": "${ASH_SCAN_TIMEOUT:6\r0}",
+      "keyword": null,
+      "path": "scanners.bandit.options.scan_timeout",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "scan-timeout-zero-bad",
+      "instance": 0,
+      "keyword": "anyOf",
+      "path": "scanners.bandit.options.scan_timeout",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "scan-timeout-negative-bad",
+      "instance": -5,
+      "keyword": "anyOf",
+      "path": "scanners.bandit.options.scan_timeout",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "scan-timeout-fraction-bad",
+      "instance": 2.5,
+      "keyword": "anyOf",
+      "path": "scanners.bandit.options.scan_timeout",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "scan-timeout-text-bad",
+      "instance": "30",
+      "keyword": "anyOf",
+      "path": "scanners.bandit.options.scan_timeout",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "scan-timeout-boolean-bad",
+      "instance": true,
+      "keyword": "anyOf",
+      "path": "scanners.bandit.options.scan_timeout",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "scan-timeout-list-bad",
+      "instance": [],
+      "keyword": "anyOf",
+      "path": "scanners.bandit.options.scan_timeout",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "opengrep-empty-ok",
+      "instance": {},
+      "keyword": null,
+      "path": "scanners.opengrep",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "opengrep-pinned-ok",
+      "instance": {
+        "enabled": false,
+        "options": {
+          "sha256": {
+            "linux-arm64": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+          }
+        }
+      },
+      "keyword": null,
+      "path": "scanners.opengrep",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "opengrep-unknown-platform-bad",
+      "instance": {
+        "options": {
+          "sha256": {
+            "windows": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+          }
+        }
+      },
+      "keyword": "anyOf",
+      "path": "scanners.opengrep",
+      "pointer": "/options/sha256",
+      "valid": false
+    },
+    {
+      "id": "opengrep-unknown-key-bad",
+      "instance": {
+        "opt": {}
+      },
+      "keyword": "additionalProperties",
+      "path": "scanners.opengrep",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "opengrep-enabled-ok",
+      "instance": true,
+      "keyword": null,
+      "path": "scanners.opengrep.enabled",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "opengrep-enabled-text-bad",
+      "instance": "no",
+      "keyword": "type",
+      "path": "scanners.opengrep.enabled",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "opengrep-options-empty-ok",
+      "instance": {},
+      "keyword": null,
+      "path": "scanners.opengrep.options",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "opengrep-options-empty-map-ok",
+      "instance": {
+        "sha256": {}
+      },
+      "keyword": null,
+      "path": "scanners.opengrep.options",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "opengrep-options-typo-bad",
+      "instance": {
+        "sha": {}
+      },
+      "keyword": "additionalProperties",
+      "path": "scanners.opengrep.options",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "opengrep-options-list-map-bad",
+      "instance": {
+        "sha256": []
+      },
+      "keyword": "type",
+      "path": "scanners.opengrep.options",
+      "pointer": "/sha256",
+      "valid": false
+    },
+    {
+      "id": "sha256-empty-ok",
+      "instance": {},
+      "keyword": null,
+      "path": "scanners.opengrep.options.sha256",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "sha256-linux-ok",
+      "instance": {
+        "linux-x86_64": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      },
+      "keyword": null,
+      "path": "scanners.opengrep.options.sha256",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "sha256-upper-case-digest-ok",
+      "instance": {
+        "darwin-arm64": "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF"
+      },
+      "keyword": null,
+      "path": "scanners.opengrep.options.sha256",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "sha256-reference-pair-ok",
+      "instance": {
+        "${ASH_PLATFORM}": "${ASH_SHA}"
+      },
+      "keyword": null,
+      "path": "scanners.opengrep.options.sha256",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "sha256-explicit-tag-name-ok",
+      "instance": {
+        "!ENV ${ASH_PLATFORM}": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      },
+      "keyword": null,
+      "path": "scanners.opengrep.options.sha256",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "sha256-trailing-newline-digest-ok",
+      "instance": {
+        "linux-arm64": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n"
+      },
+      "keyword": null,
+      "path": "scanners.opengrep.options.sha256",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "sha256-unknown-platform-bad",
+      "instance": {
+        "windows-x86_64": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      },
+      "keyword": "anyOf",
+      "path": "scanners.opengrep.options.sha256",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "sha256-empty-platform-bad",
+      "instance": {
+        "": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      },
+      "keyword": "anyOf",
+      "path": "scanners.opengrep.options.sha256",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "sha256-short-digest-bad",
+      "instance": {
+        "linux-x86_64": "short"
+      },
+      "keyword": "anyOf",
+      "path": "scanners.opengrep.options.sha256",
+      "pointer": "/linux-x86_64",
+      "valid": false
+    },
+    {
+      "id": "sha256-63-hex-digits-bad",
+      "instance": {
+        "linux-x86_64": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde"
+      },
+      "keyword": "anyOf",
+      "path": "scanners.opengrep.options.sha256",
+      "pointer": "/linux-x86_64",
+      "valid": false
+    },
+    {
+      "id": "sha256-65-hex-digits-bad",
+      "instance": {
+        "linux-x86_64": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0"
+      },
+      "keyword": "anyOf",
+      "path": "scanners.opengrep.options.sha256",
+      "pointer": "/linux-x86_64",
+      "valid": false
+    },
+    {
+      "id": "sha256-non-hex-digit-bad",
+      "instance": {
+        "linux-x86_64": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdeg"
+      },
+      "keyword": "anyOf",
+      "path": "scanners.opengrep.options.sha256",
+      "pointer": "/linux-x86_64",
+      "valid": false
+    },
+    {
+      "id": "sha256-number-digest-bad",
+      "instance": {
+        "linux-x86_64": 5
+      },
+      "keyword": "anyOf",
+      "path": "scanners.opengrep.options.sha256",
+      "pointer": "/linux-x86_64",
+      "valid": false
+    },
+    {
+      "id": "sha256-null-digest-bad",
+      "instance": {
+        "linux-x86_64": null
+      },
+      "keyword": "anyOf",
+      "path": "scanners.opengrep.options.sha256",
+      "pointer": "/linux-x86_64",
+      "valid": false
+    },
+    {
+      "id": "sha256-text-bad",
+      "instance": "x",
+      "keyword": "type",
+      "path": "scanners.opengrep.options.sha256",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "sha256-list-bad",
+      "instance": [],
+      "keyword": "type",
+      "path": "scanners.opengrep.options.sha256",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "sha256-value-digest-ok",
+      "instance": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "keyword": null,
+      "path": "scanners.opengrep.options.sha256{}",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "sha256-value-reference-ok",
+      "instance": "${ASH_SHA}",
+      "keyword": null,
+      "path": "scanners.opengrep.options.sha256{}",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "sha256-value-trailing-newline-ok",
+      "instance": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n",
+      "keyword": null,
+      "path": "scanners.opengrep.options.sha256{}",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "sha256-value-garbage-bad",
+      "instance": "xyz",
+      "keyword": "anyOf",
+      "path": "scanners.opengrep.options.sha256{}",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "sha256-value-number-bad",
+      "instance": 5,
+      "keyword": "anyOf",
+      "path": "scanners.opengrep.options.sha256{}",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "sha256-value-null-bad",
+      "instance": null,
+      "keyword": "anyOf",
+      "path": "scanners.opengrep.options.sha256{}",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "zizmor-online-ok",
+      "instance": {
+        "options": {
+          "online_audits": true
+        }
+      },
+      "keyword": null,
+      "path": "scanners.zizmor",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "zizmor-online-word-bad",
+      "instance": {
+        "options": {
+          "online_audits": "yes"
+        }
+      },
+      "keyword": "anyOf",
+      "path": "scanners.zizmor",
+      "pointer": "/options/online_audits",
+      "valid": false
+    },
+    {
+      "id": "zizmor-enabled-ok",
+      "instance": false,
+      "keyword": null,
+      "path": "scanners.zizmor.enabled",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "zizmor-enabled-number-bad",
+      "instance": 1,
+      "keyword": "type",
+      "path": "scanners.zizmor.enabled",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "zizmor-options-empty-ok",
+      "instance": {},
+      "keyword": null,
+      "path": "scanners.zizmor.options",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "zizmor-options-typo-bad",
+      "instance": {
+        "online": true
+      },
+      "keyword": "additionalProperties",
+      "path": "scanners.zizmor.options",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "online-audits-true-ok",
+      "instance": true,
+      "keyword": null,
+      "path": "scanners.zizmor.options.online_audits",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "online-audits-false-ok",
+      "instance": false,
+      "keyword": null,
+      "path": "scanners.zizmor.options.online_audits",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "reference-in-typed-field",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "online-audits-reference-ok",
+      "instance": "${ASH_ONLINE}",
+      "keyword": null,
+      "path": "scanners.zizmor.options.online_audits",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "online-audits-word-bad",
+      "instance": "yes",
+      "keyword": "anyOf",
+      "path": "scanners.zizmor.options.online_audits",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "online-audits-number-bad",
+      "instance": 1,
+      "keyword": "anyOf",
+      "path": "scanners.zizmor.options.online_audits",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "online-audits-null-bad",
+      "instance": null,
+      "keyword": "anyOf",
+      "path": "scanners.zizmor.options.online_audits",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "converters-empty-ok",
+      "instance": {},
+      "keyword": null,
+      "path": "converters",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "converters-archive-ok",
+      "instance": {
+        "archive": {
+          "enabled": false
+        }
+      },
+      "keyword": null,
+      "path": "converters",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "converters-other-key-ok",
+      "instance": {
+        "other": 1
+      },
+      "keyword": null,
+      "path": "converters",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "converters-text-bad",
+      "instance": "x",
+      "keyword": "type",
+      "path": "converters",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "converters-archive-number-bad",
+      "instance": {
+        "archive": 5
+      },
+      "keyword": "type",
+      "path": "converters",
+      "pointer": "/archive",
+      "valid": false
+    },
+    {
+      "id": "converters-archive-enabled-word-bad",
+      "instance": {
+        "archive": {
+          "enabled": "no"
+        }
+      },
+      "keyword": "type",
+      "path": "converters",
+      "pointer": "/archive/enabled",
+      "valid": false
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "plugin-section-spelling",
+            "severity": "note"
+          }
+        ],
+        "valid": true
+      },
+      "id": "converters-spelling-variant-ok",
+      "instance": {
+        "Archive": {
+          "enabled": false
+        }
+      },
+      "keyword": null,
+      "path": "converters",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "archive-empty-ok",
+      "instance": {},
+      "keyword": null,
+      "path": "converters.archive",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "archive-ratio-ok",
+      "instance": {
+        "options": {
+          "max_compression_ratio": 50
+        }
+      },
+      "keyword": null,
+      "path": "converters.archive",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "archive-unknown-key-bad",
+      "instance": {
+        "enable": true
+      },
+      "keyword": "additionalProperties",
+      "path": "converters.archive",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "archive-enabled-ok",
+      "instance": true,
+      "keyword": null,
+      "path": "converters.archive.enabled",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "archive-enabled-text-bad",
+      "instance": "true",
+      "keyword": "type",
+      "path": "converters.archive.enabled",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "archive-options-empty-ok",
+      "instance": {},
+      "keyword": null,
+      "path": "converters.archive.options",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "archive-options-typo-bad",
+      "instance": {
+        "max_ratio": 1
+      },
+      "keyword": "additionalProperties",
+      "path": "converters.archive.options",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "max-compression-ratio-integer-ok",
+      "instance": 100,
+      "keyword": null,
+      "path": "converters.archive.options.max_compression_ratio",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "max-compression-ratio-fraction-ok",
+      "instance": 0.5,
+      "keyword": null,
+      "path": "converters.archive.options.max_compression_ratio",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "max-compression-ratio-tiny-ok",
+      "instance": 0.0001,
+      "keyword": null,
+      "path": "converters.archive.options.max_compression_ratio",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "reference-in-typed-field",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "max-compression-ratio-reference-ok",
+      "instance": "${ASH_RATIO}",
+      "keyword": null,
+      "path": "converters.archive.options.max_compression_ratio",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "max-compression-ratio-zero-bad",
+      "instance": 0,
+      "keyword": "anyOf",
+      "path": "converters.archive.options.max_compression_ratio",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "max-compression-ratio-negative-bad",
+      "instance": -1,
+      "keyword": "anyOf",
+      "path": "converters.archive.options.max_compression_ratio",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "max-compression-ratio-text-bad",
+      "instance": "10",
+      "keyword": "anyOf",
+      "path": "converters.archive.options.max_compression_ratio",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "max-compression-ratio-boolean-bad",
+      "instance": true,
+      "keyword": "anyOf",
+      "path": "converters.archive.options.max_compression_ratio",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "max-compression-ratio-null-bad",
+      "instance": null,
+      "keyword": "anyOf",
+      "path": "converters.archive.options.max_compression_ratio",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "document-empty-ok",
+      "instance": {},
+      "keyword": null,
+      "path": "",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "document-project-name-ok",
+      "instance": {
+        "project_name": "x"
+      },
+      "keyword": null,
+      "path": "",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "document-full-ok",
+      "instance": {
+        "ash_plugin_modules": [],
+        "converters": {
+          "archive": {
+            "options": {
+              "max_compression_ratio": 10
+            }
+          }
+        },
+        "extends": null,
+        "fail_on_findings": false,
+        "global_settings": {
+          "severity_threshold": "HIGH",
+          "suppressions": [
+            {
+              "path": "a",
+              "reason": "b"
+            }
+          ]
+        },
+        "output_formats": [
+          "sarif"
+        ],
+        "project_name": "x",
+        "scanners": {
+          "bandit": {
+            "enabled": true,
+            "options": {
+              "scan_timeout": 30
+            }
+          }
+        }
+      },
+      "keyword": null,
+      "path": "",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "unknown-top-level-key",
+            "severity": "warning"
+          }
+        ],
+        "valid": true
+      },
+      "id": "document-unknown-key-ok",
+      "instance": {
+        "mystery": 1,
+        "project_name": "x"
+      },
+      "keyword": null,
+      "path": "",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "internal-top-level-field",
+            "severity": "warning"
+          }
+        ],
+        "valid": true
+      },
+      "id": "document-internal-field-ok",
+      "instance": {
+        "build": {}
+      },
+      "keyword": null,
+      "path": "",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "id": "document-list-bad",
+      "instance": [],
+      "keyword": "type",
+      "path": "",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "document-text-bad",
+      "instance": "x",
+      "keyword": "type",
+      "path": "",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "id": "document-project-name-number-bad",
+      "instance": {
+        "project_name": 5
+      },
+      "keyword": "anyOf",
+      "path": "",
+      "pointer": "/project_name",
+      "valid": false
+    },
+    {
+      "id": "document-deep-timeout-bad",
+      "instance": {
+        "scanners": {
+          "bandit": {
+            "options": {
+              "scan_timeout": 0
+            }
+          }
+        }
+      },
+      "keyword": "anyOf",
+      "path": "",
+      "pointer": "/scanners/bandit/options/scan_timeout",
+      "valid": false
+    },
+    {
+      "id": "document-deep-missing-reason-bad",
+      "instance": {
+        "global_settings": {
+          "suppressions": [
+            {
+              "path": "a"
+            }
+          ]
+        }
+      },
+      "keyword": "required",
+      "path": "",
+      "pointer": "/global_settings/suppressions/0",
+      "valid": false
+    }
+  ],
+  "keywordCases": [
+    {
+      "id": "const-text-ok",
+      "instance": "fixed",
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "const": "fixed"
+      },
+      "valid": true
+    },
+    {
+      "id": "const-text-bad",
+      "instance": "other",
+      "keyword": "const",
+      "pointer": "",
+      "schema": {
+        "const": "fixed"
+      },
+      "valid": false
+    },
+    {
+      "id": "const-number-ok",
+      "instance": 1,
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "const": 1
+      },
+      "valid": true
+    },
+    {
+      "id": "const-number-as-float-ok",
+      "instance": 1.0,
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "const": 1
+      },
+      "valid": true
+    },
+    {
+      "id": "const-number-boolean-bad",
+      "instance": true,
+      "keyword": "const",
+      "pointer": "",
+      "schema": {
+        "const": 1
+      },
+      "valid": false
+    },
+    {
+      "id": "const-number-text-bad",
+      "instance": "1",
+      "keyword": "const",
+      "pointer": "",
+      "schema": {
+        "const": 1
+      },
+      "valid": false
+    },
+    {
+      "id": "const-true-ok",
+      "instance": true,
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "const": true
+      },
+      "valid": true
+    },
+    {
+      "id": "const-true-number-bad",
+      "instance": 1,
+      "keyword": "const",
+      "pointer": "",
+      "schema": {
+        "const": true
+      },
+      "valid": false
+    },
+    {
+      "id": "const-null-ok",
+      "instance": null,
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "const": null
+      },
+      "valid": true
+    },
+    {
+      "id": "const-null-zero-bad",
+      "instance": 0,
+      "keyword": "const",
+      "pointer": "",
+      "schema": {
+        "const": null
+      },
+      "valid": false
+    },
+    {
+      "id": "const-nested-ok",
+      "instance": {
+        "a": [
+          1,
+          true
+        ]
+      },
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "const": {
+          "a": [
+            1,
+            true
+          ]
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "const-nested-float-ok",
+      "instance": {
+        "a": [
+          1.0,
+          true
+        ]
+      },
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "const": {
+          "a": [
+            1,
+            true
+          ]
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "const-nested-boolean-for-number-bad",
+      "instance": {
+        "a": [
+          1,
+          1
+        ]
+      },
+      "keyword": "const",
+      "pointer": "",
+      "schema": {
+        "const": {
+          "a": [
+            1,
+            true
+          ]
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "const-nested-extra-key-bad",
+      "instance": {
+        "a": [
+          1,
+          true
+        ],
+        "b": 2
+      },
+      "keyword": "const",
+      "pointer": "",
+      "schema": {
+        "const": {
+          "a": [
+            1,
+            true
+          ]
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "enum-mixed-number-ok",
+      "instance": 1,
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "enum": [
+          1,
+          true,
+          null,
+          "a",
+          [
+            1,
+            2
+          ],
+          {
+            "k": "v"
+          }
+        ]
+      },
+      "valid": true
+    },
+    {
+      "id": "enum-mixed-float-ok",
+      "instance": 1.0,
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "enum": [
+          1,
+          true,
+          null,
+          "a",
+          [
+            1,
+            2
+          ],
+          {
+            "k": "v"
+          }
+        ]
+      },
+      "valid": true
+    },
+    {
+      "id": "enum-mixed-boolean-ok",
+      "instance": true,
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "enum": [
+          1,
+          true,
+          null,
+          "a",
+          [
+            1,
+            2
+          ],
+          {
+            "k": "v"
+          }
+        ]
+      },
+      "valid": true
+    },
+    {
+      "id": "enum-mixed-null-ok",
+      "instance": null,
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "enum": [
+          1,
+          true,
+          null,
+          "a",
+          [
+            1,
+            2
+          ],
+          {
+            "k": "v"
+          }
+        ]
+      },
+      "valid": true
+    },
+    {
+      "id": "enum-mixed-text-ok",
+      "instance": "a",
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "enum": [
+          1,
+          true,
+          null,
+          "a",
+          [
+            1,
+            2
+          ],
+          {
+            "k": "v"
+          }
+        ]
+      },
+      "valid": true
+    },
+    {
+      "id": "enum-mixed-list-ok",
+      "instance": [
+        1,
+        2
+      ],
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "enum": [
+          1,
+          true,
+          null,
+          "a",
+          [
+            1,
+            2
+          ],
+          {
+            "k": "v"
+          }
+        ]
+      },
+      "valid": true
+    },
+    {
+      "id": "enum-mixed-mapping-ok",
+      "instance": {
+        "k": "v"
+      },
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "enum": [
+          1,
+          true,
+          null,
+          "a",
+          [
+            1,
+            2
+          ],
+          {
+            "k": "v"
+          }
+        ]
+      },
+      "valid": true
+    },
+    {
+      "id": "enum-mixed-zero-bad",
+      "instance": 0,
+      "keyword": "enum",
+      "pointer": "",
+      "schema": {
+        "enum": [
+          1,
+          true,
+          null,
+          "a",
+          [
+            1,
+            2
+          ],
+          {
+            "k": "v"
+          }
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "enum-mixed-false-bad",
+      "instance": false,
+      "keyword": "enum",
+      "pointer": "",
+      "schema": {
+        "enum": [
+          1,
+          true,
+          null,
+          "a",
+          [
+            1,
+            2
+          ],
+          {
+            "k": "v"
+          }
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "enum-mixed-case-bad",
+      "instance": "A",
+      "keyword": "enum",
+      "pointer": "",
+      "schema": {
+        "enum": [
+          1,
+          true,
+          null,
+          "a",
+          [
+            1,
+            2
+          ],
+          {
+            "k": "v"
+          }
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "enum-mixed-short-list-bad",
+      "instance": [
+        1
+      ],
+      "keyword": "enum",
+      "pointer": "",
+      "schema": {
+        "enum": [
+          1,
+          true,
+          null,
+          "a",
+          [
+            1,
+            2
+          ],
+          {
+            "k": "v"
+          }
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "enum-mixed-reordered-list-bad",
+      "instance": [
+        2,
+        1
+      ],
+      "keyword": "enum",
+      "pointer": "",
+      "schema": {
+        "enum": [
+          1,
+          true,
+          null,
+          "a",
+          [
+            1,
+            2
+          ],
+          {
+            "k": "v"
+          }
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "enum-mixed-other-mapping-bad",
+      "instance": {
+        "k": "w"
+      },
+      "keyword": "enum",
+      "pointer": "",
+      "schema": {
+        "enum": [
+          1,
+          true,
+          null,
+          "a",
+          [
+            1,
+            2
+          ],
+          {
+            "k": "v"
+          }
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "maximum-equal-ok",
+      "instance": 10,
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "maximum": 10
+      },
+      "valid": true
+    },
+    {
+      "id": "maximum-fraction-ok",
+      "instance": 9.5,
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "maximum": 10
+      },
+      "valid": true
+    },
+    {
+      "id": "maximum-text-skipped-ok",
+      "instance": "text",
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "maximum": 10
+      },
+      "valid": true
+    },
+    {
+      "id": "maximum-boolean-skipped-ok",
+      "instance": true,
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "maximum": 10
+      },
+      "valid": true
+    },
+    {
+      "id": "maximum-fraction-over-bad",
+      "instance": 10.5,
+      "keyword": "maximum",
+      "pointer": "",
+      "schema": {
+        "maximum": 10
+      },
+      "valid": false
+    },
+    {
+      "id": "maximum-over-bad",
+      "instance": 11,
+      "keyword": "maximum",
+      "pointer": "",
+      "schema": {
+        "maximum": 10
+      },
+      "valid": false
+    },
+    {
+      "id": "minimum-equal-ok",
+      "instance": 2,
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "minimum": 2
+      },
+      "valid": true
+    },
+    {
+      "id": "minimum-boolean-skipped-ok",
+      "instance": true,
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "minimum": 2
+      },
+      "valid": true
+    },
+    {
+      "id": "minimum-under-bad",
+      "instance": 1.5,
+      "keyword": "minimum",
+      "pointer": "",
+      "schema": {
+        "minimum": 2
+      },
+      "valid": false
+    },
+    {
+      "id": "exclusive-minimum-over-ok",
+      "instance": 2.0001,
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "exclusiveMinimum": 2
+      },
+      "valid": true
+    },
+    {
+      "id": "exclusive-minimum-equal-bad",
+      "instance": 2,
+      "keyword": "exclusiveMinimum",
+      "pointer": "",
+      "schema": {
+        "exclusiveMinimum": 2
+      },
+      "valid": false
+    },
+    {
+      "id": "exclusive-minimum-boolean-skipped-ok",
+      "instance": false,
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "exclusiveMinimum": 2
+      },
+      "valid": true
+    },
+    {
+      "id": "min-items-equal-ok",
+      "instance": [
+        1,
+        2
+      ],
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "minItems": 2
+      },
+      "valid": true
+    },
+    {
+      "id": "min-items-over-ok",
+      "instance": [
+        1,
+        2,
+        3
+      ],
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "minItems": 2
+      },
+      "valid": true
+    },
+    {
+      "id": "min-items-text-skipped-ok",
+      "instance": "a",
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "minItems": 2
+      },
+      "valid": true
+    },
+    {
+      "id": "min-items-empty-bad",
+      "instance": [],
+      "keyword": "minItems",
+      "pointer": "",
+      "schema": {
+        "minItems": 2
+      },
+      "valid": false
+    },
+    {
+      "id": "min-items-one-bad",
+      "instance": [
+        1
+      ],
+      "keyword": "minItems",
+      "pointer": "",
+      "schema": {
+        "minItems": 2
+      },
+      "valid": false
+    },
+    {
+      "id": "max-items-empty-ok",
+      "instance": [],
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "maxItems": 2
+      },
+      "valid": true
+    },
+    {
+      "id": "max-items-equal-ok",
+      "instance": [
+        1,
+        2
+      ],
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "maxItems": 2
+      },
+      "valid": true
+    },
+    {
+      "id": "max-items-text-skipped-ok",
+      "instance": "abc",
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "maxItems": 2
+      },
+      "valid": true
+    },
+    {
+      "id": "max-items-over-bad",
+      "instance": [
+        1,
+        2,
+        3
+      ],
+      "keyword": "maxItems",
+      "pointer": "",
+      "schema": {
+        "maxItems": 2
+      },
+      "valid": false
+    },
+    {
+      "id": "max-length-equal-ok",
+      "instance": "abc",
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "maxLength": 3
+      },
+      "valid": true
+    },
+    {
+      "id": "max-length-empty-ok",
+      "instance": "",
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "maxLength": 3
+      },
+      "valid": true
+    },
+    {
+      "id": "max-length-number-skipped-ok",
+      "instance": 12345,
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "maxLength": 3
+      },
+      "valid": true
+    },
+    {
+      "id": "max-length-counts-code-points-ok",
+      "instance": "\ud83d\ude00\ud83d\ude00\ud83d\ude00",
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "maxLength": 3
+      },
+      "valid": true
+    },
+    {
+      "id": "max-length-one-emoji-ok",
+      "instance": "\ud83d\ude00",
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "maxLength": 1
+      },
+      "valid": true
+    },
+    {
+      "id": "max-length-over-bad",
+      "instance": "abcd",
+      "keyword": "maxLength",
+      "pointer": "",
+      "schema": {
+        "maxLength": 3
+      },
+      "valid": false
+    },
+    {
+      "id": "max-length-four-emoji-bad",
+      "instance": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00",
+      "keyword": "maxLength",
+      "pointer": "",
+      "schema": {
+        "maxLength": 3
+      },
+      "valid": false
+    },
+    {
+      "id": "max-length-combining-mark-bad",
+      "instance": "e\u0301",
+      "keyword": "maxLength",
+      "pointer": "",
+      "schema": {
+        "maxLength": 1
+      },
+      "valid": false
+    },
+    {
+      "id": "min-length-equal-ok",
+      "instance": "ab",
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "minLength": 2
+      },
+      "valid": true
+    },
+    {
+      "id": "min-length-two-emoji-ok",
+      "instance": "\ud83d\ude00\ud83d\ude00",
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "minLength": 2
+      },
+      "valid": true
+    },
+    {
+      "id": "min-length-number-skipped-ok",
+      "instance": 1,
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "minLength": 2
+      },
+      "valid": true
+    },
+    {
+      "id": "min-length-one-emoji-bad",
+      "instance": "\ud83d\ude00",
+      "keyword": "minLength",
+      "pointer": "",
+      "schema": {
+        "minLength": 2
+      },
+      "valid": false
+    },
+    {
+      "id": "min-length-empty-bad",
+      "instance": "",
+      "keyword": "minLength",
+      "pointer": "",
+      "schema": {
+        "minLength": 2
+      },
+      "valid": false
+    },
+    {
+      "id": "required-all-present-ok",
+      "instance": {
+        "a": 1,
+        "b": 2
+      },
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "required": [
+          "a",
+          "b"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "id": "required-not-an-object-skipped-ok",
+      "instance": "text",
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "required": [
+          "a"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "id": "required-one-missing-bad",
+      "instance": {
+        "a": 1
+      },
+      "keyword": "required",
+      "pointer": "",
+      "schema": {
+        "required": [
+          "a",
+          "b"
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "required-all-missing-bad",
+      "instance": {},
+      "keyword": "required",
+      "pointer": "",
+      "schema": {
+        "required": [
+          "a",
+          "b"
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "additional-true-ok",
+      "instance": {
+        "a": "x",
+        "b": 1
+      },
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "additionalProperties": true,
+        "properties": {
+          "a": {
+            "type": "string"
+          }
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "additional-true-declared-bad",
+      "instance": {
+        "a": 1
+      },
+      "keyword": "type",
+      "pointer": "/a",
+      "schema": {
+        "additionalProperties": true,
+        "properties": {
+          "a": {
+            "type": "string"
+          }
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "additional-schema-ok",
+      "instance": {
+        "x": 1,
+        "y": 2
+      },
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "additionalProperties": {
+          "type": "integer"
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "additional-schema-bad",
+      "instance": {
+        "x": "s"
+      },
+      "keyword": "type",
+      "pointer": "/x",
+      "schema": {
+        "additionalProperties": {
+          "type": "integer"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "additional-schema-skips-declared-ok",
+      "instance": {
+        "a": "s",
+        "b": 2
+      },
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "additionalProperties": {
+          "type": "integer"
+        },
+        "properties": {
+          "a": {
+            "type": "string"
+          }
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "additional-schema-declared-bad",
+      "instance": {
+        "a": 1
+      },
+      "keyword": "type",
+      "pointer": "/a",
+      "schema": {
+        "additionalProperties": {
+          "type": "integer"
+        },
+        "properties": {
+          "a": {
+            "type": "string"
+          }
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "additional-false-two-extras-bad",
+      "instance": {
+        "a": 1,
+        "b": 2,
+        "c": 3
+      },
+      "keyword": "additionalProperties",
+      "pointer": "",
+      "schema": {
+        "additionalProperties": false,
+        "properties": {
+          "a": {}
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "additional-false-declared-only-ok",
+      "instance": {
+        "a": 1
+      },
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "additionalProperties": false,
+        "properties": {
+          "a": {}
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "additional-false-not-an-object-skipped-ok",
+      "instance": [
+        1
+      ],
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "additionalProperties": false
+      },
+      "valid": true
+    },
+    {
+      "id": "items-integers-ok",
+      "instance": [
+        1,
+        2
+      ],
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "items": {
+          "type": "integer"
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "items-empty-ok",
+      "instance": [],
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "items": {
+          "type": "integer"
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "items-text-item-bad",
+      "instance": [
+        1,
+        "x"
+      ],
+      "keyword": "type",
+      "pointer": "/1",
+      "schema": {
+        "items": {
+          "type": "integer"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "items-not-an-array-skipped-ok",
+      "instance": "x",
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "items": {
+          "type": "integer"
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "items-true-ok",
+      "instance": [
+        1,
+        "x",
+        null
+      ],
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "items": true
+      },
+      "valid": true
+    },
+    {
+      "id": "items-false-empty-ok",
+      "instance": [],
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "items": false
+      },
+      "valid": true
+    },
+    {
+      "id": "items-false-not-an-array-skipped-ok",
+      "instance": 5,
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "items": false
+      },
+      "valid": true
+    },
+    {
+      "id": "items-false-one-item-bad",
+      "instance": [
+        1
+      ],
+      "keyword": "items",
+      "pointer": "",
+      "schema": {
+        "items": false
+      },
+      "valid": false
+    },
+    {
+      "id": "items-false-two-items-bad",
+      "instance": [
+        1,
+        2
+      ],
+      "keyword": "items",
+      "pointer": "",
+      "schema": {
+        "items": false
+      },
+      "valid": false
+    },
+    {
+      "id": "type-number-integer-ok",
+      "instance": 1,
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "type": "number"
+      },
+      "valid": true
+    },
+    {
+      "id": "type-number-fraction-ok",
+      "instance": 1.5,
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "type": "number"
+      },
+      "valid": true
+    },
+    {
+      "id": "type-number-text-bad",
+      "instance": "1",
+      "keyword": "type",
+      "pointer": "",
+      "schema": {
+        "type": "number"
+      },
+      "valid": false
+    },
+    {
+      "id": "type-number-boolean-bad",
+      "instance": true,
+      "keyword": "type",
+      "pointer": "",
+      "schema": {
+        "type": "number"
+      },
+      "valid": false
+    },
+    {
+      "id": "type-number-null-bad",
+      "instance": null,
+      "keyword": "type",
+      "pointer": "",
+      "schema": {
+        "type": "number"
+      },
+      "valid": false
+    },
+    {
+      "id": "type-integer-ok",
+      "instance": 3,
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "type": "integer"
+      },
+      "valid": true
+    },
+    {
+      "id": "type-integer-integral-float-ok",
+      "instance": 3.0,
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "type": "integer"
+      },
+      "valid": true
+    },
+    {
+      "id": "type-integer-negative-zero-float-ok",
+      "instance": -0.0,
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "type": "integer"
+      },
+      "valid": true
+    },
+    {
+      "id": "type-integer-fraction-bad",
+      "instance": 3.5,
+      "keyword": "type",
+      "pointer": "",
+      "schema": {
+        "type": "integer"
+      },
+      "valid": false
+    },
+    {
+      "id": "type-integer-text-bad",
+      "instance": "3",
+      "keyword": "type",
+      "pointer": "",
+      "schema": {
+        "type": "integer"
+      },
+      "valid": false
+    },
+    {
+      "id": "type-integer-boolean-bad",
+      "instance": true,
+      "keyword": "type",
+      "pointer": "",
+      "schema": {
+        "type": "integer"
+      },
+      "valid": false
+    },
+    {
+      "id": "type-boolean-true-ok",
+      "instance": true,
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "type": "boolean"
+      },
+      "valid": true
+    },
+    {
+      "id": "type-boolean-false-ok",
+      "instance": false,
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "type": "boolean"
+      },
+      "valid": true
+    },
+    {
+      "id": "type-boolean-one-bad",
+      "instance": 1,
+      "keyword": "type",
+      "pointer": "",
+      "schema": {
+        "type": "boolean"
+      },
+      "valid": false
+    },
+    {
+      "id": "type-boolean-zero-bad",
+      "instance": 0,
+      "keyword": "type",
+      "pointer": "",
+      "schema": {
+        "type": "boolean"
+      },
+      "valid": false
+    },
+    {
+      "id": "type-boolean-text-bad",
+      "instance": "true",
+      "keyword": "type",
+      "pointer": "",
+      "schema": {
+        "type": "boolean"
+      },
+      "valid": false
+    },
+    {
+      "id": "type-null-ok",
+      "instance": null,
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "type": "null"
+      },
+      "valid": true
+    },
+    {
+      "id": "type-null-zero-bad",
+      "instance": 0,
+      "keyword": "type",
+      "pointer": "",
+      "schema": {
+        "type": "null"
+      },
+      "valid": false
+    },
+    {
+      "id": "type-null-empty-text-bad",
+      "instance": "",
+      "keyword": "type",
+      "pointer": "",
+      "schema": {
+        "type": "null"
+      },
+      "valid": false
+    },
+    {
+      "id": "type-null-false-bad",
+      "instance": false,
+      "keyword": "type",
+      "pointer": "",
+      "schema": {
+        "type": "null"
+      },
+      "valid": false
+    },
+    {
+      "id": "type-string-empty-ok",
+      "instance": "",
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "type": "string"
+      },
+      "valid": true
+    },
+    {
+      "id": "type-string-number-bad",
+      "instance": 5,
+      "keyword": "type",
+      "pointer": "",
+      "schema": {
+        "type": "string"
+      },
+      "valid": false
+    },
+    {
+      "id": "type-string-null-bad",
+      "instance": null,
+      "keyword": "type",
+      "pointer": "",
+      "schema": {
+        "type": "string"
+      },
+      "valid": false
+    },
+    {
+      "id": "type-array-ok",
+      "instance": [
+        1
+      ],
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "type": "array"
+      },
+      "valid": true
+    },
+    {
+      "id": "type-array-mapping-bad",
+      "instance": {},
+      "keyword": "type",
+      "pointer": "",
+      "schema": {
+        "type": "array"
+      },
+      "valid": false
+    },
+    {
+      "id": "type-object-ok",
+      "instance": {},
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "type": "object"
+      },
+      "valid": true
+    },
+    {
+      "id": "type-object-list-bad",
+      "instance": [],
+      "keyword": "type",
+      "pointer": "",
+      "schema": {
+        "type": "object"
+      },
+      "valid": false
+    },
+    {
+      "id": "type-object-null-bad",
+      "instance": null,
+      "keyword": "type",
+      "pointer": "",
+      "schema": {
+        "type": "object"
+      },
+      "valid": false
+    },
+    {
+      "id": "any-of-empty-schema-ok",
+      "instance": 5,
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "anyOf": [
+          {},
+          {
+            "type": "string"
+          }
+        ]
+      },
+      "valid": true
+    },
+    {
+      "id": "any-of-second-alternative-ok",
+      "instance": null,
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "valid": true
+    },
+    {
+      "id": "any-of-none-match-bad",
+      "instance": 5,
+      "keyword": "anyOf",
+      "pointer": "",
+      "schema": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "any-of-nested-pointer-bad",
+      "instance": {
+        "a": 5
+      },
+      "keyword": "anyOf",
+      "pointer": "/a",
+      "schema": {
+        "properties": {
+          "a": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "pattern-name-ok",
+      "instance": "cdk-nag",
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "pattern": "^[a-zA-Z][\\w-]+$",
+        "type": "string"
+      },
+      "valid": true
+    },
+    {
+      "id": "pattern-name-too-short-bad",
+      "instance": "a",
+      "keyword": "pattern",
+      "pointer": "",
+      "schema": {
+        "pattern": "^[a-zA-Z][\\w-]+$",
+        "type": "string"
+      },
+      "valid": false
+    },
+    {
+      "id": "pattern-name-leading-digit-bad",
+      "instance": "1abc",
+      "keyword": "pattern",
+      "pointer": "",
+      "schema": {
+        "pattern": "^[a-zA-Z][\\w-]+$",
+        "type": "string"
+      },
+      "valid": false
+    },
+    {
+      "id": "pattern-name-number-skipped-ok",
+      "instance": 5,
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "pattern": "^[a-zA-Z][\\w-]+$"
+      },
+      "valid": true
+    },
+    {
+      "id": "pattern-digest-ok",
+      "instance": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "pattern": "^[0-9a-fA-F]{64}$"
+      },
+      "valid": true
+    },
+    {
+      "id": "pattern-digest-short-bad",
+      "instance": "0123",
+      "keyword": "pattern",
+      "pointer": "",
+      "schema": {
+        "pattern": "^[0-9a-fA-F]{64}$"
+      },
+      "valid": false
+    },
+    {
+      "id": "reference-sibling-keyword-ok",
+      "instance": "abc",
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "$defs": {
+          "s": {
+            "type": "string"
+          }
+        },
+        "$ref": "#/$defs/s",
+        "minLength": 3
+      },
+      "valid": true
+    },
+    {
+      "id": "reference-sibling-keyword-bad",
+      "instance": "ab",
+      "keyword": "minLength",
+      "pointer": "",
+      "schema": {
+        "$defs": {
+          "s": {
+            "type": "string"
+          }
+        },
+        "$ref": "#/$defs/s",
+        "minLength": 3
+      },
+      "valid": false
+    },
+    {
+      "id": "reference-target-keyword-bad",
+      "instance": 5,
+      "keyword": "type",
+      "pointer": "",
+      "schema": {
+        "$defs": {
+          "s": {
+            "type": "string"
+          }
+        },
+        "$ref": "#/$defs/s",
+        "minLength": 3
+      },
+      "valid": false
+    },
+    {
+      "id": "reference-into-properties-ok",
+      "instance": 5,
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "$defs": {
+          "o": {
+            "properties": {
+              "a": {
+                "type": "integer"
+              }
+            }
+          }
+        },
+        "$ref": "#/$defs/o/properties/a"
+      },
+      "valid": true
+    },
+    {
+      "id": "reference-into-properties-bad",
+      "instance": "x",
+      "keyword": "type",
+      "pointer": "",
+      "schema": {
+        "$defs": {
+          "o": {
+            "properties": {
+              "a": {
+                "type": "integer"
+              }
+            }
+          }
+        },
+        "$ref": "#/$defs/o/properties/a"
+      },
+      "valid": false
+    },
+    {
+      "id": "reference-chain-ok",
+      "instance": "x",
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "$defs": {
+          "a": {
+            "$ref": "#/$defs/b"
+          },
+          "b": {
+            "type": "string"
+          }
+        },
+        "$ref": "#/$defs/a"
+      },
+      "valid": true
+    },
+    {
+      "id": "reference-chain-bad",
+      "instance": 1,
+      "keyword": "type",
+      "pointer": "",
+      "schema": {
+        "$defs": {
+          "a": {
+            "$ref": "#/$defs/b"
+          },
+          "b": {
+            "type": "string"
+          }
+        },
+        "$ref": "#/$defs/a"
+      },
+      "valid": false
+    },
+    {
+      "id": "reference-escaped-name-ok",
+      "instance": {
+        "x": "s",
+        "y": 1
+      },
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "$defs": {
+          "a/b": {
+            "type": "string"
+          },
+          "c~d": {
+            "type": "integer"
+          }
+        },
+        "properties": {
+          "x": {
+            "$ref": "#/$defs/a~1b"
+          },
+          "y": {
+            "$ref": "#/$defs/c~0d"
+          }
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "reference-escaped-name-bad",
+      "instance": {
+        "x": "s",
+        "y": "t"
+      },
+      "keyword": "type",
+      "pointer": "/y",
+      "schema": {
+        "$defs": {
+          "a/b": {
+            "type": "string"
+          },
+          "c~d": {
+            "type": "integer"
+          }
+        },
+        "properties": {
+          "x": {
+            "$ref": "#/$defs/a~1b"
+          },
+          "y": {
+            "$ref": "#/$defs/c~0d"
+          }
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "property-names-length-ok",
+      "instance": {
+        "abc": 1
+      },
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "propertyNames": {
+          "maxLength": 3
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "property-names-length-bad",
+      "instance": {
+        "abcd": 1
+      },
+      "keyword": "maxLength",
+      "pointer": "",
+      "schema": {
+        "propertyNames": {
+          "maxLength": 3
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "property-names-not-an-object-skipped-ok",
+      "instance": [
+        "abcd"
+      ],
+      "keyword": null,
+      "pointer": null,
+      "schema": {
+        "propertyNames": {
+          "maxLength": 3
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "property-names-nested-pointer-bad",
+      "instance": {
+        "m": {
+          "ab": 1
+        }
+      },
+      "keyword": "maxLength",
+      "pointer": "/m",
+      "schema": {
+        "properties": {
+          "m": {
+            "propertyNames": {
+              "maxLength": 1
+            }
+          }
+        }
+      },
+      "valid": false
+    }
+  ]
+}

@@ -1,0 +1,640 @@
+{
+  "about": "Inputs and expected results for the plugin-section spelling fold. canonical lists the declared section names per kind, standing in for the names ASH declares. targets are [kind, input, expected] triples, as the data block's spelling vectors are: expected is the declared name the input is a spelling of, or null. sections are whole mappings of one kind: keys in file order, and either the sorted keys left after the fold or, when two spellings of one plugin collide, the first and second key and the declared name. merges are whole mappings of one kind with a variant spelling in them, each with the mapping ASH reads once the variant is merged into the declared section key by key, the declared value winning. A Python test checks every expected value against ASH's own fold, with the declared names replaced by canonical. A node test checks the JavaScript port against the same file.",
+  "canonical": {
+    "converters": [
+      "archive",
+      "jupyter"
+    ],
+    "reporters": [
+      "csv",
+      "gitlab-sast",
+      "html",
+      "sarif"
+    ],
+    "scanners": [
+      "bandit",
+      "cdk-nag",
+      "cfn-lint",
+      "detect-secrets",
+      "gitleaks",
+      "opengrep",
+      "semgrep"
+    ]
+  },
+  "merges": [
+    {
+      "folded": {
+        "bandit": {
+          "enabled": false
+        }
+      },
+      "kind": "scanners",
+      "section": {
+        "Bandit": {
+          "enabled": false
+        }
+      }
+    },
+    {
+      "folded": {
+        "bandit": {
+          "enabled": true,
+          "options": {
+            "scan_timeout": 5
+          }
+        }
+      },
+      "kind": "scanners",
+      "section": {
+        "Bandit": {
+          "enabled": false,
+          "options": {
+            "scan_timeout": 5
+          }
+        },
+        "bandit": {
+          "enabled": true
+        }
+      }
+    },
+    {
+      "folded": {
+        "bandit": {
+          "options": {
+            "a": 1,
+            "b": 3,
+            "c": 4
+          }
+        }
+      },
+      "kind": "scanners",
+      "section": {
+        "Bandit": {
+          "options": {
+            "a": 1,
+            "b": 2
+          }
+        },
+        "bandit": {
+          "options": {
+            "b": 3,
+            "c": 4
+          }
+        }
+      }
+    },
+    {
+      "folded": {
+        "bandit": null
+      },
+      "kind": "scanners",
+      "section": {
+        "Bandit": {
+          "enabled": true
+        },
+        "bandit": null
+      }
+    },
+    {
+      "folded": {
+        "bandit": {
+          "enabled": true
+        }
+      },
+      "kind": "scanners",
+      "section": {
+        "Bandit": 5,
+        "bandit": {
+          "enabled": true
+        }
+      }
+    },
+    {
+      "folded": {
+        "bandit": 5
+      },
+      "kind": "scanners",
+      "section": {
+        "Bandit": 5
+      }
+    },
+    {
+      "folded": {
+        "bandit": {
+          "paths": [
+            3
+          ]
+        }
+      },
+      "kind": "scanners",
+      "section": {
+        "Bandit": {
+          "paths": [
+            1,
+            2
+          ]
+        },
+        "bandit": {
+          "paths": [
+            3
+          ]
+        }
+      }
+    },
+    {
+      "folded": {
+        "bandit": {
+          "options": 3
+        }
+      },
+      "kind": "scanners",
+      "section": {
+        "Bandit": {
+          "options": {
+            "a": 1
+          }
+        },
+        "bandit": {
+          "options": 3
+        }
+      }
+    },
+    {
+      "folded": {
+        "bandit": {
+          "options": {
+            "a": 1
+          }
+        }
+      },
+      "kind": "scanners",
+      "section": {
+        "Bandit": {
+          "options": 3
+        },
+        "bandit": {
+          "options": {
+            "a": 1
+          }
+        }
+      }
+    },
+    {
+      "folded": {
+        "bandit": {
+          "enabled": false
+        },
+        "mystery": {
+          "x": 1
+        }
+      },
+      "kind": "scanners",
+      "section": {
+        "BanditScanner": {
+          "enabled": false
+        },
+        "mystery": {
+          "x": 1
+        }
+      }
+    },
+    {
+      "folded": {
+        "archive": {
+          "enabled": false
+        }
+      },
+      "kind": "converters",
+      "section": {
+        "Archive": {
+          "enabled": false
+        }
+      }
+    },
+    {
+      "folded": {
+        "bandit": {
+          "enabled": true
+        }
+      },
+      "kind": "scanners",
+      "section": {
+        "bandit": {
+          "enabled": true
+        }
+      }
+    }
+  ],
+  "sections": [
+    {
+      "ambiguous": null,
+      "folded": [
+        "bandit"
+      ],
+      "keys": [
+        "bandit"
+      ],
+      "kind": "scanners"
+    },
+    {
+      "ambiguous": null,
+      "folded": [
+        "bandit"
+      ],
+      "keys": [
+        "Bandit"
+      ],
+      "kind": "scanners"
+    },
+    {
+      "ambiguous": null,
+      "folded": [
+        "bandit",
+        "cdk-nag"
+      ],
+      "keys": [
+        "cdk_nag",
+        "bandit"
+      ],
+      "kind": "scanners"
+    },
+    {
+      "ambiguous": null,
+      "folded": [
+        "bandit"
+      ],
+      "keys": [
+        "bandit",
+        "Bandit"
+      ],
+      "kind": "scanners"
+    },
+    {
+      "ambiguous": null,
+      "folded": [
+        "bandit",
+        "mystery"
+      ],
+      "keys": [
+        "Bandit",
+        "mystery"
+      ],
+      "kind": "scanners"
+    },
+    {
+      "ambiguous": null,
+      "folded": [
+        "bandit",
+        "no-such-plugin"
+      ],
+      "keys": [
+        "no-such-plugin",
+        "bandit"
+      ],
+      "kind": "scanners"
+    },
+    {
+      "ambiguous": {
+        "first": "cdk_nag",
+        "second": "CdkNag",
+        "target": "cdk-nag"
+      },
+      "folded": null,
+      "keys": [
+        "cdk_nag",
+        "CdkNag"
+      ],
+      "kind": "scanners"
+    },
+    {
+      "ambiguous": {
+        "first": "CdkNag",
+        "second": "cdk_nag",
+        "target": "cdk-nag"
+      },
+      "folded": null,
+      "keys": [
+        "CdkNag",
+        "cdk-nag",
+        "cdk_nag"
+      ],
+      "kind": "scanners"
+    },
+    {
+      "ambiguous": {
+        "first": "DetectSecretsScanner",
+        "second": "detect_secrets",
+        "target": "detect-secrets"
+      },
+      "folded": null,
+      "keys": [
+        "DetectSecretsScanner",
+        "detect_secrets"
+      ],
+      "kind": "scanners"
+    },
+    {
+      "ambiguous": null,
+      "folded": [
+        "csv"
+      ],
+      "keys": [
+        "CsvReporter"
+      ],
+      "kind": "reporters"
+    },
+    {
+      "ambiguous": null,
+      "folded": [
+        "archive"
+      ],
+      "keys": [
+        "archive",
+        "Archive_Converter"
+      ],
+      "kind": "converters"
+    }
+  ],
+  "targets": [
+    [
+      "scanners",
+      "bandit",
+      "bandit"
+    ],
+    [
+      "scanners",
+      "Bandit",
+      "bandit"
+    ],
+    [
+      "scanners",
+      "BANDIT",
+      "bandit"
+    ],
+    [
+      "scanners",
+      "cdk-nag",
+      "cdk-nag"
+    ],
+    [
+      "scanners",
+      "cdk_nag",
+      "cdk-nag"
+    ],
+    [
+      "scanners",
+      "CdkNag",
+      "cdk-nag"
+    ],
+    [
+      "scanners",
+      "cdknag",
+      "cdk-nag"
+    ],
+    [
+      "scanners",
+      "CDK_NAG",
+      "cdk-nag"
+    ],
+    [
+      "scanners",
+      "cdk--nag",
+      "cdk-nag"
+    ],
+    [
+      "scanners",
+      "_cdk-nag_",
+      "cdk-nag"
+    ],
+    [
+      "scanners",
+      "c-d-k-n-a-g",
+      "cdk-nag"
+    ],
+    [
+      "scanners",
+      "detect_secrets",
+      "detect-secrets"
+    ],
+    [
+      "scanners",
+      "DetectSecrets",
+      "detect-secrets"
+    ],
+    [
+      "scanners",
+      "DetectSecretsScanner",
+      "detect-secrets"
+    ],
+    [
+      "scanners",
+      "detect-secrets-scanner",
+      "detect-secrets"
+    ],
+    [
+      "scanners",
+      "detect_secrets_scanner",
+      "detect-secrets"
+    ],
+    [
+      "scanners",
+      "BanditSCANNER",
+      "bandit"
+    ],
+    [
+      "scanners",
+      "BANDIT_SCANNER",
+      "bandit"
+    ],
+    [
+      "scanners",
+      "banditscanner",
+      "bandit"
+    ],
+    [
+      "scanners",
+      "DetectSecretsReporter",
+      "detect-secrets"
+    ],
+    [
+      "scanners",
+      "scanner",
+      null
+    ],
+    [
+      "scanners",
+      "Scanner",
+      null
+    ],
+    [
+      "scanners",
+      "detect-secrets-scan-ner",
+      null
+    ],
+    [
+      "scanners",
+      "detect-secrets-scan_ner",
+      null
+    ],
+    [
+      "scanners",
+      "bandit-scanner-scanner",
+      null
+    ],
+    [
+      "scanners",
+      "scannerbandit",
+      null
+    ],
+    [
+      "scanners",
+      "no-such-scanner",
+      null
+    ],
+    [
+      "scanners",
+      "cdk nag",
+      null
+    ],
+    [
+      "scanners",
+      "cdk.nag",
+      null
+    ],
+    [
+      "scanners",
+      "cdk-nag ",
+      null
+    ],
+    [
+      "scanners",
+      "",
+      null
+    ],
+    [
+      "scanners",
+      "-",
+      null
+    ],
+    [
+      "scanners",
+      "_",
+      null
+    ],
+    [
+      "scanners",
+      "band\u0131t",
+      null
+    ],
+    [
+      "scanners",
+      "BAND\u0130T",
+      null
+    ],
+    [
+      "scanners",
+      "cd\u212a-nag",
+      null
+    ],
+    [
+      "scanners",
+      "\u017femgrep",
+      null
+    ],
+    [
+      "scanners",
+      "\uff41\uff42",
+      null
+    ],
+    [
+      "reporters",
+      "csv",
+      "csv"
+    ],
+    [
+      "reporters",
+      "CSV",
+      "csv"
+    ],
+    [
+      "reporters",
+      "csvReporter",
+      "csv"
+    ],
+    [
+      "reporters",
+      "gitlab_sast",
+      "gitlab-sast"
+    ],
+    [
+      "reporters",
+      "GitlabSast",
+      "gitlab-sast"
+    ],
+    [
+      "reporters",
+      "gitlabsastreporter",
+      "gitlab-sast"
+    ],
+    [
+      "reporters",
+      "SarifReporter",
+      "sarif"
+    ],
+    [
+      "reporters",
+      "sarif_reporter",
+      "sarif"
+    ],
+    [
+      "reporters",
+      "html-reporter",
+      "html"
+    ],
+    [
+      "reporters",
+      "sarif-re_porter",
+      null
+    ],
+    [
+      "reporters",
+      "bandit",
+      null
+    ],
+    [
+      "converters",
+      "archive",
+      "archive"
+    ],
+    [
+      "converters",
+      "Archive",
+      "archive"
+    ],
+    [
+      "converters",
+      "archive-converter",
+      "archive"
+    ],
+    [
+      "converters",
+      "ArchiveConverter",
+      "archive"
+    ],
+    [
+      "converters",
+      "jupyter",
+      "jupyter"
+    ],
+    [
+      "converters",
+      "JupyterConverter",
+      "jupyter"
+    ],
+    [
+      "converters",
+      "csv",
+      null
+    ]
+  ]
+}

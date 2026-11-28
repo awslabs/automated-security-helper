@@ -1,0 +1,10 @@
+{
+  "description": "Node tests for the documentation site's configuration editor modules and for the coverage census.",
+  "name": "ash-config-editor-tests",
+  "private": true,
+  "scripts": {
+    "test": "node --test"
+  },
+  "type": "module",
+  "version": "1.0.0"
+}
