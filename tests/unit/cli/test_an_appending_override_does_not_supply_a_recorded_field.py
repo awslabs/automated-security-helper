@@ -201,6 +201,7 @@ def test_merge_refuses_under_an_appending_override(shard):
     result = CliRunner().invoke(
         app,
         [
+            "results",
             "merge",
             "--results",
             str(shard),
@@ -226,6 +227,7 @@ def test_report_refuses_under_an_appending_override(shard):
     result = CliRunner().invoke(
         app,
         [
+            "results",
             "report",
             "--format",
             "markdown",

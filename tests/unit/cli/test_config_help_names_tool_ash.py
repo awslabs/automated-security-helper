@@ -18,7 +18,7 @@ from automated_security_helper.cli.main import app
 pytestmark = pytest.mark.unit
 
 COMMANDS = [
-    ["scan"],
+    ["scan", "fs"],
     ["config", "init"],
     ["config", "get"],
     ["config", "update"],

@@ -73,7 +73,7 @@ def test_the_command_refuses_it_with_exit_3_and_imports_nothing(
     )
     monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "bin"))
     if command == "report":
-        args = ["report", "--config-overrides", OVERRIDE]
+        args = ["results", "report", "--config-overrides", OVERRIDE]
     else:
         args = [
             "dependencies",
@@ -132,7 +132,7 @@ def test_any_other_loading_refusal_still_exits_3(tmp_path, monkeypatch, command)
 
     if command == "report":
         monkeypatch.setattr("automated_security_helper.cli.report.load_plugins", refuse)
-        args = ["report"]
+        args = ["results", "report"]
     else:
         monkeypatch.setattr(
             "automated_security_helper.cli.dependencies.load_plugins", refuse
@@ -184,7 +184,7 @@ def test_the_command_refuses_a_module_that_fails_to_import_with_exit_3(
     monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "bin"))
     override = f'ash_plugin_modules+=["{BROKEN}"]'
     if command == "report":
-        args = ["report", "--config-overrides", override]
+        args = ["results", "report", "--config-overrides", override]
     else:
         args = [
             "dependencies",

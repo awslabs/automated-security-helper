@@ -69,6 +69,9 @@ def _child_env(extra: dict[str, str]) -> dict[str, str]:
     env = dict(os.environ)
     for name in _CHOSEN_PER_TEST:
         env.pop(name, None)
+    # A caller's ASH_SCANNERS reaches the scan through the deprecated --scanners
+    # option, and --add-scanners does not override it.
+    env.pop("ASH_SCANNERS", None)
     env.update(TERM="xterm-256color", COLUMNS="120", LINES="40")
     env.update(extra)
     return checkout_env(env)

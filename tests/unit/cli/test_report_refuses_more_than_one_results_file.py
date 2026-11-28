@@ -50,7 +50,8 @@ def _entries(root: Path) -> set:
 def _report(output_dir: Path):
     with patch(SARIF_REPORT, return_value=DOCUMENT):
         return CliRunner().invoke(
-            app, ["report", "--format", "sarif", "--output-dir", str(output_dir)]
+            app,
+            ["results", "report", "--format", "sarif", "--output-dir", str(output_dir)],
         )
 
 

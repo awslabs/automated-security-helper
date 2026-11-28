@@ -296,7 +296,7 @@ class _Harness:
     def merge(self, shard_paths: Sequence[Path], *args: str):
         from automated_security_helper.cli.main import app
 
-        argv = ["merge"]
+        argv = ["results", "merge"]
         for path in shard_paths:
             argv += ["--results", str(path)]
         argv += ["--output-dir", str(self.output_dir), *args]
@@ -1683,7 +1683,7 @@ class TestTheRealChain:
             tmp_path / "shard-config" / "ash.yaml", SHARD_CONFIG
         )
         recorded = resolve_config(config_path=recorded_file)
-        argv = ["merge"]
+        argv = ["results", "merge"]
         for index, model in enumerate(build_shards(2)):
             model.ash_config = recorded
             target = tmp_path / "artifacts" / f"shard-{index}"

@@ -92,6 +92,7 @@ def _merge_in_a_child(
         importing_this_checkout(
             "from automated_security_helper.cli.main import app; app()"
         ),
+        "results",
         "merge",
     ]
     for shard in shards:

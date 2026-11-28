@@ -131,6 +131,9 @@ def test_a_sigterm_to_ash_stops_the_scanner_tool_and_exits_terminated(tmp_path):
         "ASH_SIGTERM_STOP_BLOCKER": str(FIXTURE / "blocker.py"),
         "ASH_SIGTERM_STOP_PID_FILE": str(pid_file),
     }
+    # A caller's ASH_SCANNERS reaches the scan through the deprecated --scanners
+    # option, and --add-scanners does not override it.
+    env.pop("ASH_SCANNERS", None)
     command = [
         _ash_executable(),
         "scan",

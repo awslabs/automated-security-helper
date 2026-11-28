@@ -106,8 +106,8 @@ def test_a_short_options_value_in_the_same_token_is_not_a_spelling(params):
 
 def _report_command():
     root = typer.main.get_command(app)
-    ctx = root.make_context("ash", ["report"], resilient_parsing=True)
-    return root.get_command(ctx, "report"), ctx
+    ctx = root.make_context("ash", ["results", "report"], resilient_parsing=True)
+    return root.get_command(ctx, "results").get_command(ctx, "report"), ctx
 
 
 @pytest.mark.parametrize(

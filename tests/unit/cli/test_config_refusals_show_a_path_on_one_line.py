@@ -92,7 +92,7 @@ def test_report_names_a_refused_path_on_one_line(tmp_path, monkeypatch, named):
     monkeypatch.chdir(tmp_path)
     refused = tmp_path / "a\nrefused.yaml"
     refused.write_text(REFUSED, encoding="utf-8")
-    args = ["report"]
+    args = ["results", "report"]
     if named == "--config":
         args += ["--config", str(refused)]
     else:
@@ -224,7 +224,7 @@ UNPARSED = "project_name: [unclosed\n"
         (["config", "validate"], "ASH_CONFIG"),
         (["config", "lint"], "--config"),
         (["config", "lint"], "ASH_CONFIG"),
-        (["report"], "--config"),
+        (["results", "report"], "--config"),
     ],
 )
 def test_a_parse_refusal_names_the_file_on_one_line(
@@ -431,7 +431,7 @@ def test_report_names_a_missing_config_on_one_line(tmp_path, monkeypatch, _wide)
     monkeypatch.chdir(tmp_path)
     missing = tmp_path / "a\nmissing.yaml"
 
-    result = CliRunner().invoke(app, ["report", "--config", str(missing)])
+    result = CliRunner().invoke(app, ["results", "report", "--config", str(missing)])
 
     assert result.exit_code == 3, result.output
     assert "Configuration file not found" in result.output, result.output
@@ -637,7 +637,7 @@ def test_report_refuses_a_config_it_cannot_read_on_one_line(
     monkeypatch.chdir(tmp_path)
     config = tmp_path / "a\nunreadable.yaml"
     _unreadable(config)
-    args = ["report"]
+    args = ["results", "report"]
     if named == "--config":
         args += ["--config", str(config)]
     else:
@@ -784,7 +784,7 @@ def test_scan_names_a_missing_config_on_one_line(
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     monkeypatch.chdir(tmp_path)
     missing = tmp_path / "a\nmissing.yaml"
-    args = ["scan"]
+    args = ["scan", "fs"]
     if named == "--config":
         args += ["--config", str(missing)]
     else:

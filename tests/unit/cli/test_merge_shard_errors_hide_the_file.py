@@ -304,7 +304,7 @@ def test_a_shard_it_cannot_open_is_named_once(tmp_path, monkeypatch):
         "automated_security_helper.cli.merge.open", denied, raising=False
     )
     result = CliRunner().invoke(
-        app, ["merge", "--output-dir", "out", "--results", "shard0.json"]
+        app, ["results", "merge", "--output-dir", "out", "--results", "shard0.json"]
     )
 
     printed = " ".join(result.output.split())
@@ -327,7 +327,7 @@ def test_ash_merge_prints_no_workflow_command(tmp_path, monkeypatch, content):
     (tmp_path / "shard0.json").write_text(content, encoding="utf-8")
 
     result = CliRunner().invoke(
-        app, ["merge", "--output-dir", "out", "--results", "shard0.json"]
+        app, ["results", "merge", "--output-dir", "out", "--results", "shard0.json"]
     )
 
     assert result.exit_code == 1, result.output

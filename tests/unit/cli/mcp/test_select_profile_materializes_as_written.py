@@ -162,6 +162,9 @@ def test_a_scan_under_the_bound_profile_shows_no_value(bound, tmp_path):
     (source / "app.py").write_text("print('hello')\n", encoding="utf-8")
     output = tmp_path / "out"
     started = ChildToolStarts(tmp_path)
+    # A caller's ASH_SCANNERS reaches the scan through the deprecated --scanners
+    # option, and --add-scanners does not override it.
+    inherited = {k: v for k, v in os.environ.items() if k != "ASH_SCANNERS"}
     scan = subprocess.run(
         [
             sys.executable,
@@ -201,7 +204,7 @@ def test_a_scan_under_the_bound_profile_shows_no_value(bound, tmp_path):
         env=checkout_env(
             started.child_env(
                 {
-                    **os.environ,
+                    **inherited,
                     "COLUMNS": "300",
                 }
             )

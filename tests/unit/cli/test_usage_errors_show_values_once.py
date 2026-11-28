@@ -74,9 +74,9 @@ def _assert_shown_once(output: str, value: str) -> None:
 @pytest.mark.parametrize(
     "option",
     [
-        pytest.param(["scan", "--mode"], id="choice-mode"),
-        pytest.param(["scan", "--log-level"], id="choice-log-level"),
-        pytest.param(["scan", "--shard-index"], id="integer-shard-index"),
+        pytest.param(["scan", "fs", "--mode"], id="choice-mode"),
+        pytest.param(["scan", "fs", "--log-level"], id="choice-log-level"),
+        pytest.param(["scan", "fs", "--shard-index"], id="integer-shard-index"),
     ],
 )
 @pytest.mark.integration
@@ -91,8 +91,8 @@ def test_a_refused_option_value_is_shown_once(tmp_path, option, value):
 def test_a_real_override_and_the_text_of_its_escape_stay_distinct(tmp_path):
     """Shown once each, the two read differently: one escape, then an escaped
     backslash and the text. Shown twice, the override read as the text."""
-    real = _ash(tmp_path, "scan", "--mode", _RLO)
-    text = _ash(tmp_path, "scan", "--mode", _RLO_AS_TEXT)
+    real = _ash(tmp_path, "scan", "fs", "--mode", _RLO)
+    text = _ash(tmp_path, "scan", "fs", "--mode", _RLO_AS_TEXT)
 
     assert "'x\\u202ey'" in real.stderr + real.stdout
     assert "'x\\\\u202ey'" in text.stderr + text.stdout
@@ -125,7 +125,7 @@ def test_a_cli_json_input_refusal_is_shown_once(tmp_path, document, needle):
     source = tmp_path / "input.json"
     source.write_text(json.dumps(document), encoding="utf-8")
 
-    result = _ash(tmp_path, "scan", "--cli-json-input", str(source))
+    result = _ash(tmp_path, "scan", "fs", "--cli-json-input", str(source))
 
     output = result.stdout + result.stderr
     assert result.returncode == ASH_EXIT_USAGE_ERROR, output
@@ -138,7 +138,7 @@ def test_a_duplicated_cli_json_input_key_is_shown_once(tmp_path):
     source = tmp_path / "input.json"
     source.write_text('{"x\\u001b[31my": 1, "x\\u001b[31my": 2}', encoding="utf-8")
 
-    result = _ash(tmp_path, "scan", "--cli-json-input", str(source))
+    result = _ash(tmp_path, "scan", "fs", "--cli-json-input", str(source))
 
     output = result.stdout + result.stderr
     assert result.returncode == ASH_EXIT_USAGE_ERROR, output
@@ -164,7 +164,7 @@ def _lookalike_line(output: str) -> bool:
 def test_a_value_with_a_newline_stays_on_one_line(tmp_path):
     """The repr kept it on one line ("\\n"); put back as typed, its newlines laid
     the panel out, so the panel held a line the value wrote."""
-    result = _ash(tmp_path, "scan", "--mode", _ERROR_LINE_LOOKALIKE)
+    result = _ash(tmp_path, "scan", "fs", "--mode", _ERROR_LINE_LOOKALIKE)
 
     output = result.stdout + result.stderr
     assert result.returncode == ASH_EXIT_USAGE_ERROR, output
@@ -186,7 +186,7 @@ def test_a_cli_json_input_value_or_key_with_a_newline_stays_on_one_line(
     source = tmp_path / "input.json"
     source.write_text(json.dumps(document), encoding="utf-8")
 
-    result = _ash(tmp_path, "scan", "--cli-json-input", str(source))
+    result = _ash(tmp_path, "scan", "fs", "--cli-json-input", str(source))
 
     output = result.stdout + result.stderr
     assert result.returncode == ASH_EXIT_USAGE_ERROR, output
@@ -197,7 +197,7 @@ def test_a_cli_json_input_value_or_key_with_a_newline_stays_on_one_line(
 def test_a_value_holding_a_quote_keeps_the_quotes_its_repr_chose(tmp_path):
     """repr quotes a'b with double quotes; put back between single ones, it read
     as 'a' followed by b'."""
-    result = _ash(tmp_path, "scan", "--mode", "a'b")
+    result = _ash(tmp_path, "scan", "fs", "--mode", "a'b")
 
     output = result.stdout + result.stderr
     assert result.returncode == ASH_EXIT_USAGE_ERROR, output
@@ -207,7 +207,7 @@ def test_a_value_holding_a_quote_keeps_the_quotes_its_repr_chose(tmp_path):
 @pytest.mark.integration
 def test_an_unknown_option_was_shown_once_already(tmp_path):
     """The control: click names an unknown option as typed, so it was shown once."""
-    result = _ash(tmp_path, "scan", "--nope" + "\x1b[31m")
+    result = _ash(tmp_path, "scan", "fs", "--nope" + "\x1b[31m")
 
     assert result.returncode == ASH_EXIT_USAGE_ERROR, result.stdout + result.stderr
     _assert_shown_once(result.stdout + result.stderr, "--nope\x1b[31m")
@@ -271,8 +271,8 @@ def test_text_that_only_looks_like_a_repr_is_left_as_it_is():
 @pytest.mark.parametrize(
     "command",
     [
-        pytest.param(["scan"], id="scan"),
-        pytest.param(["report"], id="report"),
+        pytest.param(["scan", "fs"], id="scan"),
+        pytest.param(["results", "report"], id="report"),
         pytest.param(["config", "get"], id="config-get"),
         pytest.param(["dependencies", "install"], id="dependencies-install"),
     ],
@@ -304,15 +304,19 @@ def test_an_extra_argument_holding_a_newline_stays_on_one_line(tmp_path):
 
 @pytest.mark.parametrize(
     "command",
-    [pytest.param(["scan"], id="scan"), pytest.param(["merge"], id="merge")],
+    [
+        pytest.param(["scan", "fs"], id="scan"),
+        pytest.param(["results", "merge"], id="merge"),
+    ],
 )
 @pytest.mark.integration
 def test_a_refused_output_format_stays_on_one_line(tmp_path, command):
     """The format refusals build their own message around the value as typed."""
-    if command == ["merge"]:
+    if command == ["results", "merge"]:
         results = tmp_path / "results.json"
         results.write_text("{}", encoding="utf-8")
         command = [
+            "results",
             "merge",
             "--results",
             str(results),

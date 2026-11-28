@@ -127,7 +127,7 @@ def test_a_display_reader_keeps_the_default_and_names_the_field(shard):
 def _merge(shard: Path, *extra: str):
     return CliRunner().invoke(
         app,
-        ["merge", "--results", str(shard), "--output-dir", "merged", *extra],
+        ["results", "merge", "--results", str(shard), "--output-dir", "merged", *extra],
         env={"COLUMNS": "300"},
     )
 
@@ -160,7 +160,15 @@ def test_merge_takes_the_operator_s_value(shard, tmp_path, value_where_merge_run
 def _report(shard: Path, *extra: str):
     return CliRunner().invoke(
         app,
-        ["report", "--format", "markdown", "--output-dir", str(shard), *extra],
+        [
+            "results",
+            "report",
+            "--format",
+            "markdown",
+            "--output-dir",
+            str(shard),
+            *extra,
+        ],
         env={"COLUMNS": "300"},
     )
 

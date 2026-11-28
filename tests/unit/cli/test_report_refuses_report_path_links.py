@@ -33,7 +33,7 @@ pytestmark = [
 # From this checkout, which `-I` alone would not import; see importing_this_checkout.
 DRIVER = importing_this_checkout(
     "from automated_security_helper.cli.main import app\n"
-    "sys.argv = ['ash', 'report', *sys.argv[1:]]\n"
+    "sys.argv = ['ash', 'results', 'report', *sys.argv[1:]]\n"
     "app()\n"
 )
 

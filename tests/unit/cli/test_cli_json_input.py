@@ -77,9 +77,9 @@ class TestScanJsonInput:
         params = _write(
             tmp_path,
             {
-                "source_dir": src.as_posix(),
+                "path": src.as_posix(),
                 "output_dir": (tmp_path / "out").as_posix(),
-                "scanners": ["bandit", "semgrep"],
+                "add_scanners": ["bandit", "semgrep"],
                 "strategy": "sequential",
                 "offline": True,
                 "mode": "local",
@@ -87,13 +87,13 @@ class TestScanJsonInput:
         )
         with patch(RUN_ASH_SCAN) as mock_run:
             result = runner.invoke(
-                app, ["scan", "--cli-json-input", f"file://{params}"]
+                app, ["scan", "fs", "--cli-json-input", f"file://{params}"]
             )
         assert result.exit_code == 0, result.output
         kwargs = _scan_kwargs(mock_run)
         assert kwargs["source_dir"] == src.as_posix()
         assert kwargs["output_dir"] == (tmp_path / "out").as_posix()
-        assert list(kwargs["scanners"]) == ["bandit", "semgrep"]
+        assert list(kwargs["add_scanners"]) == ["bandit", "semgrep"]
         # Cast through the click type exactly as the flag would be: an enum, not
         # the string that was in the file.
         assert kwargs["strategy"] == ExecutionStrategy.SEQUENTIAL
@@ -103,7 +103,7 @@ class TestScanJsonInput:
     def test_plain_path_is_accepted_as_well_as_file_uri(self, runner, tmp_path):
         params = _write(tmp_path, {"offline": True})
         with patch(RUN_ASH_SCAN) as mock_run:
-            result = runner.invoke(app, ["scan", "--cli-json-input", str(params)])
+            result = runner.invoke(app, ["scan", "fs", "--cli-json-input", str(params)])
         assert result.exit_code == 0, result.output
         assert _scan_kwargs(mock_run)["offline"] is True
 
@@ -113,7 +113,7 @@ class TestScanJsonInput:
             {"--strategy": "sequential", "--python-only": True, "--formats": ["sarif"]},
         )
         with patch(RUN_ASH_SCAN) as mock_run:
-            result = runner.invoke(app, ["scan", "--cli-json-input", str(params)])
+            result = runner.invoke(app, ["scan", "fs", "--cli-json-input", str(params)])
         assert result.exit_code == 0, result.output
         kwargs = _scan_kwargs(mock_run)
         assert kwargs["strategy"] == ExecutionStrategy.SEQUENTIAL
@@ -125,7 +125,7 @@ class TestScanJsonInput:
             tmp_path,
             {
                 "strategy": "sequential",
-                "scanners": ["bandit", "semgrep"],
+                "add_scanners": ["bandit", "semgrep"],
                 "offline": True,
                 "config_overrides": ["global_settings.severity_threshold=LOW"],
             },
@@ -135,11 +135,12 @@ class TestScanJsonInput:
                 app,
                 [
                     "scan",
+                    "fs",
                     "--cli-json-input",
                     str(params),
                     "--strategy",
                     "parallel",
-                    "--scanners",
+                    "--add-scanners",
                     "checkov",
                     "--no-offline",
                 ],
@@ -149,7 +150,7 @@ class TestScanJsonInput:
         assert kwargs["strategy"] == ExecutionStrategy.PARALLEL
         # A list flag on the command line replaces the JSON list; it does not
         # extend it.
-        assert list(kwargs["scanners"]) == ["checkov"]
+        assert list(kwargs["add_scanners"]) == ["checkov"]
         assert kwargs["offline"] is False
         # Keys the command line did not mention still come from the file.
         assert kwargs["config_overrides"] == ["global_settings.severity_threshold=LOW"]
@@ -159,7 +160,14 @@ class TestScanJsonInput:
         with patch(RUN_ASH_SCAN) as mock_run:
             result = runner.invoke(
                 app,
-                ["scan", "--strategy", "parallel", "--cli-json-input", str(params)],
+                [
+                    "scan",
+                    "fs",
+                    "--strategy",
+                    "parallel",
+                    "--cli-json-input",
+                    str(params),
+                ],
             )
         assert result.exit_code == 0, result.output
         assert _scan_kwargs(mock_run)["strategy"] == ExecutionStrategy.PARALLEL
@@ -171,7 +179,7 @@ class TestScanJsonInput:
         with patch(RUN_ASH_SCAN) as mock_run:
             result = runner.invoke(
                 app,
-                ["scan", "--cli-json-input", str(params)],
+                ["scan", "fs", "--cli-json-input", str(params)],
                 env={"ASH_SOURCE_DIR": (tmp_path / "from-env").as_posix()},
             )
         assert result.exit_code == 0, result.output
@@ -186,7 +194,7 @@ class TestScanJsonInput:
         with patch(RUN_ASH_SCAN) as mock_run:
             result = runner.invoke(
                 app,
-                ["scan", "--cli-json-input", str(params)],
+                ["scan", "fs", "--cli-json-input", str(params)],
                 env={"ASH_SOURCE_DIR": env_src.as_posix()},
             )
         assert result.exit_code == 0, result.output
@@ -195,7 +203,7 @@ class TestScanJsonInput:
     def test_null_value_means_not_provided(self, runner, tmp_path):
         params = _write(tmp_path, {"strategy": None, "offline": True})
         with patch(RUN_ASH_SCAN) as mock_run:
-            result = runner.invoke(app, ["scan", "--cli-json-input", str(params)])
+            result = runner.invoke(app, ["scan", "fs", "--cli-json-input", str(params)])
         assert result.exit_code == 0, result.output
         assert _scan_kwargs(mock_run)["strategy"] == ExecutionStrategy.PARALLEL
 
@@ -203,7 +211,7 @@ class TestScanJsonInput:
         with patch(RUN_ASH_SCAN) as mock_run:
             result = runner.invoke(
                 app,
-                ["scan", "--cli-json-input", "-"],
+                ["scan", "fs", "--cli-json-input", "-"],
                 input=json.dumps({"strategy": "sequential", "offline": True}),
             )
         assert result.exit_code == 0, result.output
@@ -216,7 +224,7 @@ class TestScanJsonInputErrors:
     def _invoke(self, runner, tmp_path, payload):
         params = _write(tmp_path, payload)
         with patch(RUN_ASH_SCAN) as mock_run:
-            result = runner.invoke(app, ["scan", "--cli-json-input", str(params)])
+            result = runner.invoke(app, ["scan", "fs", "--cli-json-input", str(params)])
         return result, mock_run
 
     def test_unknown_key_names_the_key_and_valid_ones(self, runner, tmp_path):
@@ -244,16 +252,16 @@ class TestScanJsonInputErrors:
 
     def test_list_for_scalar_parameter_is_rejected(self, runner, tmp_path):
         # A string parameter would otherwise accept str(['a', 'b']).
-        result, mock_run = self._invoke(runner, tmp_path, {"source_dir": ["a", "b"]})
+        result, mock_run = self._invoke(runner, tmp_path, {"path": ["a", "b"]})
         assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
-        assert "'source_dir'" in _flat(result.output)
+        assert "'path'" in _flat(result.output)
 
     def test_scalar_for_list_parameter_is_rejected(self, runner, tmp_path):
-        result, mock_run = self._invoke(runner, tmp_path, {"scanners": "bandit"})
+        result, mock_run = self._invoke(runner, tmp_path, {"add_scanners": "bandit"})
         assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
-        assert "'scanners'" in _flat(result.output)
+        assert "'add_scanners'" in _flat(result.output)
 
     def test_boolean_for_non_boolean_parameter_is_rejected(self, runner, tmp_path):
         # int(True) == 1, so without this check `true` would become shard 1.
@@ -288,7 +296,7 @@ class TestScanJsonInputErrors:
         path = tmp_path / "dup.json"
         path.write_text('{"strategy": "parallel", "strategy": "sequential"}')
         with patch(RUN_ASH_SCAN) as mock_run:
-            result = runner.invoke(app, ["scan", "--cli-json-input", str(path)])
+            result = runner.invoke(app, ["scan", "fs", "--cli-json-input", str(path)])
         assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
         assert "strategy" in _flat(result.output)
@@ -297,7 +305,7 @@ class TestScanJsonInputErrors:
         path = tmp_path / "bad.json"
         path.write_text("{not json")
         with patch(RUN_ASH_SCAN) as mock_run:
-            result = runner.invoke(app, ["scan", "--cli-json-input", str(path)])
+            result = runner.invoke(app, ["scan", "fs", "--cli-json-input", str(path)])
         assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
         assert "JSON" in _flat(result.output)
@@ -311,7 +319,9 @@ class TestScanJsonInputErrors:
         # for the other usage errors).
         assert len(str(missing)) > 120
         with patch(RUN_ASH_SCAN) as mock_run:
-            result = runner.invoke(app, ["scan", "--cli-json-input", str(missing)])
+            result = runner.invoke(
+                app, ["scan", "fs", "--cli-json-input", str(missing)]
+            )
         assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
         error_lines = [
@@ -333,7 +343,7 @@ class TestScanJsonInputErrors:
         reason = f"[Errno {raised.value.errno}] {raised.value.strerror}"
         assert raised.value.strerror, reason
         with patch(RUN_ASH_SCAN) as mock_run:
-            result = runner.invoke(app, ["scan", "--cli-json-input", str(path)])
+            result = runner.invoke(app, ["scan", "fs", "--cli-json-input", str(path)])
         assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
         assert not mock_run.called
         assert result.output.count(str(path)) == 1, result.output
@@ -348,7 +358,9 @@ class TestScanJsonInputErrors:
         # the refusal still names the path once, as typed.
         monkeypatch.chdir(tmp_path)
         with patch(RUN_ASH_SCAN) as mock_run:
-            result = runner.invoke(app, ["scan", "--cli-json-input", "./params.json"])
+            result = runner.invoke(
+                app, ["scan", "fs", "--cli-json-input", "./params.json"]
+            )
         assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
         assert not mock_run.called
         assert "./params.json" in result.output, result.output
@@ -372,9 +384,9 @@ class TestScanJsonInputErrors:
         # assertion below to be reached.
         monkeypatch.chdir(tmp_path)
         (tmp_path / "$ASH_TEST_290").mkdir()
-        params = _write(tmp_path, {"source_dir": "$ASH_TEST_290"})
+        params = _write(tmp_path, {"path": "$ASH_TEST_290"})
         with patch(RUN_ASH_SCAN) as mock_run:
-            result = runner.invoke(app, ["scan", "--cli-json-input", str(params)])
+            result = runner.invoke(app, ["scan", "fs", "--cli-json-input", str(params)])
         assert result.exit_code == 0, result.output
         assert _scan_kwargs(mock_run)["source_dir"] == "$ASH_TEST_290"
 
@@ -478,7 +490,9 @@ class TestSkeleton:
         for key, value in (("express", True), ("--express", False)):
             params = _write(tmp_path, {key: value})
             with patch(RUN_ASH_SCAN) as mock_run:
-                result = runner.invoke(app, ["scan", "--cli-json-input", str(params)])
+                result = runner.invoke(
+                    app, ["scan", "fs", "--cli-json-input", str(params)]
+                )
             assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
             assert "--express" in _flat(result.output)
             assert "commandline" in _flat(result.output).replace("-", "")
@@ -486,27 +500,27 @@ class TestSkeleton:
 
     def test_skeleton_does_not_run_the_scan(self, runner):
         with patch(RUN_ASH_SCAN) as mock_run:
-            result = runner.invoke(app, ["scan", "--generate-cli-skeleton"])
+            result = runner.invoke(app, ["scan", "fs", "--generate-cli-skeleton"])
         assert result.exit_code == 0, result.output
         assert not mock_run.called
 
     def test_skeleton_values_are_defaults(self, runner):
         skeleton = json.loads(
-            runner.invoke(app, ["scan", "--generate-cli-skeleton"]).stdout
+            runner.invoke(app, ["scan", "fs", "--generate-cli-skeleton"]).stdout
         )
         assert skeleton["strategy"] == "parallel"
-        assert skeleton["source_dir"] is None
+        assert skeleton["path"] is None
         assert skeleton["progress"] is True
 
     def test_skeleton_round_trips_into_cli_json_input(self, runner, tmp_path):
-        skeleton = runner.invoke(app, ["scan", "--generate-cli-skeleton"]).stdout
+        skeleton = runner.invoke(app, ["scan", "fs", "--generate-cli-skeleton"]).stdout
         path = tmp_path / "skeleton.json"
         path.write_text(skeleton, encoding="utf-8")
 
         with patch(RUN_ASH_SCAN) as from_skeleton:
-            via_json = runner.invoke(app, ["scan", "--cli-json-input", str(path)])
+            via_json = runner.invoke(app, ["scan", "fs", "--cli-json-input", str(path)])
         with patch(RUN_ASH_SCAN) as from_flags:
-            via_flags = runner.invoke(app, ["scan"])
+            via_flags = runner.invoke(app, ["scan", "fs"])
 
         assert via_json.exit_code == 0, via_json.output
         assert via_flags.exit_code == 0, via_flags.output
@@ -514,22 +528,30 @@ class TestSkeleton:
 
     def test_edited_skeleton_round_trips(self, runner, tmp_path):
         skeleton = json.loads(
-            runner.invoke(app, ["scan", "--generate-cli-skeleton"]).stdout
+            runner.invoke(app, ["scan", "fs", "--generate-cli-skeleton"]).stdout
         )
         skeleton["strategy"] = "sequential"
-        skeleton["scanners"] = ["bandit"]
+        skeleton["add_scanners"] = ["bandit"]
         path = _write(tmp_path, skeleton)
         with patch(RUN_ASH_SCAN) as mock_run:
-            result = runner.invoke(app, ["scan", "--cli-json-input", str(path)])
+            result = runner.invoke(app, ["scan", "fs", "--cli-json-input", str(path)])
         assert result.exit_code == 0, result.output
         kwargs = _scan_kwargs(mock_run)
         assert kwargs["strategy"] == ExecutionStrategy.SEQUENTIAL
-        assert list(kwargs["scanners"]) == ["bandit"]
+        assert list(kwargs["add_scanners"]) == ["bandit"]
 
 
-@pytest.mark.parametrize("command", ["scan", "build-image", "report", "merge"])
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param(["scan", "fs"], id="scan-fs"),
+        pytest.param(["container", "build"], id="container-build"),
+        pytest.param(["results", "report"], id="results-report"),
+        pytest.param(["results", "merge"], id="results-merge"),
+    ],
+)
 def test_commands_expose_both_options(runner, command):
-    result = runner.invoke(app, [command, "--help"])
+    result = runner.invoke(app, [*command, "--help"])
     assert result.exit_code == 0, result.output
     # Rich styles each dash-separated segment of a flag separately.
     plain = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
@@ -537,9 +559,16 @@ def test_commands_expose_both_options(runner, command):
     assert "--generate-cli-skeleton" in plain
 
 
-@pytest.mark.parametrize("command", ["build-image", "report", "merge"])
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param(["container", "build"], id="container-build"),
+        pytest.param(["results", "report"], id="results-report"),
+        pytest.param(["results", "merge"], id="results-merge"),
+    ],
+)
 def test_other_commands_produce_a_skeleton(runner, command):
-    result = runner.invoke(app, [command, "--generate-cli-skeleton"])
+    result = runner.invoke(app, [*command, "--generate-cli-skeleton"])
     assert result.exit_code == 0, result.output
     assert isinstance(json.loads(result.stdout), dict)
 

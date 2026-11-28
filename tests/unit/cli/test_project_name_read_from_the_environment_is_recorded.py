@@ -158,6 +158,9 @@ def runs(tmp_path_factory):
     env = stand_in.child_aws_env(work, endpoint)
     env.update(ASH_PROBE_VALUE=CANARY, COLUMNS="300")
     env.pop("ASH_CONFIG", None)
+    # A caller's ASH_SCANNERS reaches the scan through the deprecated --scanners
+    # option, and --add-scanners does not override it.
+    env.pop("ASH_SCANNERS", None)
 
     (work / "src").mkdir(parents=True)
     (work / "src" / "app.py").write_text("print('hello')\n", encoding="utf-8")
@@ -213,7 +216,13 @@ def runs(tmp_path_factory):
             before = len(bodies)
             steps[f"scan{index}"] = ash(*scan_argv, *(overrides if index == 0 else []))
             sent_by += [f"scan{index}"] * (len(bodies) - before)
-        merge_argv = ["merge", "--output-dir", "merged", "--no-fail-on-findings"]
+        merge_argv = [
+            "results",
+            "merge",
+            "--output-dir",
+            "merged",
+            "--no-fail-on-findings",
+        ]
         for index in (0, 1):
             merge_argv += [
                 "--results",
@@ -225,6 +234,7 @@ def runs(tmp_path_factory):
         for fmt in ("s3", "cloudwatch-logs"):
             before = len(bodies)
             steps[f"report-{fmt}"] = ash(
+                "results",
                 "report",
                 "--format",
                 fmt,

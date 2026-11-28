@@ -58,7 +58,7 @@ def test_main_cli_default_command(mock_run_ash_scan):
 def test_main_cli_with_source_dir(mock_run_ash_scan):
     """Test main CLI with source directory."""
     runner = CliRunner()
-    result = runner.invoke(app, ["--source-dir", "/test/source"])
+    result = runner.invoke(app, ["scan", "fs", "/test/source"])
 
     # Verify run_ash_scan was called with correct source_dir
     mock_run_ash_scan.assert_called_once()
@@ -73,7 +73,7 @@ def test_main_cli_with_source_dir(mock_run_ash_scan):
 def test_main_cli_with_output_dir(mock_run_ash_scan):
     """Test main CLI with output directory."""
     runner = CliRunner()
-    result = runner.invoke(app, ["--output-dir", "/test/output"])
+    result = runner.invoke(app, ["scan", "fs", "--output-dir", "/test/output"])
 
     # Verify run_ash_scan was called with correct output_dir
     mock_run_ash_scan.assert_called_once()
@@ -91,7 +91,8 @@ def test_main_cli_with_multiple_options(mock_run_ash_scan):
     result = runner.invoke(
         app,
         [
-            "--source-dir",
+            "scan",
+            "fs",
             "/test/source",
             "--output-dir",
             "/test/output",

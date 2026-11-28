@@ -63,7 +63,15 @@ def test_the_plugin_context_names_the_directory_the_results_came_from(scanned_ro
         ),
     ):
         result = CliRunner().invoke(
-            app, ["report", "--format", "sarif", "--output-dir", str(scanned_root)]
+            app,
+            [
+                "results",
+                "report",
+                "--format",
+                "sarif",
+                "--output-dir",
+                str(scanned_root),
+            ],
         )
 
     assert result.exit_code == 0, result.output
@@ -86,7 +94,15 @@ def test_the_reports_checks_look_in_the_scans_reports_directory(scanned_root):
         ),
     ):
         result = CliRunner().invoke(
-            app, ["report", "--format", "sarif", "--output-dir", str(scanned_root)]
+            app,
+            [
+                "results",
+                "report",
+                "--format",
+                "sarif",
+                "--output-dir",
+                str(scanned_root),
+            ],
         )
 
     assert result.exit_code == 0, result.output
@@ -129,7 +145,15 @@ def test_a_file_a_reporter_writes_beside_its_report_lands_where_the_checks_looke
     monkeypatch.setattr(report_module, "refuse_report_names_outside", recording)
 
     result = CliRunner().invoke(
-        app, ["report", "--format", "text", "--output-dir", str(scanned_root)]
+        app,
+        [
+            "results",
+            "report",
+            "--format",
+            "text",
+            "--output-dir",
+            str(scanned_root),
+        ],
     )
 
     assert result.exit_code == 0, result.output
@@ -162,7 +186,7 @@ def test_a_plain_output_directory_is_still_used_as_given(tmp_path):
         ),
     ):
         result = CliRunner().invoke(
-            app, ["report", "--format", "sarif", "--output-dir", str(output)]
+            app, ["results", "report", "--format", "sarif", "--output-dir", str(output)]
         )
 
     assert result.exit_code == 0, result.output

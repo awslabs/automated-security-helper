@@ -39,7 +39,7 @@ def _flat(output: str) -> str:
 
 def _scan(args, **kwargs):
     with patch(RUN_ASH_SCAN) as mock_run:
-        result = CliRunner().invoke(app, ["scan", *args], **kwargs)
+        result = CliRunner().invoke(app, ["scan", "fs", *args], **kwargs)
     return result, mock_run
 
 
@@ -256,7 +256,7 @@ def test_a_document_nested_too_deeply_is_refused_not_a_traceback(tmp_path, monke
     (3.14's decoder followed 100,000 levels and then refused the unknown key), so
     the parser's refusal is forced rather than provoked."""
     path = tmp_path / "deep.json"
-    document = '{"source_dir": ' + "[" * 100000 + "]" * 100000 + "}"
+    document = '{"path": ' + "[" * 100000 + "]" * 100000 + "}"
     path.write_text(document, encoding="utf-8")
     real_loads = json.loads
 
@@ -359,7 +359,7 @@ def test_the_skeleton_is_printed_whatever_document_was_named(tmp_path):
     )
 
     assert result.exit_code == 0, result.output
-    assert "source_dir" in json.loads(result.stdout)
+    assert "path" in json.loads(result.stdout)
     assert not mock_run.called
 
 
