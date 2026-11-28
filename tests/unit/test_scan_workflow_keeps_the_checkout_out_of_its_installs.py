@@ -538,6 +538,36 @@ _FRAGMENT_ON_A_COMMAND_LINE = [
     ),
 ]
 
+# A step that writes a script with cat and then runs it. Its fragment is only on the
+# script's #! line, which names the interpreter the script runs under: the line that
+# opens the heredoc holds cat. Planted like the texts above.
+_FRAGMENT_ONLY_ON_A_SHEBANG_LINE = [
+    pytest.param(
+        "uv run",
+        "set -euo pipefail\n"
+        "cat > \"${RUNNER_TEMP}/helper\" <<'EOF'\n"
+        "#!/usr/bin/env -S uv run --script\n"
+        "import sys\n"
+        "print(sys.version)\n"
+        "EOF\n"
+        'chmod +x "${RUNNER_TEMP}/helper"\n'
+        '"${RUNNER_TEMP}/helper"\n',
+        id="uv run only on the shebang line of a script the step runs",
+    ),
+    pytest.param(
+        "python",
+        "set -euo pipefail\n"
+        "cat > \"${RUNNER_TEMP}/helper\" <<'EOF'\n"
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        "print(sys.version)\n"
+        "EOF\n"
+        'chmod +x "${RUNNER_TEMP}/helper"\n'
+        '"${RUNNER_TEMP}/helper"\n',
+        id="python only on the shebang line of a script the step runs",
+    ),
+]
+
 
 @pytest.mark.unit
 class TestTheLocatorReadsCommandsNotComments:
@@ -574,6 +604,19 @@ class TestTheLocatorReadsCommandsNotComments:
         """
         assert _run_contains(run, fragment), (
             f"the locator misses a step that runs {fragment!r}:\n{run}"
+        )
+
+    @pytest.mark.parametrize(("fragment", "run"), _FRAGMENT_ONLY_ON_A_SHEBANG_LINE)
+    def test_a_fragment_only_on_a_shebang_line_finds_the_step(self, fragment, run):
+        """A fragment only on the ``#!`` line of a script the step runs finds the step.
+
+        The step writes the script with ``cat`` and then runs it, which starts the
+        interpreter the ``#!`` line names. That is the one line holding the fragment:
+        the line that opens the heredoc holds ``cat``. Missed, the step would be
+        checked by no row at all.
+        """
+        assert _run_contains(run, fragment), (
+            f"the locator misses a step that runs {fragment!r} from a #! line:\n{run}"
         )
 
     def test_every_step_found_holds_its_fragment_on_a_command_line(self):
