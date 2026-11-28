@@ -166,3 +166,37 @@ def test_the_lint_symbol_path_is_shown_once(tmp_path: Path) -> None:
         result.output
     )
     _assert_shown_once(result.output)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("written", "shown"),
+    [
+        pytest.param("a\\x1bb.py", "'a\\x1bb.py' no longer exists", id="gone"),
+        pytest.param("a\\x1bb*.py", "'a\\x1bb*.py' is a pattern", id="pattern"),
+    ],
+)
+def test_the_lock_refusal_shows_the_path_once(
+    tmp_path: Path, written: str, shown: str
+) -> None:
+    """The linter's refusal of a symbol suppression that ``.ash.lock`` does not
+    record quotes its path as written, for a file that is gone and for a
+    pattern, and the lint sink shows it once."""
+    from automated_security_helper.cli.config import config_app
+
+    config = tmp_path / ".ash.yaml"
+    config.write_text(
+        "project_name: demo\n"
+        "global_settings:\n"
+        "  suppressions:\n"
+        "    - rule_id: R1\n"
+        f'      path: "{written}"\n'
+        "      symbol: MyClass.my_method\n"
+        "      reason: probe\n",
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(config_app, ["lint", "--config", str(config)])
+
+    assert shown in result.output, result.output
+    _assert_shown_once(result.output)
