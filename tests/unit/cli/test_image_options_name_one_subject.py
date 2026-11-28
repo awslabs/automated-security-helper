@@ -50,8 +50,13 @@ class TestExclusivityIsRefusedBeforeAnyWork:
     def test_an_image_beside_source_dir_names_the_flag(self, tmp_path):
         result = _scan("fs", "--image", IMAGE_REF, "--source-dir", str(tmp_path))
         assert result.exit_code == ASH_EXIT_USAGE_ERROR
-        assert "--source-dir" in result.output
-        assert "one scan has one subject" in result.output
+        # The refusal's own clause, not the flag anywhere in the output: `scan fs`
+        # prints the deprecation line of --source-dir before it refuses, and that
+        # line names the flag whatever the refusal says.
+        assert (
+            "--image cannot be combined with --source-dir: one scan has one subject"
+            in result.output
+        ), result.output
 
     def test_an_image_beside_ash_source_dir_names_the_variable(
         self, tmp_path, monkeypatch
