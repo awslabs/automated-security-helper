@@ -18,6 +18,9 @@ Also the cache's trust boundary and the transfer bound, the fix round's rows:
   entry was written is not served: the entry is evicted and treated as cold;
 - the ``max_sdist_mb`` bound holds against the bytes actually streamed, not
   only against the lock's own (attacker-aligned) size claim.
+
+And the path with the syft scanner disabled: which packages and lockfiles it
+names, for which of grype and trivy, and what it does not set up.
 """
 
 from __future__ import annotations
@@ -40,6 +43,7 @@ from automated_security_helper.plugin_modules.ash_builtin.converters import (
     sdist_lock_harvester as harvester_module,
 )
 from automated_security_helper.utils import download_utils
+from automated_security_helper.utils.scanned_tree import TreeInputRefused
 from automated_security_helper.utils.sdist_harvest import (
     HARVEST_DIR_NAME,
     HARVEST_MANIFEST_NAME,
@@ -612,3 +616,261 @@ def test_cache_index_is_written_atomically(
     assert json.loads(index[0].read_text(encoding="utf-8"))["lockfiles"] == [
         "Cargo.lock"
     ]
+
+
+# ----------------------------------------------------------------------
+# With syft off: what is named, for whom, and what is left alone
+# ----------------------------------------------------------------------
+#
+# With the syft scanner disabled nothing is fetched. grype and trivy still read
+# the harvested lockfiles, so for each of them that runs the converter names the
+# packages it did not harvest, and with neither running it has nothing to say.
+
+#: A refusal reason no real check writes, so a test can tell its record apart.
+PLANTED_REFUSAL = "a refusal planted by the test"
+
+#: Bytes that are not a TOML document: a bare key may not hold a space.
+NOT_TOML = b"this is = [not toml\n"
+
+
+def _syft_off_config(*readers_on: str):
+    """A default config with syft off and only ``readers_on`` of grype and trivy on."""
+    config = get_default_config()
+    config.scanners.syft.enabled = False
+    for reader in ("grype", "trivy"):
+        getattr(config.scanners, reader).enabled = reader in readers_on
+    return config
+
+
+def _refuse_every_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every lockfile the converter opens a refused tree input."""
+
+    def refuse(self, path):
+        raise TreeInputRefused(path="uv.lock", reason=PLANTED_REFUSAL)
+
+    monkeypatch.setattr(SdistLockHarvester, "open_source_file", refuse)
+
+
+def test_with_syft_grype_and_trivy_off_the_tree_is_not_walked(
+    harvest_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With syft, grype and trivy all off, nothing reads a harvest.
+
+    The converter returns before the scan-set walk and writes no record, so a
+    setup that runs none of them gets no record whose claim does not apply to it.
+    """
+    _source, _output, opener, build = harvest_env
+    converter = build(config=_syft_off_config())
+    walked: List[List[str]] = []
+    real = SdistLockHarvester._lockfiles_in_scan_set
+
+    def spy(self, names):
+        walked.append(list(names))
+        return real(self, names)
+
+    monkeypatch.setattr(SdistLockHarvester, "_lockfiles_in_scan_set", spy)
+
+    assert converter.convert() == []
+    assert walked == [], "nothing reads a harvest, so the tree is not walked"
+    assert converter.refused_inputs == []
+    assert converter.failed_inputs == []
+    assert opener.calls == []
+
+
+@pytest.mark.parametrize("on", ["grype", "trivy"])
+def test_with_syft_off_the_record_names_only_the_readers_that_run(
+    harvest_env, on: str
+) -> None:
+    """The record says whose input misses the packages: the reader that runs only."""
+    _source, _output, opener, build = harvest_env
+    off = "trivy" if on == "grype" else "grype"
+    converter = build(config=_syft_off_config(on))
+
+    assert converter.convert() == []
+    assert opener.calls == []
+    (record,) = converter.refused_inputs
+    assert f"missing from the input of {on}" in record.reason
+    assert off not in record.reason
+    assert "fixturepkg 0.1.0" in record.reason
+
+
+def test_with_syft_off_and_both_readers_on_the_record_names_both(harvest_env) -> None:
+    _source, _output, _opener, build = harvest_env
+    converter = build(config=_syft_off_config("grype", "trivy"))
+
+    assert converter.convert() == []
+    (record,) = converter.refused_inputs
+    assert "missing from the input of grype and trivy" in record.reason
+    assert record.limit is None
+
+
+def test_with_syft_off_the_record_does_not_speak_of_an_sbom(harvest_env) -> None:
+    """syft makes the SBOM, so with syft off there is none for the record to name.
+
+    It names the packages that were not harvested instead.
+    """
+    _source, _output, _opener, build = harvest_env
+    converter = build(config=_syft_off_config("grype", "trivy"))
+
+    converter.convert()
+    (record,) = converter.refused_inputs
+    assert "SBOM" not in record.reason
+    assert "not harvested: fixturepkg 0.1.0" in record.reason
+
+
+def test_with_syft_off_a_rejected_entry_keeps_its_own_cause(harvest_env) -> None:
+    """An entry the lock parse rejected would not be fetched with syft on either.
+
+    Its record says why, not that syft is off.
+    """
+    _source, _output, opener, build = harvest_env
+    converter = build(
+        lock_bytes=fixture_uv_lock(SDIST_URL, WHEEL_URL, sdist_sha256="z" * 64),
+        config=_syft_off_config("grype", "trivy"),
+    )
+
+    assert converter.convert() == []
+    assert opener.calls == []
+    (record,) = converter.refused_inputs
+    assert "not a 64-character hex digest" in record.reason
+    assert "scanners.syft.enabled" not in record.reason
+
+
+def test_with_syft_off_an_entry_with_no_sha256_pin_keeps_its_own_cause(
+    harvest_env,
+) -> None:
+    """An entry that pins no sdist by sha256 authorizes no fetch whatever syft says."""
+    _source, _output, opener, build = harvest_env
+    lock = fixture_uv_lock(SDIST_URL, WHEEL_URL)
+    pinned = f'sdist = {{ url = "{SDIST_URL}", hash = "sha256:'.encode()
+    assert lock.count(pinned) == 1
+    lock = lock.replace(
+        pinned, f'sdist = {{ url = "{SDIST_URL}", hash = "md5:'.encode()
+    )
+    converter = build(lock_bytes=lock, config=_syft_off_config("grype", "trivy"))
+
+    assert converter.convert() == []
+    assert opener.calls == []
+    (record,) = converter.refused_inputs
+    assert "pins no sdist by sha256" in record.reason
+    assert "scanners.syft.enabled" not in record.reason
+
+
+def test_with_syft_off_a_refused_lockfile_is_still_named(
+    harvest_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A lockfile the tree refuses cannot name its packages, so it is named itself.
+
+    The record is the one syft on writes: the tree's refusal, with no limit.
+    """
+    _source, _output, _opener, build = harvest_env
+    converter = build(config=_syft_off_config("grype", "trivy"))
+    _refuse_every_open(monkeypatch)
+
+    assert converter.convert() == []
+    (record,) = converter.refused_inputs
+    assert record.path == "uv.lock"
+    assert PLANTED_REFUSAL in record.reason
+    assert record.limit is None
+    assert converter.failed_inputs == []
+
+
+def test_with_syft_off_a_lockfile_that_does_not_parse_is_named_and_fails_nothing(
+    harvest_env,
+) -> None:
+    """With syft off nothing would have been fetched from it, so it fails no gate.
+
+    It is named in a skip record with no limit, not recorded as a failed input.
+    """
+    _source, _output, opener, build = harvest_env
+    converter = build(lock_bytes=NOT_TOML, config=_syft_off_config("grype", "trivy"))
+
+    assert converter.convert() == []
+    assert opener.calls == []
+    assert converter.failed_inputs == []
+    (record,) = converter.refused_inputs
+    assert HARVEST_SKIPPED_RULE in record.reason
+    assert "not a TOML document" in record.reason
+    assert "scanners.syft.enabled" in record.reason
+    assert record.limit is None
+
+
+def test_control_with_syft_on_a_lockfile_that_does_not_parse_is_a_failed_input(
+    harvest_env,
+) -> None:
+    """With syft on the harvest set out to read the lockfile, so it is lost coverage."""
+    _source, _output, opener, build = harvest_env
+    converter = build(lock_bytes=NOT_TOML)
+
+    assert converter.convert() == []
+    assert opener.calls == []
+    (failed,) = converter.failed_inputs
+    assert "not a TOML document" in failed.reason
+    assert converter.refused_inputs == []
+
+
+def test_control_with_syft_on_a_refused_lockfile_is_a_refused_input(
+    harvest_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _source, _output, opener, build = harvest_env
+    converter = build()
+    _refuse_every_open(monkeypatch)
+
+    assert converter.convert() == []
+    assert opener.calls == []
+    (record,) = converter.refused_inputs
+    assert PLANTED_REFUSAL in record.reason
+    assert converter.failed_inputs == []
+
+
+def test_candidate_input_count_with_syft_off_counts_what_the_harvest_walks(
+    harvest_env,
+) -> None:
+    """With syft off and a reader on, convert() still walks the lockfiles to name
+    what it does not fetch, so the count is the one syft on gives."""
+    _source, _output, _opener, build = harvest_env
+    converter = build(config=_syft_off_config("grype", "trivy"))
+
+    assert converter.candidate_input_count() == 1
+
+
+def test_candidate_input_count_with_syft_grype_and_trivy_off_is_zero(
+    harvest_env,
+) -> None:
+    _source, _output, _opener, build = harvest_env
+    converter = build(config=_syft_off_config())
+
+    assert converter.candidate_input_count() == 0
+
+
+def test_with_syft_off_no_cache_no_staging_and_no_results_dir_are_made(
+    harvest_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With syft off nothing is fetched, so nothing is set up for a fetch.
+
+    No cache root is asked for (its checks can warn), no per-run staging
+    directory is made and no results directory is created. The packages are
+    still named, which shows the syft-off path ran.
+    """
+    _source, _output, _opener, build = harvest_env
+    converter = build(config=_syft_off_config("grype", "trivy"))
+    asked: List[object] = []
+    made: List[object] = []
+    real_temporary_directory = harvester_module.tempfile.TemporaryDirectory
+
+    def cache_root_spy(self, configured):
+        asked.append(configured)
+        return None
+
+    def staging_spy(*args, **kwargs):
+        made.append(kwargs.get("prefix"))
+        return real_temporary_directory(*args, **kwargs)
+
+    monkeypatch.setattr(SdistLockHarvester, "_cache_root", cache_root_spy)
+    monkeypatch.setattr(harvester_module.tempfile, "TemporaryDirectory", staging_spy)
+
+    assert converter.convert() == []
+    assert asked == [], "no cache root is asked for"
+    assert made == [], "no staging directory is made"
+    assert not converter.results_dir.exists()
+    assert len(converter.refused_inputs) == 1

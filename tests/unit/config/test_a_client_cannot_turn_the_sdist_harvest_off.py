@@ -8,7 +8,8 @@ distributions a lockfile pins embed, and the findings are read from that SBOM.
 Two settings turn it off: ``scanners.syft.options.sdist_harvest.enabled``, and
 the ``sdist-lock-harvester`` converter's own ``enabled``, which decides whether
 the converter runs at all. Disabling the syft scanner itself is a client's
-choice: the converter then records a visible skip and fetches nothing.
+choice: the converter then fetches nothing, and while grype or trivy runs it
+names what it did not fetch in a visible skip.
 
 A client has two routes to a setting: a runtime patch op, which
 ``check_runtime_ops`` judges, and a config file an MCP client delivers, which
@@ -18,6 +19,8 @@ or that writes neither setting, draws no denial at either one.
 """
 
 from __future__ import annotations
+
+from types import SimpleNamespace
 
 import pytest
 
@@ -200,3 +203,93 @@ def test_the_converter_default_is_the_converters_own() -> None:
     assert ccp.CONVERTER_SECTION_DEFAULTS[("sdist-lock-harvester", "enabled")] == (
         SdistLockHarvesterConverterConfig().enabled
     )
+
+
+# The rule that forgives a delivered converter default, read the way the scanner
+# option rule is read: by JSON value, under every spelling of the section, and
+# against the default only where the trusted section holds no value.
+
+
+def _converter_default_written(section: str, value: object, trusted: object) -> bool:
+    """Whether a delivered ``converters.<section>.enabled: <value>`` is forgiven.
+
+    ``trusted`` is what the trusted config's ``get_plugin_config`` returns for the
+    converter.
+    """
+    base = SimpleNamespace(get_plugin_config=lambda _kind, _name: trusted)
+    document = {"converters": {section: {"enabled": value}}}
+    denial = SimpleNamespace(pointer=f"/converters/{section}/enabled", from_patch=False)
+    return ccp._writes_plugin_default(document, denial, base)
+
+
+@pytest.mark.parametrize("value", [1, "true", 1.0, "yes"])
+def test_a_value_equal_to_the_converter_default_only_in_python_is_not_it(
+    value: object,
+) -> None:
+    """``enabled: 1`` is not the default ``true`` as JSON, and no string is."""
+    assert (
+        _converter_default_written("sdist-lock-harvester", value, trusted={}) is False
+    )
+
+
+def test_control_the_exact_converter_default_is_forgiven() -> None:
+    assert _converter_default_written("sdist-lock-harvester", True, trusted={}) is True
+
+
+@pytest.mark.parametrize(
+    "section", ["sdist-lock-harvester", "sdist_lock_harvester", "SdistLockHarvester"]
+)
+def test_the_converter_default_is_read_under_each_spelling_of_its_section(
+    section: str,
+) -> None:
+    """The section is found under each spelling ``plugin_key_lookup_names`` reads."""
+    assert _converter_default_written(section, True, trusted={}) is True
+
+
+def test_control_another_converters_section_is_not_forgiven() -> None:
+    assert _converter_default_written("archive", True, trusted={}) is False
+
+
+@pytest.mark.parametrize(("value", "forgiven"), [(True, True), (False, False)])
+def test_a_trusted_section_without_enabled_is_compared_with_the_default(
+    value: bool, forgiven: bool
+) -> None:
+    """A trusted section that holds no ``enabled`` has no value of its own there.
+
+    The delivered value is then compared with the converter's default.
+    """
+    trusted = {"name": "sdist-lock-harvester"}
+    assert (
+        _converter_default_written("sdist-lock-harvester", value, trusted=trusted)
+        is forgiven
+    )
+
+
+def test_control_a_trusted_enabled_leaves_the_rule_to_the_denial() -> None:
+    """Where the trusted section holds ``enabled``, the denial already compared the
+    delivered value with it, so this rule forgives nothing."""
+    assert (
+        _converter_default_written(
+            "sdist-lock-harvester", True, trusted={"enabled": True}
+        )
+        is False
+    )
+
+
+@pytest.mark.parametrize("section", ["sdist_lock_harvester", "SdistLockHarvester"])
+def test_a_delivered_file_cannot_turn_the_harvest_off_under_another_spelling(
+    tmp_path, section: str
+) -> None:
+    """Another spelling of the section does not get past the default policy."""
+    pointer = f"/converters/{section}/enabled"
+    refused = _refused_pointers({"converters": {section: {"enabled": False}}}, tmp_path)
+    assert pointer in refused, f"{pointer} was not refused; refused at {refused}"
+
+
+@pytest.mark.parametrize("section", ["sdist_lock_harvester", "SdistLockHarvester"])
+def test_a_delivered_file_repeating_the_default_under_another_spelling_is_accepted(
+    tmp_path, section: str
+) -> None:
+    pointer = f"/converters/{section}/enabled"
+    refused = _refused_pointers({"converters": {section: {"enabled": True}}}, tmp_path)
+    assert pointer not in refused, f"refused at {refused}"
