@@ -301,7 +301,7 @@ def test_the_equals_spelling_of_the_wrappers_own_value_options(runner, tmp_path)
             f"--source-dir={source}",
             f"--output-dir={out}",
             "--build-target=ci",
-            "--scanners",
+            "--add-scanners",
             "bandit",
         ],
     )
@@ -312,7 +312,7 @@ def test_the_equals_spelling_of_the_wrappers_own_value_options(runner, tmp_path)
     mounts = _mounts(run)
     assert Path(mounts["/src"]["source"]).resolve() == source.resolve(), run
     assert Path(mounts["/out"]["source"]).resolve() == out.resolve(), run
-    assert _inner(run, image) == ["ash", *SANDBOX_OFF, "--scanners", "bandit"], run
+    assert _inner(run, image) == ["ash", *SANDBOX_OFF, "--add-scanners", "bandit"], run
 
 
 @pytest.mark.parametrize(
