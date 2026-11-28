@@ -2552,12 +2552,13 @@ def test_a_scanners_own_run_started_at_the_filesystem_root_keeps_the_operators_u
         said[label] = [
             text for _, text in uv_warnings if text.startswith("UV_CONSTRAINT ")
         ]
-    assert seen["operator"] == {str(operator)}, seen
-    assert said["operator"] == [], said
     # Control: started in the same directory, a path inside the source tree is still
     # left out, and named in the warning.
     assert seen["inside"] == {None}, seen
     assert said["inside"] == [f"UV_CONSTRAINT {_INSIDE_REASON}"], said
+    # The operator's own file outside the tree reaches uv, and no line names it.
+    assert seen["operator"] == {str(operator)}, seen
+    assert said["operator"] == [], said
 
 
 @pytest.mark.unit
@@ -2591,10 +2592,11 @@ def test_a_runners_run_started_at_the_filesystem_root_keeps_the_operators_uv_pat
             run["command"] for run in spawns.runs
         ]
         seen[label] = {_effective(run["env"]).get("UV_CONSTRAINT") for run in runs}
-    assert seen["operator"] == {str(operator)}, seen
-    # Control: on the same run, a path inside the tree the caller names is still left
-    # out.
+    # Control: on the same route, a path inside the tree the caller names is still
+    # left out.
     assert seen["inside"] == {None}, seen
+    # The operator's own file outside the tree reaches uv.
+    assert seen["operator"] == {str(operator)}, seen
 
 
 # Spellings of a path that name the tree without lying under a root as written.
