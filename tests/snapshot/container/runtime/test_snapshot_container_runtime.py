@@ -135,6 +135,13 @@ def _wide(monkeypatch):
     monkeypatch.setenv("COLUMNS", "1000")
 
 
+@pytest.fixture(autouse=True)
+def _no_scanners_variable(monkeypatch):
+    # ASH_SCANNERS is the environment variable of the deprecated --scanners. A
+    # caller's value would make the host's --only-scanners a usage error.
+    monkeypatch.delenv("ASH_SCANNERS", raising=False)
+
+
 @pytest.fixture
 def runner_store_in_environ(monkeypatch):
     """Give a podman that ASH starts in this process the developer's image store.

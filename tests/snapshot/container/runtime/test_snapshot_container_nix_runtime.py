@@ -56,5 +56,7 @@ def test_nix_scan_of_the_fixture(run_cli, snapshot, fixture_repo, monkeypatch):
     monkeypatch.setenv("COLUMNS", "1000")
     monkeypatch.delenv("ASH_NIX_FLAKE_REF", raising=False)
     monkeypatch.delenv("ASH_IN_NIX", raising=False)
+    # A caller's ASH_SCANNERS would make --only-scanners a usage error on the host.
+    monkeypatch.delenv("ASH_SCANNERS", raising=False)
     monkeypatch.setattr(sys, "argv", ["ash", *NIX_SCAN])
     assert run_cli(NIX_SCAN) == snapshot
