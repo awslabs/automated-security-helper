@@ -142,6 +142,28 @@ def test_an_error_whose_text_cannot_be_rendered_is_still_reported():
     assert "could not be rendered" in text
 
 
+def test_an_os_error_whose_text_cannot_be_rendered_is_still_reported():
+    # Red before the fix: an OSError keeps Python's own text, which renders its
+    # argument, so this one's text cannot be made. error_text named it by its type,
+    # then rendered it a second time, to name its files as given, with no guard, and
+    # raised what the argument's __str__ raised; so did traceback_text.
+    error = OSError(_Unrenderable())
+    try:
+        try:
+            raise error
+        except OSError:
+            raise RuntimeError("the record could not be removed")
+    except RuntimeError as caught:
+        wrapper = caught
+
+    assert error_text(error) == "<OSError: its message could not be rendered>"
+    # Raised while the OSError was handled, so the OSError is in its chain.
+    assert error_text(wrapper) == "the record could not be removed"
+    shown = traceback_text(error)
+    assert shown.startswith("Traceback (most recent call last):"), shown
+    assert "OSError" in shown, shown
+
+
 def test_an_unexpected_unrenderable_error_is_logged_as_text():
     error = _Unrenderable()
     logger = MagicMock()

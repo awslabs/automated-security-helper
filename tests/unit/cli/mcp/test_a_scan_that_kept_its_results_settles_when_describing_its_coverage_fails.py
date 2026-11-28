@@ -880,6 +880,51 @@ async def test_a_history_discard_that_raises_still_puts_the_previous_results_bac
 
 
 @pytest.mark.asyncio
+async def test_a_history_discard_failing_on_an_unrenderable_os_error_puts_results_back(
+    tmp_path, monkeypatch
+):
+    """The case above with an OSError: the record's removal fails with an OSError that
+    keeps Python's own text, built from an argument whose ``__str__`` raises. The
+    history helper renders it with ``error_text``, which names it by its type, so the
+    helper returns and the previous results are put back. Fails before the fix:
+    ``error_text`` rendered an OSError's text a second time, to name its files as
+    given, with no guard, so the helper raised, the guard at the call raised on the
+    same error, and the error ended the runner's task."""
+    from automated_security_helper.utils import scan_history
+
+    removals: List[Tuple[Any, Any]] = []
+    discards: List[str] = []
+    real_discard_history_record = ras.discard_history_record
+
+    def a_removal_that_fails(*args: Any, **kwargs: Any) -> bool:
+        removals.append((args, kwargs))
+        raise OSError(_AnErrorWhoseMessageCannotBeShown())
+
+    def a_discard_that_is_recorded(results: Any, output_dir: Path) -> None:
+        discards.append("called")
+        real_discard_history_record(results, output_dir)
+        discards.append("returned")
+
+    monkeypatch.setattr(scan_history, "discard_run_record", a_removal_that_fails)
+    monkeypatch.setattr(ras, "discard_history_record", a_discard_that_is_recorded)
+
+    def a_scan_that_returns_its_results(*args: Any, **kwargs: Any) -> Any:
+        return AshAggregatedResults()
+
+    entry, drops, restores = await _run(
+        tmp_path,
+        monkeypatch,
+        a_scan_that_returns_its_results,
+        cancel_during_the_scan=True,
+    )
+
+    assert entry.status == MCScanStatus.COMPLETED, (entry.status, entry.error_message)
+    assert len(removals) == 1, removals
+    assert discards == ["called", "returned"], discards
+    assert drops == [] and len(restores) == 1, (drops, restores)
+
+
+@pytest.mark.asyncio
 async def test_a_history_helper_that_raises_still_puts_the_previous_results_back(
     tmp_path, monkeypatch
 ):
