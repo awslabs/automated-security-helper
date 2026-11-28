@@ -15,9 +15,10 @@ default: a literal that equals or contains a value the server read is shown as
 written, the same as one that does not, and a guess gets the same answer as a
 miss. A reference resolves to nothing when the text it resolves to (the
 variable's value when the variable is set, even to blank text, its default
-otherwise) and any text after it are blank. The loader then gives the option no
-value and no mark, so the marker shows ``null``, for a key as for a value: it
-tells whether that text is blank, never what it is. With an empty, blank or
+otherwise, ``None`` read as empty) and any text after it are blank. The loader
+then gives the place the reference sits no value and no mark, so the marker
+shows ``null`` there, for a key as for a value: it tells whether that text is
+blank, never what it is. With an empty, blank or
 ``None`` default that is whether the variable holds text; with any other
 default, whether the variable is set to blank text. A reference with no default
 fails the load while its variable is unset.

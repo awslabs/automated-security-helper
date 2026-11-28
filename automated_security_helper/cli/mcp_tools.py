@@ -5178,9 +5178,11 @@ def mcp_get_config(
         variable or from its default. A reference resolves to nothing when the
         text it resolves to (the variable's value when the variable is set,
         even to blank text, and its default otherwise, ``None`` read as empty),
-        together with any text the file wrote after it, is blank: the option
-        then has no value and no reference to show, and VALUE is ``null`` (a
-        mapping key that resolves to nothing is shown as ``null`` too). So
+        together with any text the file wrote after it, is blank: the place
+        the reference sits then has no value and no reference to show, and
+        VALUE shows ``null`` there, so a list that holds such a reference is
+        shown with ``null`` in its place (a mapping key that resolves to
+        nothing is shown as ``null`` too). So
         VALUE tells whether that text is blank, never what it is: with an
         empty, blank or ``None`` default, whether the variable holds text; with
         any other default, whether the variable is set to blank text. A

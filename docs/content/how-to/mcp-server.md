@@ -648,12 +648,15 @@ refuses such a config too, with exit code 3. The refusal covers the file a clien
 `ASH_MCP_ALLOWED_CONFIG_ROOTS` names keeps its references.
 
 `get_config` never returns a value that a config read from the environment, since the server's
-environment is not the client's. The resolved config shows such a value as `<from ${VAR}>`, and
-with `raw` the reference appears as the file wrote it. A reference that resolves to blank text
-has no value, and the resolved config shows `null` there. That text is the variable's value when
-the variable is set, even to blank text, and its default otherwise, with any text the file wrote
-after the reference. So the answer can tell that the text is blank, but never shows what a
-variable holds. For how a scan's results record such a value, see
+environment is not the client's. The resolved config shows such a value as `<from ${VAR}>`,
+followed by any text the file wrote after the reference, and with `raw` the reference appears as
+the file wrote it. Where the variable gives no text, the answer shows the file's own text
+instead: the default followed by any text after the reference, when the variable is not set, or
+that text alone, when the variable is set to blank text. When that text is blank too, with a
+default of `None` counted as blank, the reference has no value: the resolved config shows `null`
+at a field that can be empty, and a field that needs text, such as `project_name`, refuses the
+config. So the answer can show whether a variable is set and whether it holds text, but never
+what it holds. For how a scan's results record such a value, see
 [Read values from the environment](configure.md#environment).
 
 Suppressions and ignore paths in a delivered config are applied, and marked as coming from the
