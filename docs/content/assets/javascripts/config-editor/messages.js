@@ -536,8 +536,8 @@ export function judge(block, path, instance, failures, options = {}) {
 
     // The schema admits a reference where ASH's loader refuses one. It also admits text that
     // only looks like a reference to it: its pattern lets a carriage return through a default,
-    // and the loader's recognizer stops at one. ASH reads no reference at such a field and
-    // takes no other string either, so every string the schema admitted here is refused.
+    // and the loader's recognizer stops at one. The loader refuses a reference at such a field
+    // and takes no other string either, so every string the schema admitted here is refused.
     if (field.envRef && !field.envAccepted && !failed && typeof value === 'string') {
       rows.push(
         finding(
