@@ -69,11 +69,14 @@ refusal, or one whose probe fails.
    on the releases that answer without ``results``, and its exit status is the step's.
    On ``broken``, ``names-it-and-fails``, ``numbered-failure`` and ``hostile`` the
    step fails with status 70 and runs no report.
-5. The probes run with colour off, name the config their step's command names, run
-   without ``--reinstall``, do not print the help they read, and do not run at all
-   for an ``ash-args`` the step refuses. They start in RUNNER_TEMP with
-   ``--no-config``, so the scanned repository's uv settings do not reach the install
-   they make, while the scan and the report start in the checkout.
+5. The probes run with colour off, run without ``--reinstall``, do not print the help
+   they read, and do not run at all for an ``ash-args`` the step refuses. Each names
+   the config its step's command names, by its absolute path, in ``--config`` and in
+   ASH_CONFIG: they start in RUNNER_TEMP, while the scan and the report start in the
+   checkout, so a config written relative to the checkout would name a file that is
+   not there. This tree's ``ash scan fs --help`` reads no config, which a row
+   measures. The probes pass ``--no-config``, so the scanned repository's uv settings
+   do not reach the install they make.
 6. Each step says on stderr which spelling it chose and why, and what a failed probe
    printed goes through ``one_line`` a line at a time, so no line of it is read as a
    workflow command.
@@ -91,7 +94,8 @@ refusal, or one whose probe fails.
    or a clone, starts with a dash, and in the older spelling, which asks nothing more.
    An answer of any other kind ends the step with status 70 and what the probe printed,
    as the first probe does. The probe is asked as the first one is: colour off, no
-   ``--reinstall``, the scan's config named, from RUNNER_TEMP with ``--no-config``.
+   ``--reinstall``, the scan's config named by its absolute path, from RUNNER_TEMP
+   with ``--no-config``.
 8. The routed command line is accepted by this tree's own CLI: the ``workspace`` forms
    are run through it with the scan engine stubbed, and the options left on ``fs`` are
    refused by name or handed on as they were typed, never dropped.
@@ -151,7 +155,9 @@ posix_only = pytest.mark.skipif(
 #: start `--from ash-source ash`, so it gets the broken answer. A probe of `ash scan
 #: <subject>` is answered from $SUBJECT_ANSWERS when that directory has the subject:
 #: the file named for it holds what it prints and `<subject>.status` the status it
-#: exits with, so each test says what the ASH it plays has.
+#: exits with, so each test says what the ASH it plays has. The ASH_CONFIG each call
+#: has in its environment, or that it has none, is logged to $PROBE_ENV_LOG for a
+#: probe and to $CALL_ENV_LOG for any other call.
 STAND_IN_UVX = r"""#!/bin/sh
 pad() {
   i=0
@@ -160,10 +166,18 @@ pad() {
     i=$((i + 1))
   done
 }
+config_env() {
+  if [ -n "${ASH_CONFIG+set}" ]; then
+    printf 'ASH_CONFIG=%s\n' "$ASH_CONFIG"
+  else
+    echo "ASH_CONFIG unset"
+  fi
+}
 for last in "$@"; do :; done
 if [ "${last:-}" = "--help" ]; then
   printf '%s NO_COLOR=%s\n' "$*" "${NO_COLOR:-}" >> "$PROBE_LOG"
   pwd >> "$PROBE_CWD_LOG"
+  config_env >> "$PROBE_ENV_LOG"
   if [ "${1:-}" = "--no-config" ]; then shift; fi
   case "$UVX_RELEASE:$1 $2 $3 $4 $5" in
     "3.9:--from ash-source ash scan fs") cat "$FS_HELP"; pad; exit 0 ;;
@@ -207,6 +221,7 @@ if [ "${last:-}" = "--help" ]; then
 fi
 printf '%s\n' "$@" END >> "$CALLS_LOG"
 pwd >> "$CALL_CWD_LOG"
+config_env >> "$CALL_ENV_LOG"
 exit "${UVX_EXIT:-0}"
 """
 
@@ -365,6 +380,20 @@ class Ran:
     #: The directory each probe started in, and each of the other calls.
     probe_dirs: list[str]
     call_dirs: list[str]
+    #: The ASH_CONFIG in the environment of each probe, and of each of the other
+    #: calls, or None where it was not set.
+    probe_configs: list[str | None]
+    call_configs: list[str | None]
+
+
+def _configs(log: Path) -> list[str | None]:
+    """The ASH_CONFIG the stand-in logged to *log*, one entry per call, None for a
+    call whose environment had none."""
+    lines = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+    return [
+        line.removeprefix("ASH_CONFIG=") if line.startswith("ASH_CONFIG=") else None
+        for line in lines
+    ]
 
 
 def _run(
@@ -402,6 +431,7 @@ def _run(
     write_helper(_steps(), runner_temp)
     calls_log, probe_log = where / "calls", where / "probes"
     call_cwd_log, probe_cwd_log = where / "call-dirs", where / "probe-dirs"
+    call_env_log, probe_env_log = where / "call-env", where / "probe-env"
     result = subprocess.run(
         [shutil.which("bash") or "bash", "-e", "-o", "pipefail", "-c", _script(step)],
         cwd=where,
@@ -418,6 +448,8 @@ def _run(
             "PROBE_LOG": str(probe_log),
             "CALL_CWD_LOG": str(call_cwd_log),
             "PROBE_CWD_LOG": str(probe_cwd_log),
+            "CALL_ENV_LOG": str(call_env_log),
+            "PROBE_ENV_LOG": str(probe_env_log),
             "SUBJECT_ANSWERS": str(answers),
             **env,
         },
@@ -451,7 +483,15 @@ def _run(
         if call_cwd_log.exists()
         else []
     )
-    return Ran(result, calls, probes, probe_dirs, call_dirs)
+    return Ran(
+        result,
+        calls,
+        probes,
+        probe_dirs,
+        call_dirs,
+        _configs(probe_env_log),
+        _configs(call_env_log),
+    )
 
 
 def _output(ran: Ran) -> str:
@@ -797,17 +837,14 @@ def test_the_reports_exit_status_is_the_steps(tmp_path, helps, release):
 
 @pytest.mark.integration
 @posix_only
-@pytest.mark.parametrize(
-    "config, config_words",
-    [("", ""), ("ops/ash.yaml", " --config ops/ash.yaml")],
-    ids=["no-config", "config"],
-)
-def test_the_probes_run_with_colour_off_and_never_reinstall(
-    tmp_path, helps, config, config_words
-):
+@pytest.mark.parametrize("named", [False, True], ids=["no-config", "config"])
+def test_the_probes_run_with_colour_off_and_never_reinstall(tmp_path, helps, named):
     # Each names the config its step's command does, so no ASH this job runs is
     # left to find the checkout's config, though --help reads none, and each skips
-    # uv's config discovery.
+    # uv's config discovery. The path is absolute, which a probe takes as it is; the
+    # rows that give a relative one follow the workspace rows below.
+    config = str(tmp_path / "ops" / "ash.yaml") if named else ""
+    config_words = f" --config {config}" if config else ""
     env = {"ASH_CONFIG": config}
     scan = _run(tmp_path / "scan", helps, RUN_ASH, "3.9", {**SCAN_ENV, **env})
     report = _run(tmp_path / "report", helps, REPORT, "3.9", env)
@@ -1060,9 +1097,12 @@ def test_a_workspace_in_ash_args_goes_to_the_workspace_subject(
 @pytest.mark.integration
 @posix_only
 def test_the_options_the_step_adds_stay_ahead_of_the_rest_of_ash_args(tmp_path, helps):
+    # An absolute config, which the probes take as it is; a relative one is the
+    # next test's.
+    config = str(tmp_path / "ops" / "ash.yaml")
     env = _args(
         f"--workspace {WORKSPACE_FILE} --exclude-scanners grype",
-        ASH_CONFIG="ops/ash.yaml",
+        ASH_CONFIG=config,
         VERBOSE="--verbose",
         CHANGED_FILES_ONLY="--changed-files-only",
         BASE_REF="0123abc",
@@ -1080,7 +1120,7 @@ def test_the_options_the_step_adds_stay_ahead_of_the_rest_of_ash_args(tmp_path, 
             WORKSPACE_FILE,
             *OWN_OPTIONS,
             "--config",
-            "ops/ash.yaml",
+            config,
             "--verbose",
             "--changed-files-only",
             "--base-ref",
@@ -1091,10 +1131,90 @@ def test_the_options_the_step_adds_stay_ahead_of_the_rest_of_ash_args(tmp_path, 
         ]
     ], _output(ran)
     # Each probe names the config the scan names, as the first one always did.
-    assert ran.probes == [
-        _probe("fs", "ops/ash.yaml"),
-        _probe("workspace", "ops/ash.yaml"),
-    ], ran.probes
+    assert ran.probes == [_probe("fs", config), _probe("workspace", config)], ran.probes
+
+
+def _value_after(option: str, words: list[str]) -> str | None:
+    """The word after *option* in *words*, which names it once at most."""
+    found = [words[at + 1] for at, word in enumerate(words[:-1]) if word == option]
+    assert len(found) <= 1, (option, words)
+    return found[0] if found else None
+
+
+@pytest.mark.integration
+@posix_only
+@pytest.mark.parametrize("written", ["relative", "absolute"])
+@pytest.mark.parametrize(
+    "step, env, asked",
+    [
+        pytest.param(RUN_ASH, _args(f"--workspace {WORKSPACE_FILE}"), 2, id="scan"),
+        pytest.param(REPORT, {}, 1, id="report"),
+    ],
+)
+def test_every_probe_names_the_checkouts_config_by_its_absolute_path(
+    tmp_path, helps, step, env, asked, written
+):
+    """The probes start in RUNNER_TEMP, and the scan and the report in the checkout. A
+    `config` input written relative to the checkout (`config: ops/ash.yaml`) names,
+    from RUNNER_TEMP, a file that is not there. So each probe is given the checkout's
+    file by its absolute path, as --config and as ASH_CONFIG, and so names the file its
+    step's command names; a config that is absolute already (config-ref's copy) is
+    passed as it is. This tree's `ash scan fs --help` reads no config (the next test),
+    so for its ASH the path changes no answer. An ASH that read the config before its
+    help would refuse a file it cannot open, and the step would stop with status 70
+    for every caller with a relative config and no config-ref."""
+    config = tmp_path / "ops" / "ash.yaml"
+    config.parent.mkdir(parents=True)
+    config.write_text("", encoding="utf-8")
+    named = "ops/ash.yaml" if written == "relative" else str(config)
+
+    ran = _run(tmp_path, helps, step, "3.9", {**env, "ASH_CONFIG": named})
+
+    assert ran.result.returncode == 0, _output(ran)
+    assert len(ran.probes) == len(ran.probe_configs) == asked, ran.probes
+    for probe, in_env in zip(ran.probes, ran.probe_configs):
+        for path in (_value_after("--config", probe.split()), in_env):
+            assert path is not None and os.path.isabs(path), (
+                f"a probe started in RUNNER_TEMP names {path!r}: {probe}"
+            )
+            assert os.path.samefile(path, config), (path, probe)
+    # The command the step runs starts in the checkout, and names the same file.
+    (call,), (call_dir,), (in_env,) = ran.calls, ran.call_dirs, ran.call_configs
+    for path in (_value_after("--config", call), in_env):
+        assert path is not None, call
+        assert os.path.samefile(Path(call_dir, path), config), (path, call)
+
+
+@pytest.mark.unit
+def test_this_trees_fs_help_answers_whatever_file_its_config_names(
+    tmp_path, monkeypatch
+):
+    """The premise of the test above, measured on this tree's own CLI, called as the
+    rows that read its answers call it. From a directory that does not hold the file a
+    relative --config names, as RUNNER_TEMP does not hold the checkout's, `ash scan fs
+    --help` answers 0 and names `scan fs`, as it does for the file's absolute path:
+    click acts on --help before it reads any other option, and the scan's callback
+    returns before it reads a config when a subject runs. ASH_CONFIG is set as the
+    probe sets it. A release whose help did read the config would make this fail, and
+    the probes would then depend on the absolute path the test above gives them."""
+    config = tmp_path / "checkout" / "ops" / "ash.yaml"
+    config.parent.mkdir(parents=True)
+    config.write_text("", encoding="utf-8")
+    elsewhere = tmp_path / "runner_temp"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    for named in ("ops/ash.yaml", str(config)):
+        result = CliRunner().invoke(
+            app,
+            ["scan", "fs", "--config", named, "--help"],
+            prog_name="ash",
+            env={"NO_COLOR": "1", "COLUMNS": "140", "ASH_CONFIG": named},
+        )
+
+        assert result.exit_code == 0, (named, result.output)
+        assert "scan fs" in result.output, (named, result.output)
+    assert not (elsewhere / "ops" / "ash.yaml").exists()
 
 
 @pytest.mark.integration
