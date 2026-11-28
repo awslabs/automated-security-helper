@@ -68,8 +68,8 @@ What it does not cover
 * A deletion of gh-pages (``git push --delete``), which no rule here reads.
 * Tag names. Triggers are evaluated for a fixed set of names and for names built from
   the workflow's own tag filters, so an unusual filter may need a name added.
-* A script handed to ``eval``, ``xargs``, ``ssh`` or a pipe into a shell, a command
-  built at run time, and a command substitution inside quotes.
+* A script handed to ``eval``, ``xargs``, ``ssh``, a here-string or a pipe into a
+  shell, a command built at run time, and a command substitution inside quotes.
 * A shell string or here-document nested more than ``MAX_SHELL_DEPTH`` deep.
 * Anything outside the repository, such as a ruleset on gh-pages.
 """
