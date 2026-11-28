@@ -2217,8 +2217,12 @@ jobs:
           # other word is bare and refused, and so is `--`, after which click
           # reads every word as bare. ASH_VALUE_OPTIONS is the options that take a
           # value of the ash group and of `ash scan fs`, which takes two the group
-          # does not (--archive and --cli-json-input);
-          # tests/unit/test_reusable_workflow_ash_args.py holds it to the CLI's.
+          # does not (--archive and --cli-json-input). The list holds the second so
+          # that the step which reads --mode skips its value word, as click does. The
+          # word loop below refuses it by name, in both spellings: the document of
+          # parameters it names would carry a mode, a directory or a workspace past
+          # the checks that read ash-args word by word.
+          # tests/unit/test_reusable_workflow_ash_args.py holds the list to the CLI's.
           # The refusals name the word by position, not by value.
           ASH_VALUE_OPTIONS="--add-scanners --archive --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --baseline --base-ref --build-target --cli-json-input --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --git-depth --git-ref --image --image-archive --image-layout --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --require-scanner-selection --runner --sandbox --scanners --shard-count --shard-index --source-dir --source-git --strategy --workspace --workspace-config -c -f -g -o -u"
           takes_value=""
@@ -2325,6 +2329,10 @@ jobs:
             case "${word}" in
               --)
                 echo "::error::ash-args word $(one_line "${position}") is --, after which click reads the next word as an argument, whatever it looks like: an ASH older than 3.9 runs it as an ash subcommand without this workflow's options, and ASH 3.9 refuses it as a second directory. ash-args takes options of ash scan only."
+                exit 1
+                ;;
+              --cli-json-input | --cli-json-input=*)
+                echo "::error::ash-args word $(one_line "${position}") is --cli-json-input, which hands ash scan fs a document of parameters. A document of parameters is not taken through ash-args, because this step checks ash-args word by word and cannot see what the document sets: a mode, a directory or a workspace in it would reach ASH without those checks. Write those options as words of ash-args instead."
                 exit 1
                 ;;
               --source-dir=*)
