@@ -128,3 +128,69 @@ def test_a_marker_that_cannot_be_removed_is_logged_and_never_raised(
         f"{shown}; a reader of holds_restored_results may take this scan's results "
         "for put-back ones until the next scan removes it"
     )
+
+
+class _AnOSErrorWithItsOwnText(OSError):
+    """An OSError whose own ``__str__`` returns its one argument as it is."""
+
+    def __str__(self) -> str:
+        return self.args[0]
+
+
+def _a_text_of_a_str_subclass(method: str, asked: list, text: str) -> str:
+    """*text*, as an instance of a str subclass whose own ``method`` records each
+    call in ``asked``: its ``__format__`` gives other words, its ``__str__``
+    raises."""
+
+    class _Text(str):
+        __slots__ = ()
+
+    def other_words(self: str, spec: str) -> str:
+        asked.append(method)
+        return "other words"
+
+    def refuse(self: str) -> str:
+        asked.append(method)
+        raise ValueError(f"a planted {method}")
+
+    setattr(_Text, method, other_words if method == "__format__" else refuse)
+    return _Text(text)
+
+
+@pytest.mark.parametrize(
+    "method",
+    [
+        pytest.param(None, id="an-exact-str"),
+        pytest.param("__format__", id="a-subclass-whose-format-says-other-words"),
+        pytest.param("__str__", id="a-subclass-whose-str-raises"),
+    ],
+)
+def test_a_marker_refusal_whose_text_is_a_str_subclass_is_logged_as_its_characters(
+    tmp_path, monkeypatch, method
+):
+    # Red before the fix: forget_restored_marker formatted own_error_text(e) in
+    # an f-string, and own_error_text returned what the error's __str__ returned,
+    # here an instance of a str subclass. An f-string formats a str subclass
+    # through its own __format__, and str.__format__ with an empty spec calls its
+    # own __str__ (an exact str is used as is), so the warning said other words
+    # or the method raised, though it is documented never to raise.
+    asked: list = []
+    text = "held open"
+    if method is not None:
+        text = _a_text_of_a_str_subclass(method, asked, text)
+
+    def refuse(self):
+        raise _AnOSErrorWithItsOwnText(text)
+
+    logger = MagicMock()
+    monkeypatch.setattr(PreviousResults, "_remove_marker", refuse)
+    monkeypatch.setattr(previous_results_module, "ASH_LOGGER", logger)
+
+    PreviousResults(tmp_path).forget_restored_marker()
+
+    logger.warning.assert_called_once_with(
+        f"Could not remove the restore marker {tmp_path / RESTORED_MARKER_NAME}: "
+        "held open; a reader of holds_restored_results may take this scan's results "
+        "for put-back ones until the next scan removes it"
+    )
+    assert asked == [], asked

@@ -136,9 +136,18 @@ def own_error_text(error: BaseException) -> str:
     plain f-string calls the error's ``__str__``, and a raise there replaces the
     error being handled. Unlike error_text it changes nothing else (no file named
     as given, no escape code removed, no value redacted), so an error whose text
-    renders reads exactly as ``str(error)`` reads.
+    renders gives the characters of ``str(error)``.
+
+    The result is an exact ``str``. ``__str__`` may return a ``str`` subclass, and
+    an f-string formats one through the subclass's own ``__format__``, while
+    ``str.__format__`` with an empty spec calls the subclass's own ``__str__``:
+    either can say other words or raise. Such a result is copied with
+    ``str.__str__``, which takes its characters and calls neither.
     """
-    return _own_text(error)
+    text = _own_text(error)
+    if type(text) is not str:
+        text = str.__str__(text)
+    return text
 
 
 def _with_carried_values(error: BaseException, values: Iterable[str]) -> List[str]:
@@ -321,10 +330,12 @@ def os_error_without_named_file(e: OSError, named: "os.PathLike[str] | str") -> 
     An error whose filename is a file descriptor (an int) names no path, so its
     text is ``error_text(e)`` as it is.
 
-    An error whose message cannot be rendered (its own ``__str__`` raises) is
-    named by its type, as error_text names such an error, and a second file whose
-    name cannot be rendered is left out: the caller is reporting a failure, and a
-    raise here would replace it.
+    Where the error names ``named`` the text is built here: a ``strerror`` that
+    cannot be rendered (its own ``__str__`` raises) gives the line naming the
+    error by its type, and a second file whose name cannot be rendered is left
+    out, since the caller is reporting a failure and a raise here would replace
+    it; the code that heads the text is rendered without a guard. The branches
+    that return ``error_text(e)`` are only as total as error_text is.
     """
     from pathlib import Path
 
@@ -979,8 +990,10 @@ def _names_a_file_by_repr(error: BaseException) -> bool:
     whose repr differs from the name as given (a backslash, a control).
 
     A member whose files cannot be rendered (a name's own ``__str__`` or
-    ``__repr__`` raises) is not one: log_unexpected_error asks this while it logs
-    an error, and a raise here would replace that error.
+    ``__repr__`` raises) is not one, and what the name raised is not passed on.
+    Its one caller, log_unexpected_error, renders the error with error_text before
+    it asks this, and error_text's pass that names files as given reads the same
+    names.
     """
     for current in _chain(error):
         if (

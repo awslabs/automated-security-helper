@@ -27,6 +27,7 @@ from automated_security_helper.utils.error_text import (
     error_text,
     log_unexpected_error,
     os_error_without_named_file,
+    own_error_text,
     redact_then_split,
     shown_tool_stderr,
     traceback_text,
@@ -266,3 +267,59 @@ def test_a_second_file_that_cannot_be_rendered_is_left_out(method):
         "[Errno 2] No such file or directory"
     )
     assert asked == [(method, error.filename2)], asked
+
+
+class _AnOSErrorWithItsOwnText(OSError):
+    """An OSError whose own ``__str__`` returns its one argument as it is."""
+
+    def __str__(self) -> str:
+        return self.args[0]
+
+
+def _a_text_of_a_str_subclass(method: str, asked: list, text: str) -> str:
+    """*text*, as an instance of a str subclass whose own ``method`` records each
+    call in ``asked``: its ``__format__`` gives other words, its ``__str__``
+    raises. (``_a_name_that_cannot_be_rendered`` cannot plant ``__format__``,
+    which is called with a format spec.)"""
+
+    class _Text(str):
+        __slots__ = ()
+
+    def other_words(self: str, spec: str) -> str:
+        asked.append(method)
+        return "other words"
+
+    def refuse(self: str) -> str:
+        asked.append(method)
+        raise ValueError(f"a planted {method}")
+
+    setattr(_Text, method, other_words if method == "__format__" else refuse)
+    return _Text(text)
+
+
+@pytest.mark.parametrize(
+    "method",
+    [
+        pytest.param(None, id="an-exact-str"),
+        pytest.param("__format__", id="a-subclass-whose-format-says-other-words"),
+        pytest.param("__str__", id="a-subclass-whose-str-raises"),
+    ],
+)
+def test_own_error_text_is_an_exact_str_of_the_errors_characters(method):
+    # Red before the fix: own_error_text returned what the error's __str__
+    # returned, here an instance of a str subclass. An f-string formats a str
+    # subclass through its own __format__, and str.__format__ with an empty spec
+    # calls its own __str__ (an exact str is used as is), so a handler's line
+    # said other words or raised, where a plain {e} gave the characters:
+    # object.__format__ returns what __str__ returned, and the f-string joins
+    # its characters.
+    asked: list = []
+    text = "held open"
+    if method is not None:
+        text = _a_text_of_a_str_subclass(method, asked, text)
+
+    own = own_error_text(_AnOSErrorWithItsOwnText(text))
+
+    assert type(own) is str, type(own)
+    assert f"{own}; it is left in place" == "held open; it is left in place"
+    assert asked == [], asked
