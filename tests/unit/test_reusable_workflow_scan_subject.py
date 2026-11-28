@@ -90,8 +90,11 @@ refusal, or one whose probe fails.
    ash-args in the order it was written. The same options stay on ``ash scan fs`` as
    they were written, for it to refuse by name, when the ASH answers with a usage error
    or with a help that does not name the subject, when ash-args names things of two
-   subjects or a directory as well, when a value is empty or, for an image reference
-   or a clone, starts with a dash, and in the older spelling, which asks nothing more.
+   subjects or a directory as well, when it names no workspace or clone and only
+   qualifies one (``--workspace-config``, ``--git-ref`` or ``--git-depth`` on its own)
+   or names one twice (``--workspace a --workspace b``), when a value is empty or, for
+   an image reference or a clone, starts with a dash, and in the older spelling, which
+   asks nothing more.
    An answer of any other kind ends the step with status 70 and what the probe printed,
    as the first probe does. The probe is asked as the first one is: colour off, no
    ``--reinstall``, the scan's config named by its absolute path, from RUNNER_TEMP
@@ -1355,6 +1358,64 @@ def test_what_names_two_subjects_or_a_directory_as_well_is_not_routed(
     assert ran.probes == [FS_PROBE], ran.probes
 
 
+def _asked(subject: str) -> list[str]:
+    """The probes the step makes to scan with *subject*: `fs` alone, or `fs` and then
+    the subject."""
+    return [FS_PROBE] if subject == "fs" else [FS_PROBE, _probe(subject)]
+
+
+#: ash-args that qualifies a workspace without naming one, or names two, with the
+#: subject the scan runs, the operands it is given and the words after the step's own
+#: options; then the controls, which name one workspace.
+WORKSPACE_COUNTS = [
+    pytest.param(
+        "--workspace-config policy.yaml",
+        "fs",
+        ["."],
+        ["--workspace-config", "policy.yaml"],
+        id="a-qualifier-alone",
+    ),
+    pytest.param(
+        "--workspace a --workspace b",
+        "fs",
+        ["."],
+        ["--workspace", "a", "--workspace", "b"],
+        id="named-twice",
+    ),
+    pytest.param("--workspace a", "workspace", ["a"], [], id="named-once"),
+    pytest.param(
+        "--workspace a --workspace-config p.yaml",
+        "workspace",
+        ["a"],
+        ["--workspace-config", "p.yaml"],
+        id="named-once-with-a-qualifier",
+    ),
+]
+
+
+@pytest.mark.integration
+@posix_only
+@pytest.mark.parametrize("ash_args, subject, operands, rest", WORKSPACE_COUNTS)
+def test_ash_args_goes_to_the_workspace_subject_only_when_it_names_one_workspace(
+    tmp_path, helps, ash_args, subject, operands, rest
+):
+    """The workspace subject takes one FILE. A qualifier with no workspace names
+    nothing for it to scan, and two workspaces name two files where click keeps the
+    last on the other spellings; routed, either would run a scan with operands the
+    caller never wrote. So ash-args stays on `ash scan fs` as written, where `fs`,
+    which takes none of the workspace options, refuses the option by name, and the ASH
+    is not asked about the subject. The ASH here has it, so only the step's rule keeps
+    them there. The last two rows are the controls: one workspace, with or without its
+    policy file, goes to the subject."""
+    ran = _run(tmp_path, helps, RUN_ASH, "3.9", _args(ash_args))
+
+    assert ran.result.returncode == 0, _output(ran)
+    assert ran.calls == [
+        [*UVX_SCAN, "scan", subject, *operands, *OWN_OPTIONS, *rest]
+    ], _output(ran)
+    assert ran.probes == _asked(subject), ran.probes
+
+
 @pytest.mark.integration
 @posix_only
 @pytest.mark.parametrize(
@@ -1554,7 +1615,55 @@ def test_the_image_or_clone_command_line_is_one_the_subject_of_this_tree_accepts
     assert result.exit_code == 0, result.output
 
 
-#: What this tree's own answer, a usage error, keeps on `fs`: the subjects it lacks.
+OTHER_CLONE_URL = "https://example.invalid/other.git"
+#: ash-args that qualifies a clone without naming one, or names two, for an ASH that
+#: has the git subject, as WORKSPACE_COUNTS has it for a workspace; then a control,
+#: which names one clone. The rows of the git subject's routing are kept in one table,
+#: so that a change to which subjects are routed is one edit here.
+CLONE_COUNTS = [
+    pytest.param("--git-depth 1", "fs", ["."], ["--git-depth", "1"], id="depth-alone"),
+    pytest.param("--git-ref main", "fs", ["."], ["--git-ref", "main"], id="ref-alone"),
+    pytest.param(
+        f"--source-git {CLONE_URL} --source-git {OTHER_CLONE_URL}",
+        "fs",
+        ["."],
+        ["--source-git", CLONE_URL, "--source-git", OTHER_CLONE_URL],
+        id="named-twice",
+    ),
+    pytest.param(
+        f"--source-git {CLONE_URL} --git-depth 1",
+        "git",
+        [CLONE_URL],
+        ["--git-depth", "1"],
+        id="named-once-with-a-qualifier",
+    ),
+]
+
+
+@pytest.mark.integration
+@posix_only
+@pytest.mark.parametrize("ash_args, subject, operands, rest", CLONE_COUNTS)
+def test_ash_args_goes_to_the_git_subject_only_when_it_names_one_clone(
+    tmp_path, helps, ash_args, subject, operands, rest
+):
+    """As for a workspace: `--git-ref` or `--git-depth` with no `--source-git` names no
+    clone, and two `--source-git` name two URLs for a subject that clones one. Measured
+    against a stand-in ASH that has the git subject, so only the step's rule keeps the
+    first three rows on `ash scan fs` as written, and the ASH is not asked about the
+    subject; the last is the control, routed with its qualifier."""
+    ran = _run(
+        tmp_path, helps, RUN_ASH, "3.9", _args(ash_args), subjects=_wave_2_subjects()
+    )
+
+    assert ran.result.returncode == 0, _output(ran)
+    assert ran.calls == [
+        [*UVX_SCAN, "scan", subject, *operands, *OWN_OPTIONS, *rest]
+    ], _output(ran)
+    assert ran.probes == _asked(subject), ran.probes
+
+
+#: What this tree's own answer, a usage error, keeps on `fs`: the subjects it lacks. A
+#: git qualifier on its own names no clone and asks nothing (CLONE_COUNTS).
 IMAGE_AND_CLONE_ON_FS = [
     pytest.param("--image alpine:3.20", "image", id="image"),
     pytest.param("--image-archive images/app.tar", "image", id="image-archive"),
@@ -1564,8 +1673,6 @@ IMAGE_AND_CLONE_ON_FS = [
         "git",
         id="clone",
     ),
-    pytest.param("--git-ref main", "git", id="clone-ref-alone"),
-    pytest.param("--git-depth 1", "git", id="clone-depth-alone"),
 ]
 
 
@@ -1597,6 +1704,11 @@ def test_an_image_or_a_clone_stays_on_fs_when_this_tree_has_no_such_subject(
     "ash_args, option",
     [
         pytest.param(f"--workspace {WORKSPACE_FILE}", "--workspace", id="workspace"),
+        pytest.param(
+            "--workspace-config policy.yaml",
+            "--workspace-config",
+            id="workspace-config",
+        ),
         pytest.param(f"--source-git {CLONE_URL}", "--source-git", id="clone"),
     ],
 )
