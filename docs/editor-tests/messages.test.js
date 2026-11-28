@@ -93,7 +93,7 @@ test('every row of the table still differs from the schema, and the corpus says 
 });
 
 test('a document with an internal field uses the string ASH uses', () => {
-  const result = judgeField('', { build: { anything: true } });
+  const result = judgeField('', { build: {} });
   const want = block.constants.invalidTopLevelFieldWarning.replace('{field}', 'build');
   assert.equal(result.findings[0].message, want);
 });

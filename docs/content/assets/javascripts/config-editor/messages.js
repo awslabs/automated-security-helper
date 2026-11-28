@@ -17,7 +17,11 @@ const IGNORES_ENTRY = 'A scan ignores this entry.';
 
 /**
  * The places the editor's verdict departs from the schema's. `schema` is the schema's
- * verdict for an input the row applies to, and `editor` is the severity the editor gives it.
+ * verdict for an input the row applies to, and `editor` is the severity the editor gives it,
+ * which says what a scan does: an error is a file a scan refuses (exit 3), and a warning or
+ * a note is a file it loads. A Python test reads these rows out of this file and runs ASH's
+ * own file-load route over the input of each (tests/unit/docs/
+ * test_config_editor_departures_match_ash.py), so a row cannot claim what ASH does not do.
  */
 export const DEPARTURES = Object.freeze(
   [

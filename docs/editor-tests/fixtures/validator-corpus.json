@@ -2291,9 +2291,7 @@
       },
       "id": "document-internal-field-ok",
       "instance": {
-        "build": {
-          "anything": true
-        }
+        "build": {}
       },
       "keyword": null,
       "path": "",
