@@ -78,8 +78,11 @@ SCHEMA_PATH = "automated_security_helper/schemas/AshConfig.json"
 GENERATOR = "docs/hooks/config_editor.py"
 CONTRACT = "ash-config-editor-data/1"
 BLOCK_ID = "ash-config-editor-data"
-#: The serialized block may not be larger than this many bytes.
-SIZE_CEILING = 300_000
+#: The serialized block may not be larger than this many bytes. The projection of
+#: the schema measured 333,407 bytes when the ceiling was set, so this is 20% above
+#: it: room for the schema to grow, and a stop, naming the largest parts, before it
+#: grows past that.
+SIZE_CEILING = 400_000
 
 #: The three plugin kinds, by the key of their segment in a config file.
 SEGMENTS = ("scanners", "reporters", "converters")
@@ -2660,8 +2663,14 @@ def check_block(block: Mapping[str, Any], digest: str | None = None) -> list[str
         )
     size = len(serialize_block(block).encode("utf-8"))
     if size > SIZE_CEILING:
+        parts = sorted(
+            (len(serialize_block({name: value}).encode("utf-8")), name)
+            for name, value in block.items()
+        )[-4:]
+        largest = ", ".join(f"{name} {count}" for count, name in reversed(parts))
         problems.append(
-            f"the block is {size} bytes, over the ceiling of {SIZE_CEILING}"
+            f"the block is {size} bytes, over the ceiling of {SIZE_CEILING} "
+            f"(largest parts: {largest})"
         )
     return problems
 

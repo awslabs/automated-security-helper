@@ -49,7 +49,7 @@ SCHEMA_PATH = PACKAGE / "schemas" / "AshConfig.json"
 PLUGIN_MODULES = PACKAGE / "plugin_modules"
 
 PROBE_SECONDS_LIMIT = 30
-SIZE_CEILING = 300_000
+SIZE_CEILING = 400_000
 
 #: The settings the table holds that no static read of the scanners' call sites can
 #: name, each with why. The scan follows string literals and f-strings through

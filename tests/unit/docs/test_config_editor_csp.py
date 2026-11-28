@@ -315,9 +315,9 @@ REFUSED = {
         ),
         "already holds a Content-Security-Policy meta",
     ),
-    "a second policy meta in capitals": (
+    "a second policy meta in mixed case": (
         _page(
-            head='<META HTTP-EQUIV="content-security-policy" CONTENT="default-src *">\n'
+            head='<Meta HTTP-EQUIV="content-security-policy" CONTENT="default-src *">\n'
         ),
         "already holds a Content-Security-Policy meta",
     ),
