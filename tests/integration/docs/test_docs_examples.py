@@ -107,7 +107,8 @@ def test_the_docs_have_runnable_examples(request):
 @pytest.mark.e2e
 def test_doc_examples_run(page, tmp_path, request):
     # Set by the docs examples job, which then reads the coverage this run collects
-    # (scripts/docs_feature_coverage.py); unset, the page runs exactly as it always did.
+    # (scripts/docs_feature_coverage.py); unset, the runner measures nothing and
+    # writes no record.
     results = runner.PageRunner(
         page,
         tmp_path,

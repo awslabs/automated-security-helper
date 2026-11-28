@@ -193,7 +193,7 @@ def _region_contexts(directory: Path) -> set[str]:
 
 def _lines_before_the_region() -> set[int]:
     """The lines of the planted function's body statements before its region: the
-    statements up to and through its early exit. Not its def, decorator or docstring
+    statements up to and through its leading guard. Not its def, decorator or docstring
     lines: the def line runs when the module is imported, so a block that only
     imports the module puts its context there."""
     function = _planted_function()
@@ -224,7 +224,7 @@ def _lines_before_the_region() -> set[int]:
     }
     assert lines and not lines & region.lines, (
         "the planted function has no statement before its region, so no call that its "
-        "early exit answers can be told from a call that does not run it at all"
+        "leading guard answers can be told from a call that does not run it at all"
     )
     assert node.lineno not in lines
     return lines
@@ -276,8 +276,8 @@ def test_a_page_whose_block_does_not_call_the_planted_function_fails_the_gate(tm
         region.path, _lines_before_the_region(), coverage.directory
     ), (
         "importing the planted function's module ran the statements before its "
-        "region, so the early-exit test cannot tell a call its early exit answers "
-        "from an import"
+        "region, so the leading-guard test cannot tell a call its leading guard "
+        "answers from an import"
     )
     code, report, feature, markdown = _check(tmp_path, coverage, page)
 
