@@ -356,7 +356,7 @@ def test_the_override_refusal_is_redacted_with_the_chain(project, monkeypatch):
     config = project / "ash.yaml"
     config.write_text(f"project_name: ${{{PROBE}:x}}\n", encoding="utf-8")
 
-    def refuse(_data, _overrides=None):
+    def refuse(_data, _overrides=None, _selection_refusals=None):
         raise ASHConfigValidationError(f"the override left '{PROBE_VALUE}' invalid")
 
     monkeypatch.setattr(resolve_module, "build_config", refuse)
