@@ -256,7 +256,7 @@ def test_a_document_nested_too_deeply_is_refused_not_a_traceback(tmp_path, monke
     (3.14's decoder followed 100,000 levels and then refused the unknown key), so
     the parser's refusal is forced rather than provoked."""
     path = tmp_path / "deep.json"
-    document = '{"source_dir": ' + "[" * 100000 + "]" * 100000 + "}"
+    document = '{"path": ' + "[" * 100000 + "]" * 100000 + "}"
     path.write_text(document, encoding="utf-8")
     real_loads = json.loads
 

@@ -30,7 +30,7 @@ DOCUMENTS = {
     "not-json": "{",
     "not-an-object": "[]",
     "unknown-key": json.dumps({"sauce_dir": "x"}),
-    "two-keys-one-parameter": json.dumps({"source_dir": "a", "--source-dir": "b"}),
+    "two-keys-one-parameter": json.dumps({"output_dir": "a", "--output-dir": "b"}),
     "invalid-value": json.dumps({"output_formats": "sarif"}),
 }
 
