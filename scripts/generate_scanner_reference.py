@@ -36,7 +36,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _reference_docs import (
@@ -195,6 +195,78 @@ def _baseline_environment() -> list[str]:
     ]
 
 
+def _categories_fact(plugin: Any) -> str:
+    """The scan categories a scanner can serve, for its facts list: the built
+    instance's ``declared_categories()``, else its class's operational row, else
+    not determined."""
+    from automated_security_helper.base.scanner_operational_facets import (
+        nearest_operational_facets,
+    )
+
+    declared = getattr(plugin.instance, "declared_categories", None)
+    if callable(declared):
+        categories = tuple(declared())
+    else:
+        row = nearest_operational_facets(plugin.cls)
+        if row is None:
+            return "not determined"
+        categories = tuple(row.targets.categories)
+    return ", ".join(code(category.value) for category in categories) or "none"
+
+
+def _category_maps_section(plugins: list) -> list[str]:
+    """The options whose values choose the scan categories a run serves, from the
+    ``x-ash-categories`` maps on the options models; ``[]`` when no model has one.
+
+    One row per option and group of values that serve the same categories, in the
+    order the map names them.
+    """
+    from automated_security_helper.base.scanner_operational_facets import (
+        CATEGORY_MAP_ANY,
+        category_map,
+        category_mapped_fields,
+    )
+
+    rows: list[str] = []
+    for p in plugins:
+        options = p.options_cls
+        if options is None:
+            continue
+        for field_name in category_mapped_fields(options):
+            groups: dict[tuple[Any, ...], list[str]] = {}
+            for value, categories in category_map(options, field_name).items():
+                groups.setdefault(categories, []).append(value)
+            for categories, values in groups.items():
+                shown = ", ".join(
+                    "any other value" if value == CATEGORY_MAP_ANY else code(value)
+                    for value in values
+                )
+                served = ", ".join(code(c.value) for c in categories) or "none"
+                rows.append(
+                    f"| [{code(p.name)}](#{p.name}) | {code(field_name)} | "
+                    f"{shown} | {served} |"
+                )
+    if not rows:
+        return []
+    return [
+        "## Scan categories by mode",
+        "",
+        (
+            "A scanner can serve the scan categories listed with it below. For the "
+            "options in this table, a run serves only the categories of the values "
+            "it is set to: each value serves the categories beside it, an on-off "
+            "option serves its categories when it is on, and a value the table "
+            "does not name, with no `any other value` row, serves every category "
+            "the scanner can serve."
+        ),
+        "",
+        "| Scanner | Option | Values | Categories |",
+        "|---------|--------|--------|------------|",
+        *rows,
+        "",
+    ]
+
+
 def generate(docs_root: Path) -> tuple[str, dict]:
     from _plugin_reference import (
         ENV_NOTE_SLOT,
@@ -275,6 +347,7 @@ def generate(docs_root: Path) -> tuple[str, dict]:
         ENV_NOTE_SLOT,
         "",
         *_baseline_environment(),
+        *_category_maps_section(plugins),
     ]
 
     for p in plugins:
@@ -299,6 +372,7 @@ def generate(docs_root: Path) -> tuple[str, dict]:
             ("Loads by default", loads),
             ("On once loaded", yes_no(p.enabled)),
             ("Tool type", str(_value(inst, "tool_type") or "not determined")),
+            ("Scan categories", _categories_fact(p)),
             (
                 "Command",
                 code(_value(inst, "command"))

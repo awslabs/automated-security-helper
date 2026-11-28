@@ -5138,6 +5138,8 @@ sarif:
 scanner_results:
   gitleaks:
     actionable_finding_count: 5
+    categories:
+    - secrets
     dependencies_satisfied: true
     duration: 0.5
     excluded: false

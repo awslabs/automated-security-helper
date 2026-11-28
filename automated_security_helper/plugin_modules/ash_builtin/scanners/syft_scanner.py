@@ -18,7 +18,11 @@ from automated_security_helper.base.scanner_facets import (
 )
 from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
-from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.core.enums import (
+    OfflineStrategy,
+    ScanCategory,
+    ScannerToolType,
+)
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.config.tool_config_trust import empty_tool_config
 from automated_security_helper.models.core import ToolArgs
@@ -326,6 +330,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                     opsf.TargetKind.CONTAINER_IMAGE,
                 ),
                 tool_type=ScannerToolType.SBOM,
+                categories=(ScanCategory.SBOM,),
                 selection=(
                     "the whole directory, cataloged into an SBOM; a "
                     "container-image asset through a stereoscope target "

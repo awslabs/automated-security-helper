@@ -148,7 +148,11 @@ from automated_security_helper.base.scanner_plugin import (
 )
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
-from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.core.enums import (
+    OfflineStrategy,
+    ScanCategory,
+    ScannerToolType,
+)
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
@@ -891,12 +895,24 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                     opsf.TargetKind.COMPOSITE_ACTIONS,
                 ),
                 tool_type=ScannerToolType.SAST,
+                categories=(
+                    ScanCategory.SECRETS,
+                    ScanCategory.SCA,
+                    ScanCategory.CI,
+                    ScanCategory.SUPPLY_CHAIN,
+                    ScanCategory.QUALITY,
+                ),
                 selection="workflow files and composite actions (action.yml and action.yaml anywhere) from the scan set",
                 tool_type_note=(
                     "actionlint (IAC) and zizmor (SAST) scan the same workflow files; the "
                     "split is defensible (linting versus security analysis) and changing "
                     "either moves reporter-side type exclusions, so it is recorded here "
                     "and changed in neither (design E3)"
+                ),
+                categories_note=(
+                    "quality comes only from the pedantic persona and sca only from "
+                    "the online audits; a default run serves secrets, ci and "
+                    "supply-chain."
                 ),
             ),
             runtime=opsf.RuntimeFacet(

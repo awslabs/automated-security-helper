@@ -1396,6 +1396,18 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             dict.fromkeys(_TRIVY_SCANNER_ALIASES.get(name, name) for name in names)
         )
 
+    def _category_mode_values(self, field_name: str) -> Optional[List[str]]:
+        """The trivy scanners this run turns on (``_effective_scanners``), each
+        stripped, as keys of the ``scanners`` category map; any other field is
+        read as the plugin base reads it.
+
+        A padded alias (``" config"``) is stripped but not folded, so it is a value
+        the map does not name and serves the declared categories.
+        """
+        if field_name != "scanners":
+            return super()._category_mode_values(field_name)
+        return [name.strip() for name in self._effective_scanners() if name.strip()]
+
     def _scan_environment(self) -> Dict[str, str]:
         """The environment the scan runs with: the host's plus ``extra_env``."""
         return {**snapshot_environ(), **self.extra_env}

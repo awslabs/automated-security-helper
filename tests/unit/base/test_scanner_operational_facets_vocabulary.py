@@ -17,10 +17,13 @@ so a passing refusal is the validator firing, not a malformed fixture.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from pydantic import ValidationError
 
 from automated_security_helper.base import scanner_operational_facets as opsf
+from automated_security_helper.core import enums
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 
 pytestmark = pytest.mark.unit
@@ -189,17 +192,147 @@ def test_targets_need_a_kind_and_a_selection() -> None:
         )
 
 
-def test_every_target_kind_is_served_or_unclaimed_by_a_tool_type() -> None:
-    """The tool-type table and the unclaimed table must leave no kind orphaned
+def test_every_target_kind_is_served_or_unclaimed_by_a_category() -> None:
+    """The category table and the unclaimed table must leave no kind orphaned
     in the vocabulary: a new kind that nothing serves is a decision, not a
     default."""
-    served = set().union(*opsf.TOOL_TYPE_SERVED_BY.values())
+    served_by = getattr(opsf, "CATEGORY_SERVED_BY", None)
+    assert served_by is not None, (
+        "base/scanner_operational_facets.py has no CATEGORY_SERVED_BY"
+    )
+    served = set().union(*served_by.values())
     orphaned = [
         k
         for k in opsf.TargetKind
         if k not in served and k not in opsf.UNCLAIMED_TARGET_KINDS
     ]
-    assert not orphaned, f"target kinds served by no tool type: {orphaned}"
+    assert not orphaned, f"target kinds served by no category: {orphaned}"
+
+
+# ---- targets: categories --------------------------------------------------
+
+#: Each tool type, by member name, and the value of the category a row of that
+#: type derives when it writes no categories.
+_DERIVED_CATEGORY: tuple[tuple[str, str | None], ...] = (
+    ("SAST", "sast"),
+    ("DAST", "dast"),
+    ("SCA", "sca"),
+    ("IAC", "iac"),
+    ("SECRETS", "secrets"),
+    ("CONTAINER", "container"),
+    ("SBOM", "sbom"),
+    ("CUSTOM", "other"),
+    ("UNKNOWN", None),
+)
+
+
+def _categories_are_declared() -> None:
+    assert "categories" in opsf.TargetsFacet.model_fields, (
+        "TargetsFacet declares no categories field"
+    )
+
+
+def _scan_category() -> Any:
+    """``core.enums.ScanCategory``, read when the test runs rather than at import."""
+    found = getattr(enums, "ScanCategory", None)
+    assert found is not None, "core.enums has no ScanCategory"
+    return found
+
+
+def _targets(**change: Any) -> opsf.TargetsFacet:
+    """A targets row of one source-code kind, typed SAST, with *change* applied."""
+    row: dict[str, Any] = {
+        "kinds": (opsf.TargetKind.SOURCE_CODE,),
+        "tool_type": ScannerToolType.SAST,
+        "selection": "a mechanism",
+    }
+    row.update(change)
+    return opsf.TargetsFacet(**row)
+
+
+def test_the_category_fields_follow_their_tool_type_fields() -> None:
+    """``categories`` follows ``tool_type`` and ``categories_note`` follows
+    ``tool_type_note``, so a row reads as the legacy field, then what replaces
+    it."""
+    fields = list(opsf.TargetsFacet.model_fields)
+
+    for field, after in (
+        ("categories", "tool_type"),
+        ("categories_note", "tool_type_note"),
+    ):
+        assert field in fields, f"TargetsFacet declares no {field} field"
+        assert fields.index(field) == fields.index(after) + 1, fields
+
+
+@pytest.mark.parametrize(
+    ("tool_type", "value"),
+    _DERIVED_CATEGORY,
+    ids=[name for name, _ in _DERIVED_CATEGORY],
+)
+def test_a_row_without_categories_derives_them_from_its_tool_type(
+    tool_type: str, value: str | None
+) -> None:
+    _categories_are_declared()
+    category = _scan_category()
+    expected = () if value is None else (category(value),)
+
+    targets = _targets(tool_type=ScannerToolType[tool_type])
+
+    assert isinstance(targets.categories, tuple)
+    assert targets.categories == expected
+    assert "categories" not in targets.model_fields_set
+
+
+def test_a_row_writes_its_categories_as_members_or_as_values() -> None:
+    _categories_are_declared()
+    category = _scan_category()
+
+    for written in (("sast", "secrets"), (category.SAST, category.SECRETS)):
+        targets = _targets(categories=written)
+
+        assert targets.categories == (category.SAST, category.SECRETS), written
+        assert all(isinstance(member, category) for member in targets.categories)
+        assert "categories" in targets.model_fields_set
+
+
+@pytest.mark.parametrize(
+    ("categories", "refusal"),
+    [
+        pytest.param((), "categories is empty: name at least one category", id="empty"),
+        pytest.param(
+            ("sast", "sast"), "categories names sast more than once", id="repeated"
+        ),
+        pytest.param(
+            ("secrets", "sast"),
+            "categories are not in canonical order: write sast, secrets",
+            id="out-of-order",
+        ),
+        pytest.param(
+            ("ci", "sast", "iac"),
+            "categories are not in canonical order: write sast, iac, ci",
+            id="out-of-order-three",
+        ),
+    ],
+)
+def test_a_row_that_writes_its_categories_wrongly_is_refused(
+    categories: tuple[str, ...], refusal: str
+) -> None:
+    _categories_are_declared()
+
+    with pytest.raises(ValidationError) as excinfo:
+        _targets(categories=categories)
+
+    assert refusal in str(excinfo.value), str(excinfo.value)
+
+
+def test_a_row_may_carry_a_categories_note() -> None:
+    assert "categories_note" in opsf.TargetsFacet.model_fields, (
+        "TargetsFacet declares no categories_note field"
+    )
+    note = "api findings are read from the OpenAPI documents it scans"
+
+    assert _targets(categories_note=note).categories_note == note
+    assert _targets().categories_note is None
 
 
 # ---- runtime --------------------------------------------------------------

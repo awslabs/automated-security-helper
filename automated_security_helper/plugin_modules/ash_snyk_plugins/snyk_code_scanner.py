@@ -31,7 +31,11 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     redacted_command_record,
 )
-from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.core.enums import (
+    OfflineStrategy,
+    ScanCategory,
+    ScannerToolType,
+)
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -547,6 +551,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             targets=opsf.TargetsFacet(
                 kinds=(opsf.TargetKind.SOURCE_CODE,),
                 tool_type=ScannerToolType.SAST,
+                categories=(ScanCategory.SAST, ScanCategory.SECRETS),
                 selection="a staged copy of the scan set outside the tree (_stage_source); exit 3 means no supported project",
                 covers_note="an alpha scanner; it declares no covers display string",
             ),

@@ -656,6 +656,7 @@ sarif:
 scanner_results:
   bandit:
     actionable_finding_count: 1
+    categories: []
     dependencies_satisfied: true
     duration: 0.0
     excluded: false
@@ -674,6 +675,7 @@ scanner_results:
     suppressed_finding_count: 0
   checkov:
     actionable_finding_count: 1
+    categories: []
     dependencies_satisfied: true
     duration: 0.0
     excluded: false
@@ -692,6 +694,7 @@ scanner_results:
     suppressed_finding_count: 0
   npm-audit:
     actionable_finding_count: 0
+    categories: []
     dependencies_satisfied: false
     duration: 0.0
     excluded: false
@@ -711,6 +714,7 @@ scanner_results:
     suppressed_finding_count: 0
   semgrep:
     actionable_finding_count: 0
+    categories: []
     dependencies_satisfied: true
     duration: 0.0
     excluded: false

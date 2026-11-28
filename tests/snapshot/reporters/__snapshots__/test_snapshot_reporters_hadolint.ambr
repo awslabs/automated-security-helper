@@ -2,6 +2,10 @@
 # name: test_hadolint_row
   dict({
     'actionable_finding_count': 8,
+    'categories': list([
+      'iac',
+      'quality',
+    ]),
     'dependencies_satisfied': True,
     'duration': 0.25,
     'excluded': False,

@@ -776,6 +776,28 @@ _CLASS_ARGUMENT_SITES = {
         "type(plugin)",
     ): "asks the operational-facets register for the plugin class's polyfill "
     "rows at tool launch",
+    (
+        "automated_security_helper/base/scanner_plugin.py",
+        "nearest_operational_facets",
+        "type(self)",
+    ): "asks the operational-facets register for the scanner class's nearest "
+    "row: the one read behind its declared categories and its legacy type",
+    (
+        "automated_security_helper/base/scanner_plugin.py",
+        "category_mapped_fields",
+        "type(options)",
+    ): "reads which fields of the scanner's options class carry a category map",
+    (
+        "automated_security_helper/base/scanner_plugin.py",
+        "category_map",
+        "type(options)",
+    ): "reads one field's category map from the scanner's options class",
+    (
+        "automated_security_helper/base/scanner_plugin.py",
+        "_CATEGORY_DERIVATION_WARNED.add",
+        "type(self)",
+    ): "records the scanner class warned that it derives its categories, once "
+    "per class",
 }
 
 #: Assignments to ``__class__`` in the package other than the maker's, by module,

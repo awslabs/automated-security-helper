@@ -68,7 +68,11 @@ from automated_security_helper.base.scanner_plugin import (
 from automated_security_helper.core.constants import (
     KNOWN_GENERATED_LOCKFILE_NAMES,
 )
-from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.core.enums import (
+    OfflineStrategy,
+    ScanCategory,
+    ScannerToolType,
+)
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -490,6 +494,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             targets=opsf.TargetsFacet(
                 kinds=(opsf.TargetKind.SECRETS_CONTENTS,),
                 tool_type=ScannerToolType.SECRETS,
+                categories=(ScanCategory.SECRETS,),
                 selection="an in-process worker over every text file of the scan set; git history is not read",
             ),
             runtime=opsf.RuntimeFacet(

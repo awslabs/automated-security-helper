@@ -156,7 +156,11 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginConfigBase,
 )
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
-from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.core.enums import (
+    OfflineStrategy,
+    ScanCategory,
+    ScannerToolType,
+)
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
@@ -402,6 +406,7 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
             targets=opsf.TargetsFacet(
                 kinds=(opsf.TargetKind.DOCKERFILES,),
                 tool_type=ScannerToolType.IAC,
+                categories=(ScanCategory.IAC, ScanCategory.QUALITY),
                 selection="its own discovery over the scan set: Dockerfile, *.Dockerfile, Dockerfile.* and Containerfile; unparseable files are failed targets, not skipped",
                 covers_note="an alpha scanner; it declares no covers display string",
             ),

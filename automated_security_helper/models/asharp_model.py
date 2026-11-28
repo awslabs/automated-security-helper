@@ -383,6 +383,17 @@ class ScannerTargetStatusInfo(StrippedRecordModel):
             ),
         ),
     ] = None
+    categories: Annotated[
+        list[str],
+        Field(
+            description=(
+                "The scan categories the scanner can serve, as their values in "
+                "canonical order: its operational row's targets.categories, or the "
+                "one category its tool_type stands for. Empty on a row read from an "
+                "older results file."
+            ),
+        ),
+    ] = []
 
     @property
     def total_duration(self) -> float:

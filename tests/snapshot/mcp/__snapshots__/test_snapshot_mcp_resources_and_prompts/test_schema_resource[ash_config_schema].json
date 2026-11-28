@@ -3176,7 +3176,96 @@
             ]
           },
           "title": "Frameworks",
-          "type": "array"
+          "type": "array",
+          "x-ash-categories": {
+            "3d_policy": [
+              "iac"
+            ],
+            "ansible": [
+              "iac"
+            ],
+            "argo_workflows": [
+              "ci"
+            ],
+            "arm": [
+              "iac"
+            ],
+            "azure_pipelines": [
+              "ci"
+            ],
+            "bicep": [
+              "iac"
+            ],
+            "bitbucket_configuration": [
+              "ci"
+            ],
+            "bitbucket_pipelines": [
+              "ci"
+            ],
+            "cdk": [],
+            "circleci_pipelines": [
+              "ci"
+            ],
+            "cloudformation": [
+              "iac"
+            ],
+            "dockerfile": [
+              "iac"
+            ],
+            "github_actions": [
+              "ci"
+            ],
+            "github_configuration": [
+              "ci"
+            ],
+            "gitlab_ci": [
+              "ci"
+            ],
+            "gitlab_configuration": [
+              "ci"
+            ],
+            "helm": [
+              "iac"
+            ],
+            "json": [
+              "iac"
+            ],
+            "kubernetes": [
+              "iac"
+            ],
+            "kustomize": [
+              "iac"
+            ],
+            "openapi": [
+              "api"
+            ],
+            "sast": [],
+            "sast_golang": [],
+            "sast_java": [],
+            "sast_javascript": [],
+            "sast_python": [],
+            "sast_typescript": [],
+            "sca_image": [],
+            "sca_package": [],
+            "secrets": [
+              "secrets"
+            ],
+            "serverless": [
+              "iac"
+            ],
+            "terraform": [
+              "iac"
+            ],
+            "terraform_json": [
+              "iac"
+            ],
+            "terraform_plan": [
+              "iac"
+            ],
+            "yaml": [
+              "iac"
+            ]
+          }
         },
         "install_timeout": {
           "anyOf": [
@@ -5597,7 +5686,12 @@
             "type": "string"
           },
           "title": "Allowed Command Prefixes",
-          "type": "array"
+          "type": "array",
+          "x-ash-categories": {
+            "*": [
+              "agent"
+            ]
+          }
         },
         "flag_env_secrets": {
           "anyOf": [
@@ -5612,7 +5706,13 @@
           ],
           "default": true,
           "description": "Flag an `env` entry whose name says key, token, secret or password and whose value is a literal rather than a reference such as `${NAME}` (LOW). The value is never written into the finding.",
-          "title": "Flag Env Secrets"
+          "title": "Flag Env Secrets",
+          "x-ash-categories": {
+            "true": [
+              "secrets",
+              "agent"
+            ]
+          }
         },
         "forbid_auto_approval": {
           "anyOf": [
@@ -5627,7 +5727,12 @@
           ],
           "default": true,
           "description": "Flag settings that approve MCP tool calls without asking (HIGH): gemini `trust: true`, a non-empty kiro `autoApprove` or roo `alwaysAllow`, and codex `approval_mode` of `auto` or `full-auto`.",
-          "title": "Forbid Auto Approval"
+          "title": "Forbid Auto Approval",
+          "x-ash-categories": {
+            "true": [
+              "agent"
+            ]
+          }
         },
         "forbid_privilege_escalation": {
           "anyOf": [
@@ -5642,7 +5747,12 @@
           ],
           "default": true,
           "description": "Flag sudo, doas, su and pkexec used as the command, or as a whole argument, of a stdio MCP server entry (HIGH). The match is on the whole word, so a name that merely contains one is not flagged.",
-          "title": "Forbid Privilege Escalation"
+          "title": "Forbid Privilege Escalation",
+          "x-ash-categories": {
+            "true": [
+              "agent"
+            ]
+          }
         },
         "forbid_unpinned_runners": {
           "anyOf": [
@@ -5657,7 +5767,13 @@
           ],
           "default": true,
           "description": "Flag npx, bunx, pnpm dlx, pnpx and uvx entries whose package has no exact version, such as `npx -y pkg` or `uvx pkg` (MEDIUM). `pkg@1.2.3` and `pkg==1.2.3` are pinned; `pkg@latest` and ranges are not.",
-          "title": "Forbid Unpinned Runners"
+          "title": "Forbid Unpinned Runners",
+          "x-ash-categories": {
+            "true": [
+              "supply-chain",
+              "agent"
+            ]
+          }
         },
         "offline": {
           "anyOf": [
@@ -5681,7 +5797,12 @@
             "type": "string"
           },
           "title": "Remote Url Prefixes",
-          "type": "array"
+          "type": "array",
+          "x-ash-categories": {
+            "*": [
+              "agent"
+            ]
+          }
         },
         "require_local": {
           "anyOf": [
@@ -5696,7 +5817,12 @@
           ],
           "default": false,
           "description": "Flag every remote (url, httpUrl, serverUrl) entry whose host is not loopback (MEDIUM). `localhost`, `127.0.0.0/8` and `::1` count as local, whichever way the IPv6 address is spelled.",
-          "title": "Require Local"
+          "title": "Require Local",
+          "x-ash-categories": {
+            "true": [
+              "agent"
+            ]
+          }
         },
         "scan_timeout": {
           "anyOf": [
@@ -8773,7 +8899,22 @@
           },
           "minItems": 1,
           "title": "Scanners",
-          "type": "array"
+          "type": "array",
+          "x-ash-categories": {
+            "license": [
+              "license"
+            ],
+            "misconfig": [
+              "iac"
+            ],
+            "secret": [
+              "secrets"
+            ],
+            "vuln": [
+              "sca",
+              "container"
+            ]
+          }
         },
         "secret_config_file": {
           "anyOf": [

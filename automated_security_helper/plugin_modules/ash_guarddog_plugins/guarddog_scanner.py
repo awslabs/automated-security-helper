@@ -134,7 +134,11 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginConfigBase,
 )
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
-from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.core.enums import (
+    OfflineStrategy,
+    ScanCategory,
+    ScannerToolType,
+)
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
@@ -961,6 +965,7 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
             targets=opsf.TargetsFacet(
                 kinds=(opsf.TargetKind.PACKAGE_SOURCES,),
                 tool_type=ScannerToolType.SCA,
+                categories=(ScanCategory.SUPPLY_CHAIN, ScanCategory.MALWARE),
                 selection=(
                     "package roots by per-ecosystem manifest sets across pypi, npm, go, "
                     "github_action, rubygems and crates (GUARDDOG_ECOSYSTEMS); verify "

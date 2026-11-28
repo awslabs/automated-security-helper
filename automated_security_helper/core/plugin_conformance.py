@@ -77,6 +77,7 @@ from automated_security_helper.base.scanner_operational_facets import (
     LICENSE_NOT_READ,
     OPERATIONAL_FACETS_ATTR,
     RuntimeKind,
+    ScannerOperationalFacets,
 )
 from automated_security_helper.base.tool_transcript import (
     TRANSCRIPT_FILE_NAME,
@@ -88,6 +89,7 @@ from automated_security_helper.base.tool_transcript import (
     stale_transcripts,
     verify_digests,
 )
+from automated_security_helper.core.enums import ScanCategory, ScannerToolType
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.schemas.sarif_schema_model import Result, SarifReport
 from automated_security_helper.utils.scanner_names import SCANNER_TOOL_TYPES
@@ -870,6 +872,44 @@ def _tool_type_of(name: str, cls: type, override: Optional[str]) -> Optional[str
     return scanner_tool_type(name)
 
 
+def _category_problems(name: str, cls: type) -> list[str]:
+    """The category refusals of *cls*'s own operational row.
+
+    A row that names no scan category, and a row that names several while the
+    plugin keeps the base ``classify_result`` (``ash plugin verify`` has no run, so
+    it reads the can-serve set). A class with no row of its own is refused by bar
+    row 2 (``_row_operational``), not here. A ``classify_result`` inherited from an
+    intermediate base counts as an override.
+    """
+    row = _own_row(cls, OPERATIONAL_FACETS_ATTR)
+    if not isinstance(row, ScannerOperationalFacets):
+        return []
+    categories = row.targets.categories
+    if not categories:
+        every = ", ".join(category.value for category in ScanCategory)
+        return [
+            (
+                f"{name}: its operational row names no scan category; declare "
+                f"targets.categories (one of: {every})"
+            )
+        ]
+    if len(categories) == 1:
+        return []
+    from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+
+    classifier = getattr(cls, "classify_result", None)
+    if classifier is not None and classifier is not ScannerPluginBase.classify_result:
+        return []
+    listed = ", ".join(category.value for category in categories)
+    return [
+        (
+            f"{name}: its operational row names {len(categories)} scan categories "
+            f"({listed}) and the plugin does not override classify_result; declare "
+            "one category or give the plugin a classify_result"
+        )
+    ]
+
+
 def _digest_problems(transcript: ToolTranscript, base: Path) -> list[str]:
     try:
         return verify_digests(transcript, base)
@@ -915,64 +955,58 @@ def _row_facets(
         )
     verdicts: list[Verdict] = []
     cls = _scanner_class(manifest)
+    problems.extend(_category_problems(name, cls))
     declared = _own_row(cls, SCANNER_FACETS_ATTR)
     if declared is None:
         problems.append(f"{name}'s scanner class declares no facets register row")
     elif sound:
-        kind = _tool_type_of(name, cls, tool_type)
-        if kind is None:
-            problems.append(
-                f"{name}'s tool type is declared nowhere ({name}'s operational row "
-                "targets.tool_type, or the shipped scanner table); declare it so its "
-                "results can be read"
+        kind = _tool_type_of(name, cls, tool_type) or ScannerToolType.UNKNOWN.value
+        observed = observe_transcripts(name, sound, kind)
+        problems.extend(observed.problems)
+        every_hint = (
+            f"{name}'s transcripts hold no readable results (no SARIF, no "
+            "registered adapter prep)"
+        )
+        current_hint = (
+            f"{name} has no current recording that can be read as results (a "
+            "mapped cell is judged over a recording of the tool as shipped, "
+            "never over a historical one)"
+        )
+        # When no current recording could be read at all AND the cause is
+        # already a detail on this row (a pinned scanner whose every
+        # recording is historical, a current recording that failed its
+        # digest, a current recording observe_transcripts named because it
+        # could not be read as findings), the per-facet MAPPED judgments
+        # would restate that one cause once per facet; the cause row is the
+        # finding. An unpinned scanner with only historical recordings
+        # records no such cause, so its MAPPED cells are still judged (and
+        # red) rather than silent. The premise holds because every way a
+        # current transcript of `mine` can fail to reach the current frame
+        # leaves a detail: its digest (above), or observe_transcripts'
+        # problems (an unreadable or raising recording).
+        had_current = any(t.retention == "current" for _b, t in mine)
+        cause_recorded = had_current or bool(pinned)
+        for facet in FACET_NAMES:
+            state: FacetState = getattr(declared, facet).state
+            mapped = state is FacetState.MAPPED
+            if mapped and observed.current is None and cause_recorded:
+                continue
+            frame = observed.current if mapped else observed.every
+            verdict = judge(
+                name,
+                facet,
+                state,
+                None if frame is None else frame.get(facet),
+                corpus_hint=current_hint if mapped else every_hint,
             )
-        else:
-            observed = observe_transcripts(name, sound, kind)
-            problems.extend(observed.problems)
-            every_hint = (
-                f"{name}'s transcripts hold no readable results (no SARIF, no "
-                "registered adapter prep)"
-            )
-            current_hint = (
-                f"{name} has no current recording that can be read as results (a "
-                "mapped cell is judged over a recording of the tool as shipped, "
-                "never over a historical one)"
-            )
-            # When no current recording could be read at all AND the cause is
-            # already a detail on this row (a pinned scanner whose every
-            # recording is historical, a current recording that failed its
-            # digest, a current recording observe_transcripts named because it
-            # could not be read as findings), the per-facet MAPPED judgments
-            # would restate that one cause once per facet; the cause row is the
-            # finding. An unpinned scanner with only historical recordings
-            # records no such cause, so its MAPPED cells are still judged (and
-            # red) rather than silent. The premise holds because every way a
-            # current transcript of `mine` can fail to reach the current frame
-            # leaves a detail: its digest (above), or observe_transcripts'
-            # problems (an unreadable or raising recording).
-            had_current = any(t.retention == "current" for _b, t in mine)
-            cause_recorded = had_current or bool(pinned)
-            for facet in FACET_NAMES:
-                state: FacetState = getattr(declared, facet).state
-                mapped = state is FacetState.MAPPED
-                if mapped and observed.current is None and cause_recorded:
-                    continue
-                frame = observed.current if mapped else observed.every
-                verdict = judge(
-                    name,
-                    facet,
-                    state,
-                    None if frame is None else frame.get(facet),
-                    corpus_hint=current_hint if mapped else every_hint,
-                )
-                verdicts.append(verdict)
-                # An "owed" verdict (a declared-UNCONFIRMED cell) blocks promotion
-                # like a FAIL: honest-ignorance states must be resolved to promote
-                # (the register consistency gate lists a fixture owed without
-                # failing; this bar names it on the row so it cannot read green
-                # over a cell nobody has read).
-                if verdict.outcome in ("FAIL", "owed"):
-                    problems.append(f"[{name}.{facet}] {verdict.detail}")
+            verdicts.append(verdict)
+            # An "owed" verdict (a declared-UNCONFIRMED cell) blocks promotion
+            # like a FAIL: honest-ignorance states must be resolved to promote
+            # (the register consistency gate lists a fixture owed without
+            # failing; this bar names it on the row so it cannot read green
+            # over a cell nobody has read).
+            if verdict.outcome in ("FAIL", "owed"):
+                problems.append(f"[{name}.{facet}] {verdict.detail}")
     status = RowStatus.RED if problems else RowStatus.GREEN
     return (
         BarRow(1, "facets green over committed transcripts", status, tuple(problems)),

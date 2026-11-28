@@ -125,7 +125,11 @@ from automated_security_helper.base.uv_tool_mixin import (
     _restore_uv_route,
     guarded_values,
 )
-from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.core.enums import (
+    OfflineStrategy,
+    ScanCategory,
+    ScannerToolType,
+)
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
@@ -857,6 +861,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             targets=opsf.TargetsFacet(
                 kinds=(opsf.TargetKind.IAC_CLOUDFORMATION,),
                 tool_type=ScannerToolType.IAC,
+                categories=(ScanCategory.IAC,),
                 selection="shared template discovery (utils/cfn_template_discovery.py)",
             ),
             runtime=opsf.RuntimeFacet(

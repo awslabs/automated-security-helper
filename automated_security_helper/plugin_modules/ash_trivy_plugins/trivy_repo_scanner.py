@@ -32,7 +32,11 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanne
 from automated_security_helper.base.scanner_plugin import (
     redacted_command_record,
 )
-from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.core.enums import (
+    OfflineStrategy,
+    ScanCategory,
+    ScannerToolType,
+)
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -54,6 +58,14 @@ class TrivyRepoScannerConfigOptions(ScannerOptionsBase):
         List[Literal["vuln", "misconfig", "secret", "license"]],
         Field(
             description="List of what security issues to detect with Trivy Repo specifically",
+            json_schema_extra={
+                "x-ash-categories": {
+                    "vuln": ["sca"],
+                    "misconfig": ["iac"],
+                    "secret": ["secrets"],
+                    "license": ["license"],
+                },
+            },
         ),
     ] = [
         "vuln",
@@ -265,6 +277,12 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                     opsf.TargetKind.DOCKERFILES,
                 ),
                 tool_type=ScannerToolType.SCA,
+                categories=(
+                    ScanCategory.SECRETS,
+                    ScanCategory.SCA,
+                    ScanCategory.IAC,
+                    ScanCategory.LICENSE,
+                ),
                 selection="`trivy repository` over the target; scanners default to vuln, secret, misconfig and license",
                 covers_note="an alpha scanner; it declares no covers display string",
                 tool_type_note=(
@@ -272,6 +290,10 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                     "and license scanners, no source analysis) and fed the reporter-side "
                     "scanner-type exclusions the wrong type; corrected to SCA, the type "
                     "the builtin trivy scanner declares"
+                ),
+                categories_note=(
+                    "trivy-repo scans no container image, so its vuln scanner serves "
+                    "sca only; trivy's vuln scanner also serves container."
                 ),
             ),
             runtime=opsf.RuntimeFacet(

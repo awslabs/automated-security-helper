@@ -192,6 +192,46 @@ def runtime_compat_section(rows: list) -> list[str]:
     return lines
 
 
+def categories_section(rows: list) -> list[str]:
+    """The scan categories each scanner's operational row declares, as written.
+
+    Read the way the plugin base reads them (``nearest_operational_facets``, which
+    walks the MRO), with each row's ``categories_note``. A scanner whose MRO
+    declares no operational row is listed as not declared.
+    """
+    from automated_security_helper.base.scanner_operational_facets import (
+        nearest_operational_facets,
+    )
+
+    lines = [
+        "## Scan categories",
+        "",
+        (
+            "The scan categories each scanner can serve, in canonical order, from "
+            "`targets.categories` on its operational row. A run serves those of "
+            "them its modes are set to run; the scanner reference lists the "
+            "options that choose them. The note says where a category comes only "
+            "from a mode that is off by default, or is read through the nearest "
+            "target kind."
+        ),
+        "",
+        "| Scanner | Categories | Note |",
+        "|---------|------------|------|",
+    ]
+    for p, _declaration in rows:
+        row = nearest_operational_facets(p.cls)
+        if row is None:
+            categories, note = "not declared", ""
+        else:
+            declared = row.targets.categories
+            categories = ", ".join(code(c.value) for c in declared) or "none"
+            written = row.targets.categories_note
+            note = md_prose(written) if written else ""
+        lines.append(f"| [{code(p.name)}](#{p.name}) | {categories} | {note} |")
+    lines.append("")
+    return lines
+
+
 def generate() -> tuple[str, dict]:
     from _plugin_reference import discover
 
@@ -217,7 +257,7 @@ def generate() -> tuple[str, dict]:
         GENERATOR,
         "the scanner facets register (the `facets` class attribute of every "
         "scanner, automated_security_helper/base/scanner_facets.py) and the "
-        "runtime_compat rows of the operational register "
+        "runtime_compat rows and the scan categories of the operational register "
         "(automated_security_helper/base/scanner_operational_facets.py)",
         extra=[
             "",
@@ -268,6 +308,7 @@ def generate() -> tuple[str, dict]:
         )
     lines.append("")
     lines += runtime_compat_section(rows)
+    lines += categories_section(rows)
 
     for p, declaration in rows:
         lines += [

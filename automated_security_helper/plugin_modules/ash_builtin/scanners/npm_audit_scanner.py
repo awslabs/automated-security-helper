@@ -34,7 +34,11 @@ from automated_security_helper.base.scanner_facets import (
 )
 from automated_security_helper.models.vocab import Severity, TargetType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
-from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.core.enums import (
+    OfflineStrategy,
+    ScanCategory,
+    ScannerToolType,
+)
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -749,6 +753,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             targets=opsf.TargetsFacet(
                 kinds=(opsf.TargetKind.DEPENDENCY_LOCKFILES,),
                 tool_type=ScannerToolType.SCA,
+                categories=(ScanCategory.SCA,),
                 selection=(
                     "lockfile discovery over the scan set: package-lock.json, "
                     "npm-shrinkwrap.json, yarn.lock, pnpm-lock.yaml; one audit per "

@@ -211,7 +211,11 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginConfigBase,
 )
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
-from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.core.enums import (
+    OfflineStrategy,
+    ScanCategory,
+    ScannerToolType,
+)
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -1382,6 +1386,11 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             targets=opsf.TargetsFacet(
                 kinds=(opsf.TargetKind.GITHUB_ACTIONS_WORKFLOWS,),
                 tool_type=ScannerToolType.IAC,
+                categories=(
+                    ScanCategory.SECRETS,
+                    ScanCategory.CI,
+                    ScanCategory.QUALITY,
+                ),
                 selection=(
                     ".github/workflows files chosen by ASH from the scan set; the "
                     "tool's own nearest-directory discovery is deliberately replaced"
@@ -1391,6 +1400,11 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                     "split is defensible (linting versus security analysis) and changing "
                     "either moves reporter-side type exclusions, so it is recorded here "
                     "and changed in neither (design E3)"
+                ),
+                categories_note=(
+                    "quality comes from actionlint's shellcheck and pyflakes "
+                    "integrations, which run only when those tools are installed; "
+                    "without them a run serves secrets and ci."
                 ),
             ),
             runtime=opsf.RuntimeFacet(

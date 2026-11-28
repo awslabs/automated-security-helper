@@ -195,7 +195,11 @@ from automated_security_helper.base.scanner_facets import ScannerFacets
 from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
-from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.core.enums import (
+    OfflineStrategy,
+    ScanCategory,
+    ScannerToolType,
+)
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.config.tool_config_trust import empty_tool_directory
@@ -240,6 +244,14 @@ class TrivyScannerConfigOptions(ScannerOptionsBase):
                 "a config, any set but the default is ignored with a warning."
             ),
             min_length=1,
+            json_schema_extra={
+                "x-ash-categories": {
+                    "vuln": ["sca", "container"],
+                    "misconfig": ["iac"],
+                    "secret": ["secrets"],
+                    "license": ["license"],
+                },
+            },
         ),
     ] = ["vuln"]
     license_full: Annotated[
@@ -425,6 +437,13 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
                     opsf.TargetKind.CONTAINER_IMAGE,
                 ),
                 tool_type=ScannerToolType.SCA,
+                categories=(
+                    ScanCategory.SECRETS,
+                    ScanCategory.SCA,
+                    ScanCategory.CONTAINER,
+                    ScanCategory.IAC,
+                    ScanCategory.LICENSE,
+                ),
                 selection=(
                     "`trivy fs` over the target; the default scanner is vuln only, and "
                     "secret, misconfig and license are opt-in (options.scanners); a "

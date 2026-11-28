@@ -51,6 +51,7 @@ from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.core.status_order import grade as grade_status
 from automated_security_helper.models.workspace import is_workspace_scan
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.scan_categories import scanner_categories
 
 
 class ScannerMetrics(ScannerSeverityCount):
@@ -1306,6 +1307,13 @@ def _populate_scanner_results_from_unified_metrics(
             status=status,
             missing_reason=metrics.missing_reason,
         )
+        # The scanner's can-serve categories, set on every rebuilt row so the
+        # payloads that drop unset fields keep them. A name nothing in this process
+        # resolves (a results file read back without its plugin) keeps the
+        # categories the row already carries.
+        categories = [category.value for category in scanner_categories(scanner_name)]
+        if categories or not fields.get("categories"):
+            fields["categories"] = categories
         # The exit code is written as the metrics have it, None included: the
         # model's default is 0, which reads as a tool that ran and exited clean,
         # so a tool that never ran (missing, excluded, refused before its start)

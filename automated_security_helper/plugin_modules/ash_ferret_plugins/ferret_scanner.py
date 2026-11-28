@@ -78,7 +78,11 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     redacted_command_record,
 )
-from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.core.enums import (
+    OfflineStrategy,
+    ScanCategory,
+    ScannerToolType,
+)
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -698,7 +702,10 @@ class FerretScannerConfigOptions(ScannerOptionsBase):
             "DRIVERS_LICENSE, EMAIL, INTELLECTUAL_PROPERTY, IP_ADDRESS, MEDICAL_ID, "
             "METADATA, OTP, PASSPORT, PERSON_NAME, PHONE, PHYSICAL_ADDRESS, SECRETS, "
             "SOCIAL_MEDIA, SSN, VIN, or 'all'. The authoritative list for the installed "
-            "version is 'ferret-scan --help checks'."
+            "version is 'ferret-scan --help checks'.",
+            json_schema_extra={
+                "x-ash-categories": {"SECRETS": ["secrets"], "*": ["pii"]},
+            },
         ),
     ] = "all"
 
@@ -1225,6 +1232,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             targets=opsf.TargetsFacet(
                 kinds=(opsf.TargetKind.SECRETS_CONTENTS,),
                 tool_type=ScannerToolType.SECRETS,
+                categories=(ScanCategory.SECRETS, ScanCategory.PII),
                 selection="the scan set, with local confidence validators under a time budget",
                 covers_note="an alpha scanner; it declares no covers display string",
             ),
@@ -1366,6 +1374,26 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
 
     # split_rule_qualifier: the inherited no-split default is correct — ferret-scan
     # rule ids are the plain check type with no granular qualifier.
+
+    def _category_mode_values(self, field_name: str) -> Optional[List[str]]:
+        """The checks this scanner runs, as keys of the ``checks`` category map;
+        any other field is read as the plugin base reads it.
+
+        None (every check) when ``checks`` is empty or reads ``all`` in any case;
+        otherwise its comma-separated names, each stripped and upper-cased, empty
+        ones dropped, so a value of separators only serves nothing. A list (the
+        shape a later options change may give the field) is read as its items
+        joined by commas.
+        """
+        if field_name != "checks":
+            return super()._category_mode_values(field_name)
+        raw = getattr(getattr(self.config, "options", None), "checks", None)
+        if isinstance(raw, (list, tuple)):
+            raw = ",".join(str(item) for item in raw)
+        text = str(raw or "").strip()
+        if not text or text.lower() == "all":
+            return None
+        return [part.strip().upper() for part in text.split(",") if part.strip()]
 
     def model_post_init(self, context):
         if self.config is None:
