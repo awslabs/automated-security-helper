@@ -105,7 +105,7 @@ ash scan fs --only-scanners detect-secrets --shard-index 0 --shard-count 2 --out
 ash scan fs --only-scanners detect-secrets --shard-index 1 --shard-count 2 --output-dir ../shard-1 --no-fail-on-findings
 ```
 
-`--only-scanners` narrows what a shard runs, not how the scanners are split, so detect-secrets
+The scanner selection narrows what a shard runs, not how the scanners are split, so detect-secrets
 runs only on the shard it is dealt to, and the other shard runs no scanner. Each shard
 records its share in `metadata.shard`:
 
@@ -171,9 +171,9 @@ It refuses to merge, and exits 1, when a shard index is missing or repeated, the
 disagree about the count, two shards ran the same scanner, the shards split different sets
 of scanners, a results file is not from a sharded scan, a `--results` directory holds no
 results file, or a shard owned scanners and completed none of them. A shard that owned only
-scanners that `--only-scanners` or `--exclude-scanners` left out counts as complete. It
+scanners that its selection or `--exclude-scanners` left out counts as complete. It
 warns, without refusing, when a scanner ran on no shard although a shard's selection asked
-for it: the jobs of the matrix were given different `--only-scanners`, `--exclude-scanners`,
+for it: the jobs of the matrix were given different scanner selections, `--exclude-scanners`,
 or configuration, and the shard that owned the scanner did not select it.
 
 ### Sharding in GitHub Actions {#sharding-github}
@@ -460,7 +460,7 @@ before any project runs. Exit code 4 means the workspace itself is wrong: the wo
 or policy file cannot be used, a project is missing, or the projects need different plugin
 modules or incompatible scanner versions. The deprecated `--workspace` option and
 `--source-dir` together also exit 4. Exit code 5 is a usage error, such as an option that
-`ash scan workspace` does not take, or an `--only-scanners` list that names no scanner or
+`ash scan workspace` does not take, or a scanner selection that names no scanner or
 that `--exclude-scanners` cancels:
 
 <!-- doctest: run expect-exit=5 -->
