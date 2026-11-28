@@ -17,7 +17,9 @@ What it pins on how-to/supported-configurations.md:
 - the sentences that say what the page lists, what the four levels mean and how a
   configuration is described;
 - the ways out that the section on a missing scanner build links, for every platform
-  that can lack a build;
+  that can lack a build, and the one way out it says a Mac is offered;
+- the ways out that the section on GuardDog's missing kernel sandbox links, one for each
+  kernel that can lack Landlock: this machine's and the container engine's;
 - the one claim that depends on the scanner list: that several tools have no build for
   Windows on arm64, which holds while at least two of the shipped scanners declare it.
 
