@@ -151,14 +151,15 @@ UV_NO_ENV_FILE = "--no-env-file"
 # as uv does. A value that is absolute or holds a path separator is a path, judged
 # like the paths above (a relative one is the tree's, and ``~`` is not expanded). A
 # name with no separator is a path too when a file or directory of that name is in the
-# directory uv starts in, which is ASH's own working directory or one of the
-# directories judged, so such a name is the tree's. It is dropped even where uv would
-# read it as a request first (a directory named ``3.12``), the safe side. Any other
-# name is a version request (``3.12``, ``cpython@3.12``, ``python3.12``) or a program
-# uv looks up on PATH, and is passed on. ``without_tree_uv_files`` judges it on every
-# route that starts uv; ``plugin_base`` also checks a scanner's own ``UV_PYTHON``, drops
-# one that names an interpreter inside the tree itself, and names it in the same
-# warning (``warn_of_a_uv_python_left_out``).
+# directory uv starts in, which is ASH's own working directory, the directory the
+# caller says the child starts in (``start``, a filesystem root included) or one of
+# the directories judged, so such a name is the tree's. It is dropped even where uv
+# would read it as a request first (a directory named ``3.12``), the safe side. Any
+# other name is a version request (``3.12``, ``cpython@3.12``, ``python3.12``) or a
+# program uv looks up on PATH, and is passed on. ``without_tree_uv_files`` judges it
+# on every route that starts uv; ``plugin_base`` also checks a scanner's own
+# ``UV_PYTHON``, drops one that names an interpreter inside the tree itself, and names
+# it in the same warning (``warn_of_a_uv_python_left_out``).
 # ``UV_PROJECT_ENVIRONMENT`` names a project's environment, and the uv tool commands run
 # no project. The endpoints of remote services (``UV_S3_ENDPOINT_URL``,
 # ``UV_GCS_ENDPOINT_URL``, ``UV_AZURE_ENDPOINT_URL``, ``UV_MALWARE_CHECK_URL`` and
@@ -455,20 +456,43 @@ def _names_a_tree_path(
     return _tree_path_reason(value, roots, pathmod=pathmod) is not None
 
 
+def _is_a_filesystem_root(path: Union[str, "os.PathLike[str]"]) -> bool:
+    r"""Whether ``path`` is a filesystem root: a path equal to its own anchor.
+
+    ``/`` on POSIX, and on Windows a drive root such as ``C:\`` or a UNC share root
+    such as ``\\host\share\``. The path is read as spelled (made absolute) and by its
+    real path, and either being a root is enough, so a link to ``/`` is one too.
+    """
+    text = os.fspath(path)
+    for form in (os.path.abspath(text), os.path.realpath(text)):
+        pure = PurePath(form)
+        if pure.anchor == str(pure):
+            return True
+    return False
+
+
 def _uv_python_reason(
-    value: str, roots: Iterable[Union[str, "os.PathLike[str]"]]
+    value: str,
+    roots: Iterable[Union[str, "os.PathLike[str]"]],
+    *,
+    start: Optional[Union[str, "os.PathLike[str]"]] = None,
 ) -> Optional[str]:
     """Why ``UV_PYTHON`` set to ``value`` names a path of the tree, or None when not.
 
     uv reads the value as a path when it is absolute or holds a path separator, and
     that path is judged as the other variables' are (``_tree_path_reason``): a relative
     one is the tree's, and ``~`` is not expanded. A name with no separator is a path
-    too when a file or directory of that name is in the directory uv starts in, which
-    is ASH's own working directory or one of ``roots``; such a name is the tree's and
-    reads as a relative path. A name that is also an entry there is dropped even where
-    uv would read it as a request first (a directory named ``3.12``): the safe side.
-    Any other name is a version request (``3.12``, ``cpython@3.12``, ``python3.12``) or
-    a program uv looks up on PATH, and an empty value names nothing: they are kept.
+    too when a file or directory of that name is in the directory uv starts in. That
+    directory is ``start`` when the caller knows it, and otherwise ASH's own working
+    directory, which a child given no directory starts in; both are looked in, and so
+    is each of ``roots``. ``start`` is looked in whatever it is, a filesystem root
+    included: ``without_tree_uv_files`` judges no absolute path against such a root,
+    but uv still reads a bare name as the entry of that name where it starts. Such a
+    name is the tree's and reads as a relative path. A name that is also an entry there
+    is dropped even where uv would read it as a request first (a directory named
+    ``3.12``): the safe side. Any other name is a version request (``3.12``,
+    ``cpython@3.12``, ``python3.12``) or a program uv looks up on PATH, and an empty
+    value names nothing: they are kept.
     """
     if not value:
         return None
@@ -480,6 +504,8 @@ def _uv_python_reason(
     if path_shaped:
         return _tree_path_reason(value, roots)
     directories = [os.fspath(root) for root in roots]
+    if start is not None:
+        directories.append(os.fspath(start))
     with contextlib.suppress(OSError):
         directories.append(os.getcwd())
     for directory in directories:
@@ -538,6 +564,8 @@ def _warn_of_a_variable_left_out(name: str, reason: str) -> None:
 def without_tree_uv_files(
     environment: Optional[Dict[str, str]],
     roots: Iterable[Union[str, "os.PathLike[str]"]] = (),
+    *,
+    start: Optional[Union[str, "os.PathLike[str]"]] = None,
 ) -> Optional[Dict[str, str]]:
     """``environment`` without a uv variable whose value names a path of the tree.
 
@@ -547,22 +575,33 @@ def without_tree_uv_files(
     path judged on its own. The variable is dropped when any of its paths is the
     tree's: relative (uv resolves it against its working directory, the scanned tree,
     and does not expand a leading ``~``), or equal to or inside one of ``roots``, of
-    the active scan's trees (``subprocess_utils.scanned_trees``) or of the directories
-    ``judging_uv_paths_in`` names, by its spelling or by where its links lead
-    (``_tree_path_reason`` has the other spellings it reads). ``roots`` are directories
-    that are the scanned tree's or derived from it, such as a caller's working,
+    the active scan's trees (``subprocess_utils.scanned_trees``), of the directories
+    ``judging_uv_paths_in`` names or of ``start``, by its spelling or by where its
+    links lead (``_tree_path_reason`` has the other spellings it reads). ``roots`` are
+    directories that are the scanned tree's or derived from it, such as a caller's
     results, source and output directories. A variable whose paths are all absolute
     and outside every one of them is the operator's and stays whole, and so does one
     that holds only URLs that name no local path. A variable that takes only a path is
     the exception to the URL rules above: uv reads a URL spelling of its value as a
     relative path, so it is dropped.
 
+    ``start`` is the directory the child starts in, when the caller knows it. It is
+    judged as ``roots`` are, except where it is a filesystem root
+    (``_is_a_filesystem_root``): there it adds nothing to the directories an absolute
+    path is judged against. ``path_trust.cwd_outside_scanned_tree`` normally gives
+    checkov, Syft and Ferret the filesystem root of the scanned tree to start in, to
+    keep them outside it. A root of ``/`` would make every absolute path the tree's,
+    so the operator's own absolute uv files would be left out of those runs and named
+    in a warning as the tree's.
+
     ``UV_PYTHON`` is read as ``_uv_python_reason`` says. A path (absolute, or holding a
     path separator) is judged as the paths above are. A name with no separator is the
-    tree's when a file or directory of that name is in ASH's working directory or in
-    one of the directories above, and is dropped even where uv would read it as a
-    request first (a directory named ``3.12``), the safe side. Any other name, a
-    version request or a program uv looks up on PATH, stays.
+    tree's when a file or directory of that name is in ASH's working directory, in
+    ``start`` or in one of the directories above, and is dropped even where uv would
+    read it as a request first (a directory named ``3.12``), the safe side. ``start``
+    is looked in whatever it is, a filesystem root included, because uv still reads a
+    bare ``UV_PYTHON`` as the entry of that name in the directory it starts in. Any
+    other name, a version request or a program uv looks up on PATH, stays.
 
     A variable that is dropped is named in one warning for each reason in the process
     (``_reset_uv_tool_runner_caches`` forgets them), which never holds its value.
@@ -574,6 +613,8 @@ def without_tree_uv_files(
 
     current = snapshot_environ() if environment is None else environment
     trees = [*roots, *scanned_trees(), *_JUDGED_UV_ROOTS.get()]
+    if start is not None and not _is_a_filesystem_root(start):
+        trees.append(start)
     dropped: Dict[str, str] = {}
     for name in _UV_PATH_VARIABLES:
         value = current.get(name)
@@ -586,7 +627,7 @@ def without_tree_uv_files(
                 break
     python = current.get("UV_PYTHON")
     if isinstance(python, str):
-        python_reason = _uv_python_reason(python, trees)
+        python_reason = _uv_python_reason(python, trees, start=start)
         if python_reason is not None:
             dropped["UV_PYTHON"] = python_reason
     if not dropped:
@@ -3093,9 +3134,9 @@ class UVToolRunner:
                 without it. Each is checked as the install checks its own.
             tree_roots: Directories that are the scanned tree's or derived from it
                 (a converter passes its source and output directories), judged as
-                ``cwd`` and ``results_dir`` are: a uv path variable that lies inside
-                one is not passed on to the child. The trees of the active scan are
-                always judged too.
+                ``results_dir`` is, and as ``cwd`` is unless that is a filesystem
+                root: a uv path variable that lies inside one is not passed on to the
+                child. The trees of the active scan are always judged too.
 
         Returns:
             CompletedProcess result with enhanced output handling
@@ -3132,13 +3173,22 @@ class UVToolRunner:
 
         # No env file: the one UV_ENV_FILE names is read relative to cwd, the
         # scanned tree. A uv path variable the tree supplies is dropped too: one
-        # with a relative path, or with a path inside cwd, the results directory, a
-        # directory the caller names in tree_roots, or a tree of the active scan
-        # (without_tree_uv_files adds those).
+        # with a relative path, or with a path inside the results directory, a
+        # directory the caller names in tree_roots, a tree of the active scan, or
+        # cwd, the directory the run starts in, unless that is a filesystem root
+        # (without_tree_uv_files adds those). cwd goes in as ``start``, not among
+        # the roots: checkov, Syft and Ferret start their tool at the filesystem
+        # root of the scanned tree, to keep it outside the tree, and a root of ``/``
+        # would make every absolute path the tree's, so the operator's own files
+        # outside it would be left out. A filesystem root adds nothing to the
+        # directories an absolute path is judged against, and a bare UV_PYTHON is
+        # still looked up in cwd, since uv reads it as the entry of that name where
+        # it starts.
         command.append(UV_NO_ENV_FILE)
         env = without_tree_uv_files(
             env,
-            tuple(path for path in (cwd, results_dir, *tree_roots) if path is not None),
+            tuple(path for path in (results_dir, *tree_roots) if path is not None),
+            start=cwd,
         )
 
         # Build command with --from parameter if extras or version constraint specified

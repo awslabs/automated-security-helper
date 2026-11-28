@@ -2408,21 +2408,25 @@ class PluginBase(UVToolMixin, BaseModel):
             # relative name against the directory it starts in: the scanned tree.
             # A value is not passed on when a path in it is relative (a leading
             # ``~`` included, which uv does not expand) or lies inside the source
-            # directory, the output directory, the directory the child starts in or
-            # a scanned tree, by its spelling or by its real path; and a ``uv tool
-            # run`` gets ``--no-env-file``. An absolute path outside those
-            # directories is the operator's and stays. The directory the child
-            # starts in is ``working_dir``, the caller's ``cwd``, which need not be
-            # the source directory, and a bare ``UV_PYTHON`` such as ``.venv`` is
-            # judged against it: it names an entry of that directory when it holds
-            # one of that name, and uv reads it as that path.
+            # directory, the output directory, the directory the child starts in
+            # (unless it is a filesystem root) or a scanned tree, by its spelling or
+            # by its real path; and a ``uv tool run`` gets ``--no-env-file``. An
+            # absolute path outside those directories is the operator's and stays.
+            # The directory the child starts in is ``working_dir``, the caller's
+            # ``cwd``, which need not be the source directory. It goes in as
+            # ``start``, not among the roots: checkov, Syft and Ferret start their
+            # tool at the filesystem root of the scanned tree, to keep it outside
+            # the tree, and a root of ``/`` would make every absolute path the
+            # tree's, so the operator's own files outside it would be left out. A
+            # filesystem root adds nothing to the directories an absolute path is
+            # judged against. A bare ``UV_PYTHON`` such as ``.venv`` is judged
+            # against ``working_dir`` in every case, a filesystem root included: it
+            # names an entry of that directory when it holds one of that name, and
+            # uv reads it as that path.
             env = without_tree_uv_files(
                 env,
-                (
-                    Path(source_dir),
-                    Path(self._require_context().output_dir),
-                    working_dir,
-                ),
+                (Path(source_dir), Path(self._require_context().output_dir)),
+                start=working_dir,
             )
             command = with_no_env_file(command)
 

@@ -198,7 +198,8 @@
   interpreter search path (`UV_PYTHON_SEARCH_PATH`), and the project and working
   directories (`UV_PROJECT`, `UV_WORKING_DIR`). A scanner's own runs, and the notebook
   converter's, also leave out such a value when it lies inside the output directory or
-  the directory the run starts in.
+  the directory the run starts in, which counts only when it is not the filesystem
+  root, where checkov, Syft and Ferret start their tool to keep it outside the tree.
   A value of a variable that takes only a path (`UV_CONFIG_FILE`, `UV_ENV_FILE`,
   `UV_PROJECT`, `UV_WORKING_DIR`, `UV_PYTHON_CACHE_DIR`, `UV_CREDENTIALS_DIR` and
   `UV_PYTHON_SEARCH_PATH`) is read as a path even when it is spelled as a URL, as uv
@@ -207,8 +208,9 @@
   on unchanged. `UV_PYTHON` is judged the same way on all of these routes. A value that
   is absolute or holds a path separator is a path, and is left out by the rules above
   (a relative `.venv/bin/python`, say). A name with no separator is left out when a
-  file or directory of that name is in ASH's working directory or in a directory the
-  rules above judge against, because uv reads it as that path (`.venv`, say). That
+  file or directory of that name is in ASH's working directory, in the directory the
+  run starts in (the filesystem root included) or in a directory the rules above
+  judge against, because uv reads it as that path (`.venv`, say). That
   holds for a directory named like a version request (`3.12`) too, where uv would read
   the request first. A version request (`3.12`, `cpython@3.12`, `python3.12`), a
   program name that uv looks up on PATH, and an empty value are passed on.
