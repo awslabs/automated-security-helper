@@ -1163,8 +1163,9 @@ they read a generated page:
   block nobody lists would keep its last body for good, and a listed block that is missing
   would never be written.
 - A scanner name in a generated table is checked like one in any other table. A fenced
-  block inside a generated block is not held to the rule for commands that nothing runs
-  ([The illustrative ratchet](#the-illustrative-ratchet)), as a generated page is not.
+  block inside a generated block is left out of the count of commands that nothing runs
+  ([The illustrative ratchet](#the-illustrative-ratchet)), whatever it shows, because the
+  freshness test holds it to its generator's output.
 
 ### The support matrices
 
