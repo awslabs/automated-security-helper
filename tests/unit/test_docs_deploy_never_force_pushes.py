@@ -246,6 +246,10 @@ class ReachedJob:
 # --------------------------------------------------------------------------- shell
 
 _SHELLS = frozenset({"bash", "sh", "zsh", "dash"})
+
+#: A shell option that takes the next word as its value, as in ``-o pipefail`` and
+#: ``-O extglob``. The letter that takes it can end a cluster, as in ``-euo pipefail``.
+_SHELL_OPTION_WITH_A_VALUE = re.compile(r"[-+][A-Za-z]*[oO]")
 _GIT_OPTIONS_WITH_A_VALUE = frozenset(
     {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
 )
@@ -445,8 +449,8 @@ def _tokens(text: str) -> list[_Token]:
 def _shell_script(words: list[str]) -> str | None:
     """The script a command hands to a shell with ``-c``, or None.
 
-    It is the first word after the shell's options, when one of them is ``-c`` or a
-    cluster such as ``-ec``.
+    It is the first word after the shell's options and their values, when one of the
+    options is ``-c`` or a cluster such as ``-ec``.
     """
     for index, word in enumerate(words):
         if Path(word).name not in _SHELLS:
@@ -456,7 +460,7 @@ def _shell_script(words: list[str]) -> str | None:
         while position < len(words) and words[position][:1] in ("-", "+"):
             option = words[position]
             takes_a_script = takes_a_script or _short_options_include(option, "c")
-            position += 2 if option in ("-o", "+o") else 1
+            position += 2 if _SHELL_OPTION_WITH_A_VALUE.fullmatch(option) else 1
         if takes_a_script and position < len(words):
             return words[position]
     return None
