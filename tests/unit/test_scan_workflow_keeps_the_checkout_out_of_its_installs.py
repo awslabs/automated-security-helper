@@ -48,9 +48,12 @@ is a sibling of the checkout.
    outside the checkout. Controls: a frozen fixed command passes and the frozen pre-fix
    command fails the same predicate, so the predicate can tell them apart.
 
-Steps are located by content, not by name, so a renamed or merged step is still checked,
-and so is a step added later. ``test_the_install_steps_found_install_grype_and_syft`` fails
-if the locator stops finding the Install Grype and Install Syft steps.
+Steps are located by the commands in their run text, not by name or by their comments.
+So a renamed or merged step is still checked, and so is a step added later, while a
+step whose comments alone name ``uv run`` or python is not taken for one that runs it.
+``test_the_install_steps_found_install_grype_and_syft`` fails if the locator stops
+finding the Install Grype and Install Syft steps, and
+``TestTheLocatorReadsCommandsNotComments`` fails if it reads comments again.
 
 What it does not cover
 ----------------------
@@ -93,8 +96,22 @@ def _workflow_and_job() -> tuple[ga.Workflow, dict[str, Any]]:
 
 
 def _run_contains(run: str, fragment: str) -> bool:
-    """Whether ``fragment`` occurs anywhere in ``run``, a step's run text."""
-    return fragment in run
+    """Whether ``fragment`` is on a line of a step's run text that bash runs.
+
+    A line whose first non-blank character is ``#`` is a comment to bash and runs
+    nothing, so it is left out. Heredoc body lines that start with ``#`` are left out
+    too, which loses nothing: the line that opens the heredoc holds the command that
+    reads it. A ``#`` line inside a quoted string that spans lines is left out as well,
+    though bash reads it as part of the string. Only whole-line comments are left out:
+    a ``#`` later in a line starts a comment or not as bash quoting decides, so that
+    line is searched whole. The locator may then find a step too many, which shows as
+    a failing row, rather than one too few, which would leave a step unchecked.
+    """
+    return any(
+        fragment in line
+        for line in run.split("\n")
+        if not line.lstrip(" \t").startswith("#")
+    )
 
 
 def _steps_whose_run_contains(fragment: str) -> list[str]:
