@@ -26,9 +26,9 @@ What a run does
 ---------------
 * Collects every matrix, refusing two collectors that return one name.
 * Renders each page, and each block's body, as a list of lines. A block lands between
-  its markers with the F1 library (``scripts/_generated_blocks.py``), which refuses a
-  missing, repeated, nested or misspelled marker, an orphan block, a body holding a
-  placeholder, and a file it cannot read as LF text.
+  its markers with the generated-blocks library (``scripts/_generated_blocks.py``),
+  which refuses a missing, repeated, nested or misspelled marker, an orphan block, a
+  body holding a placeholder, and a file it cannot read as LF text.
 * Writes a page whole and a block in place. A refusal comes before any write: a file
   the registry names that cannot take its block leaves every other file as it was.
 * With ``--check``, writes nothing: it prints each page that differs with a diff, and

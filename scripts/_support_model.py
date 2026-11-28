@@ -112,8 +112,8 @@ class ModelError(ValueError):
 # --- the closed vocabulary --------------------------------------------------------
 
 #: The phrases a state cell may hold, as full-match patterns. A phrase with a hole
-#: (``refused: <reason>``) has a pattern that accepts any plain reason. The list is the
-#: plan's closed set; a new phrase is an edit here, in the same change that renders it.
+#: (``refused: <reason>``) has a pattern that accepts any plain reason. The list is
+#: closed: a new phrase is an edit here, in the same change that renders it.
 VOCABULARY: tuple[str, ...] = (
     r"yes",
     r"no",
