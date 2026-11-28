@@ -80,13 +80,14 @@
   `.ash/` is read from the file's own directory, so rewrite it for the root first. A
   TOML config, `.ashrc.toml` or `ashrc.toml`, cannot be moved: `.ash.yaml` is read as
   YAML, so rewrite its settings as YAML in `.ash.yaml` and delete the TOML file, and
-  put `!ENV` and a space before the opening quote of each string whose text starts
-  with `${`, and keep its quotes if it has one quote mark on each side, because a
-  quoted YAML value without the tag is read as literal text. Such a string that has
-  three quote marks on each side becomes a one-line double-quoted string with the
-  text TOML reads: each line break in it as `\n`, a literal string's backslashes and
-  double quotes escaped, and a basic string's escapes kept and its other double
-  quotes escaped. A JSON config that contains a tab character needs each tab
+  put `!ENV` and a space before the opening quote of each string value whose text
+  starts with `${`, and keep its quotes if it has one quote mark on each side,
+  because a quoted YAML value without the tag is read as literal text. Such a string
+  that has three quote marks on each side becomes a one-line double-quoted string
+  with the text TOML reads, and so does any string whose text holds a C1 control
+  (U+0080 to U+009F), U+2028, U+2029, U+FFFE or U+FFFF;
+  [Move an existing config to `.ash.yaml`](docs/content/how-to/configure.md#move-config)
+  gives the rules. A JSON config that contains a tab character needs each tab
   replaced with spaces first, because YAML refuses it. This repository's own config
   moved the same way.
 - **A finding moved from an MCP config's generated script back to the config file has a
