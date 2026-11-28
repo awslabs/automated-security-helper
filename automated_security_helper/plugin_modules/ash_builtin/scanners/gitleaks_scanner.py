@@ -344,6 +344,55 @@ def _name_length(name: str) -> int:
     return len(name.encode("utf-16-le", "surrogatepass")) // 2
 
 
+def _rescan_key(result: Any) -> Optional[Tuple[Any, ...]]:
+    """What identifies a finding when the re-scan's results are added to the first
+    run's: its file, rule and the whole region, or ``None`` for a result that has
+    no such key to compare.
+
+    The whole region, not the fingerprint's line: one fingerprint hides every
+    match of its rule on the line, and each match is a finding.
+
+    This reads the tool's raw document, before the shared reading step. A result
+    that is not an object, or whose locations, region or uri has a type that
+    cannot be read (or hashed), has no key; it is neither compared nor dropped
+    here, and the reading step reads it as it reads any result when there is no
+    ``.gitleaksignore``.
+    """
+    if not isinstance(result, dict):
+        return None
+    locations = result.get("locations")
+    if locations is None:
+        locations = []
+    if not isinstance(locations, list):
+        return None
+    first = locations[0] if locations else {}
+    if not isinstance(first, dict):
+        return None
+    physical = first.get("physicalLocation")
+    physical = {} if physical is None else physical
+    if not isinstance(physical, dict):
+        return None
+    region = physical.get("region")
+    region = {} if region is None else region
+    artifact = physical.get("artifactLocation")
+    artifact = {} if artifact is None else artifact
+    if not isinstance(region, dict) or not isinstance(artifact, dict):
+        return None
+    key = (
+        artifact.get("uri"),
+        result.get("ruleId"),
+        region.get("startLine"),
+        region.get("startColumn"),
+        region.get("endLine"),
+        region.get("endColumn"),
+    )
+    try:
+        hash(key)
+    except TypeError:
+        return None
+    return key
+
+
 def drop_regions_without_a_line(
     raw: Any, record: Optional[IngestRecord] = None
 ) -> None:
@@ -1388,29 +1437,22 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             )
         if not relatives:
             return
-        runs = raw.get("runs") or []
-        if not runs:
+        # This reads the tool's raw document, before the reading step. A document
+        # of another shape is left to that step, which refuses it, and a result
+        # that cannot be keyed is not compared: the step reads it as it reads any
+        # result when there is no .gitleaksignore.
+        if not isinstance(raw, dict):
+            return
+        runs = raw.get("runs")
+        if not isinstance(runs, list) or not runs or not isinstance(runs[0], dict):
             return
         results = runs[0].setdefault("results", None) or []
+        if not isinstance(results, list):
+            return
         runs[0]["results"] = results
 
-        def key(result: Dict[str, Any]) -> Tuple[Any, ...]:
-            # The whole region, not the fingerprint's line: one fingerprint hides
-            # every match of its rule on the line, and each match is a finding.
-            location = ((result.get("locations") or [{}])[0]).get(
-                "physicalLocation", {}
-            )
-            region = location.get("region") or {}
-            return (
-                (location.get("artifactLocation") or {}).get("uri"),
-                result.get("ruleId"),
-                region.get("startLine"),
-                region.get("startColumn"),
-                region.get("endLine"),
-                region.get("endColumn"),
-            )
-
-        seen = {key(result) for result in results}
+        key = _rescan_key
+        seen = {k for k in map(key, results) if k is not None}
         scan_path = self._scan_path(target)
         rescan_dir = results_file.parent / RESCAN_DIR_NAME
         if rescan_dir.is_symlink() or rescan_dir.is_file():
@@ -1447,11 +1489,18 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 data = self._run_rescan(
                     final_args, cwd, scan_arg, report, rescan_dir, remaining
                 )
-                for run in data.get("runs") or []:
-                    for result in run.get("results") or []:
+                rescanned = data.get("runs") if isinstance(data, dict) else None
+                for run in rescanned if isinstance(rescanned, list) else []:
+                    found = run.get("results") if isinstance(run, dict) else None
+                    for result in found if isinstance(found, list) else []:
                         self._respell_rescan_result(result, scan_path)
-                        if key(result) not in seen:
-                            seen.add(key(result))
+                        result_key = key(result)
+                        if result_key is None:
+                            # Not comparable: kept, for the reading step to read
+                            # as it reads any result.
+                            results.append(result)
+                        elif result_key not in seen:
+                            seen.add(result_key)
                             results.append(result)
                             added += 1
         finally:
@@ -1893,14 +1942,19 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         its path relative to the target: the source scan's spelling already. The
         converted target is scanned by its absolute path, so its URIs are too.
         """
-        if scan_path == ".":
+        if scan_path == "." or not isinstance(result, dict):
             return
-        for location in result.get("locations") or []:
-            artifact = (location.get("physicalLocation") or {}).get(
-                "artifactLocation"
-            ) or {}
-            uri = artifact.get("uri")
-            if uri:
+        locations = result.get("locations")
+        for location in locations if isinstance(locations, list) else []:
+            physical = (
+                location.get("physicalLocation") if isinstance(location, dict) else None
+            )
+            artifact = (
+                physical.get("artifactLocation") if isinstance(physical, dict) else None
+            )
+            uri = artifact.get("uri") if isinstance(artifact, dict) else None
+            # A uri that is not text is left as written, for the reading step.
+            if uri and isinstance(uri, str):
                 # Cleaned, as gitleaks' filepath.Join cleans each path it walks.
                 artifact["uri"] = posixpath.normpath(f"{scan_path}/{uri}")
 
