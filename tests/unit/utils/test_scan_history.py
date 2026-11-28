@@ -328,6 +328,113 @@ def test_a_write_failure_is_logged_and_never_raised(tmp_path, monkeypatch):
     assert scan_history.record_run(results(finding("B101")), tmp_path) is None
 
 
+@pytest.mark.parametrize(
+    "renders", [True, False], ids=["the-text-renders", "the-text-cannot-be-rendered"]
+)
+def test_a_write_failure_is_logged_in_its_own_words_or_by_its_type(
+    tmp_path, monkeypatch, caplog, renders
+):
+    # Red before the fix: with the text that cannot be rendered, record_run
+    # formatted the failure with a plain f-string, and an OSError built from one
+    # argument renders that argument with its __str__, which raises here, so
+    # record_run raised it, though its docstring says a failure is logged, never
+    # raised.
+    asked = []
+
+    class _TextThatCannotBeRendered:
+        def __str__(self) -> str:
+            asked.append(self)
+            raise ValueError("a planted failure making the text")
+
+    planted = _TextThatCannotBeRendered()
+    failure = OSError("disk full" if renders else planted)
+    run = results(finding("B101"))
+    calls = []
+
+    def refuse(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise failure
+
+    monkeypatch.setattr(scan_history, "write_run_record", refuse)
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        assert scan_history.record_run(run, tmp_path) is None
+
+    assert calls == [((run, tmp_path, scan_history.DEFAULT_KEEP_RUNS), {})], calls
+    assert asked == ([] if renders else [planted]), asked
+    shown = "disk full" if renders else "<OSError: its message could not be rendered>"
+    said = [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith("Could not record this scan")
+    ]
+    assert said == [f"Could not record this scan in the history: {shown}"], said
+
+
+class _AnOSErrorWithItsOwnText(OSError):
+    """An OSError whose own ``__str__`` returns its one argument as it is."""
+
+    def __str__(self) -> str:
+        return self.args[0]
+
+
+def _a_text_of_a_str_subclass(method: str, asked: list, text: str) -> str:
+    """*text*, as an instance of a str subclass whose own ``method`` records each
+    call in ``asked``: its ``__format__`` gives other words, its ``__str__``
+    raises."""
+
+    class _Text(str):
+        __slots__ = ()
+
+    def other_words(self: str, spec: str) -> str:
+        asked.append(method)
+        return "other words"
+
+    def refuse(self: str) -> str:
+        asked.append(method)
+        raise ValueError(f"a planted {method}")
+
+    setattr(_Text, method, other_words if method == "__format__" else refuse)
+    return _Text(text)
+
+
+@pytest.mark.parametrize(
+    "method",
+    [
+        pytest.param(None, id="an-exact-str"),
+        pytest.param("__format__", id="a-subclass-whose-format-says-other-words"),
+        pytest.param("__str__", id="a-subclass-whose-str-raises"),
+    ],
+)
+def test_a_write_failure_whose_text_is_a_str_subclass_is_logged_as_its_characters(
+    tmp_path, monkeypatch, caplog, method
+):
+    # Red before the fix: record_run formatted own_error_text(exc) in an
+    # f-string, and own_error_text returned what the error's __str__ returned,
+    # here an instance of a str subclass. An f-string formats a str subclass
+    # through its own __format__, and str.__format__ with an empty spec calls its
+    # own __str__ (an exact str is used as is), so the warning said other words
+    # or record_run raised, though its docstring says a failure is never raised.
+    asked: list = []
+    text = "disk full"
+    if method is not None:
+        text = _a_text_of_a_str_subclass(method, asked, text)
+
+    def refuse(*args, **kwargs):
+        raise _AnOSErrorWithItsOwnText(text)
+
+    monkeypatch.setattr(scan_history, "write_run_record", refuse)
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        assert scan_history.record_run(results(finding("B101")), tmp_path) is None
+
+    said = [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith("Could not record this scan")
+    ]
+    assert said == ["Could not record this scan in the history: disk full"], said
+    assert asked == [], asked
+
+
 def test_nothing_is_recorded_unless_the_config_enables_it(tmp_path):
     run = results(finding("B101"))
     assert scan_history.record_run_if_enabled(AshHistoryConfig(), run, tmp_path) is None

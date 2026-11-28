@@ -66,6 +66,7 @@ from pathlib import Path
 from typing import Iterator
 
 from automated_security_helper.core.committed_output import PREVIOUS_RUN_FILE_NAMES
+from automated_security_helper.utils.error_text import own_error_text
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.scan_output_dirs import WORKING_DIR_NAMES
 
@@ -266,9 +267,9 @@ class PreviousResults:
             self._remove_marker()
         except OSError as e:
             ASH_LOGGER.warning(
-                f"Could not remove the restore marker {self.marker}: {e}; a reader "
-                "of holds_restored_results may take this scan's results for put-back "
-                "ones until the next scan removes it"
+                f"Could not remove the restore marker {self.marker}: "
+                f"{own_error_text(e)}; a reader of holds_restored_results may take "
+                "this scan's results for put-back ones until the next scan removes it"
             )
 
     def _remove_discarding_leftover(self) -> None:
@@ -289,7 +290,7 @@ class PreviousResults:
             except OSError as e:
                 ASH_LOGGER.warning(
                     f"Could not remove {leftover}, left by a discard that stopped "
-                    f"partway: {e}; it is left in place"
+                    f"partway: {own_error_text(e)}; it is left in place"
                 )
 
     def _put_back(self, staging: Path) -> None:
@@ -322,7 +323,7 @@ class PreviousResults:
         except OSError as e:
             ASH_LOGGER.error(
                 f"Could not move the previous results staged in {staging} back to "
-                f"{self.output_dir}: {e}"
+                f"{self.output_dir}: {own_error_text(e)}"
             )
 
     def discard(self) -> None:

@@ -105,3 +105,128 @@ def test_the_control_removes_a_removable_leftover(tmp_path):
 
     assert not leftover.exists()
     assert (output / HELD_DIR_NAME / RESULTS).read_text(encoding="utf-8") == "previous"
+
+
+@pytest.mark.parametrize(
+    "renders", [True, False], ids=["the-text-renders", "the-text-cannot-be-rendered"]
+)
+def test_a_leftover_refusal_is_logged_in_its_own_words_or_by_its_type(
+    tmp_path, monkeypatch, caplog, renders
+):
+    # Red before the fix: with the text that cannot be rendered, the leftover's
+    # refusal was formatted with a plain f-string, and an OSError built from one
+    # argument renders that argument with its __str__, which raises here, so
+    # set_aside raised it from its first step, the one this best-effort removal
+    # exists to keep from stopping the set aside.
+    asked = []
+
+    class _TextThatCannotBeRendered:
+        def __str__(self) -> str:
+            asked.append(self)
+            raise ValueError("a planted failure making the text")
+
+    planted = _TextThatCannotBeRendered()
+    output = tmp_path / "out"
+    output.mkdir()
+    (output / RESULTS).write_text("previous", encoding="utf-8")
+    leftover = output / DISCARDING_DIR_NAME
+    leftover.mkdir()
+    (leftover / "stuck").write_text("x", encoding="utf-8")
+    real_remove = previous_results_module._remove
+    attempts = []
+
+    def remove(path: Path) -> None:
+        if Path(path) == leftover:
+            attempts.append(Path(path))
+            raise OSError("held open" if renders else planted)
+        real_remove(path)
+
+    monkeypatch.setattr(previous_results_module, "_remove", remove)
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        PreviousResults(output).set_aside()
+
+    assert attempts == [leftover], attempts
+    assert asked == ([] if renders else [planted]), asked
+    assert (output / HELD_DIR_NAME / RESULTS).read_text(encoding="utf-8") == "previous"
+    assert leftover.is_dir()
+    shown = "held open" if renders else "<OSError: its message could not be rendered>"
+    expected = (
+        f"Could not remove {leftover}, left by a discard that stopped partway: "
+        f"{shown}; it is left in place"
+    )
+    said = [message for message in caplog.messages if DISCARDING_DIR_NAME in message]
+    assert said == [expected], said
+
+
+class _AnOSErrorWithItsOwnText(OSError):
+    """An OSError whose own ``__str__`` returns its one argument as it is."""
+
+    def __str__(self) -> str:
+        return self.args[0]
+
+
+def _a_text_of_a_str_subclass(method: str, asked: list, text: str) -> str:
+    """*text*, as an instance of a str subclass whose own ``method`` records each
+    call in ``asked``: its ``__format__`` gives other words, its ``__str__``
+    raises."""
+
+    class _Text(str):
+        __slots__ = ()
+
+    def other_words(self: str, spec: str) -> str:
+        asked.append(method)
+        return "other words"
+
+    def refuse(self: str) -> str:
+        asked.append(method)
+        raise ValueError(f"a planted {method}")
+
+    setattr(_Text, method, other_words if method == "__format__" else refuse)
+    return _Text(text)
+
+
+@pytest.mark.parametrize(
+    "method",
+    [
+        pytest.param(None, id="an-exact-str"),
+        pytest.param("__format__", id="a-subclass-whose-format-says-other-words"),
+        pytest.param("__str__", id="a-subclass-whose-str-raises"),
+    ],
+)
+def test_a_leftover_refusal_whose_text_is_a_str_subclass_is_logged_as_its_characters(
+    tmp_path, monkeypatch, caplog, method
+):
+    # Red before the fix: the leftover's refusal was formatted with
+    # own_error_text(e) in an f-string, and own_error_text returned what the
+    # error's __str__ returned, here an instance of a str subclass. An f-string
+    # formats a str subclass through its own __format__, and str.__format__ with
+    # an empty spec calls its own __str__ (an exact str is used as is), so the
+    # warning said other words or set_aside raised from its first step.
+    asked: list = []
+    text = "held open"
+    if method is not None:
+        text = _a_text_of_a_str_subclass(method, asked, text)
+    output = tmp_path / "out"
+    output.mkdir()
+    (output / RESULTS).write_text("previous", encoding="utf-8")
+    leftover = output / DISCARDING_DIR_NAME
+    leftover.mkdir()
+    real_remove = previous_results_module._remove
+
+    def remove(path: Path) -> None:
+        if Path(path) == leftover:
+            raise _AnOSErrorWithItsOwnText(text)
+        real_remove(path)
+
+    monkeypatch.setattr(previous_results_module, "_remove", remove)
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        PreviousResults(output).set_aside()
+
+    expected = (
+        f"Could not remove {leftover}, left by a discard that stopped partway: "
+        "held open; it is left in place"
+    )
+    said = [message for message in caplog.messages if DISCARDING_DIR_NAME in message]
+    assert said == [expected], said
+    assert asked == [], asked
+    assert (output / HELD_DIR_NAME / RESULTS).read_text(encoding="utf-8") == "previous"
