@@ -414,8 +414,8 @@ def payload_digest(image: ImageLocator) -> Tuple[Optional[str], str]:
         try:
             # Sized: an index is a few hundred bytes; read(cap + 1) so a
             # bigger file is seen as over the cap rather than truncated.
-            with _open_regular(layout / "index.json") as handle:
-                body = handle.read(_MAX_PAYLOAD_RECORD_BYTES + 1)
+            with _open_regular(layout / "index.json") as index_handle:
+                body = index_handle.read(_MAX_PAYLOAD_RECORD_BYTES + 1)
             if len(body) > _MAX_PAYLOAD_RECORD_BYTES:
                 return None, "its index.json is too large to be an image index"
             digest, why = _single_index_digest(json.loads(body))
@@ -440,7 +440,7 @@ def payload_digest(image: ImageLocator) -> Tuple[Optional[str], str]:
     try:
         with tarfile.open(image.oci_archive, "r:") as saved:
             records: dict = {}
-            seen: set = set()
+            seen: set[str] = set()
             for member in saved:
                 name = member.name.removeprefix("./")
                 if reads_as_manifest_json(member.name) and not (
@@ -499,11 +499,11 @@ def payload_digest(image: ImageLocator) -> Tuple[Optional[str], str]:
             if record == "manifest.json":
                 # _single_config_digest accepted it: a one-entry list whose
                 # Config is a string, whose file-name stem is the digest.
-                blob = records[record][0]["Config"].removeprefix("./")
+                blob_name = records[record][0]["Config"].removeprefix("./")
             else:
-                blob = f"blobs/sha256/{wanted}"
+                blob_name = f"blobs/sha256/{wanted}"
             reason = _blob_reason(
-                record, blob, wanted, lambda: _archive_blob(saved, blob)
+                record, blob_name, wanted, lambda: _archive_blob(saved, blob_name)
             )
             return (None, reason) if reason else (digest, "")
     except Exception as error:  # noqa: BLE001 - a bad archive is no digest
