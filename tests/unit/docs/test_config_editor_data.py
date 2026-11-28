@@ -1657,7 +1657,7 @@ WINDOWS_DIRECTORY = (
     r"C:\Users\runner\AppData\Local\Temp\pytest-of-runner\pytest-0\build-dir-marker0"
 )
 SLASHED_DIRECTORY = WINDOWS_DIRECTORY.replace("\\", "/")
-POSIX_DIRECTORY = "/tmp/pytest-of-runner/pytest-0/build-dir-marker0"
+POSIX_DIRECTORY = "/home/runner/pytest-of-runner/pytest-0/build-dir-marker0"
 
 
 @pytest.mark.parametrize(
