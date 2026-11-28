@@ -95,6 +95,9 @@ def scan(tmp_path_factory):
     output = base / "out"
     env = dict(os.environ)
     env.pop("ASH_CONFIG", None)
+    # A caller's ASH_SCANNERS, the environment variable of the deprecated
+    # --scanners, would reach the scan beside the scanner --add-scanners names.
+    env.pop("ASH_SCANNERS", None)
     # Keep the child off the network and away from the caller's terminal settings.
     env.update({"ASH_OFFLINE": "YES", "NO_COLOR": "1", "COLUMNS": "200"})
     # A fixed argv run by the test's own interpreter. `-I` keeps the child's imports

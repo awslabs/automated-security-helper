@@ -111,6 +111,9 @@ def scan(tree: Path, tools: dict, *extra: str, env_extra=None) -> str:
     )
     env = dict(os.environ)
     env.pop("ASH_ALLOW_IN_TREE_TOOLS", None)
+    # A caller's ASH_SCANNERS, the environment variable of the deprecated
+    # --scanners, would reach the scan beside the scanner --add-scanners names.
+    env.pop("ASH_SCANNERS", None)
     env.update(
         {
             "ASH_OFFLINE": "YES",

@@ -55,6 +55,9 @@ _REFUSE_TOOL_STARTS = (
 
 def _ash(root: Path, *args: str) -> subprocess.CompletedProcess:
     env = {key: value for key, value in os.environ.items() if key != "ASH_CONFIG"}
+    # A caller's ASH_SCANNERS, the environment variable of the deprecated
+    # --scanners, would reach the scan beside the scanner --add-scanners names.
+    env.pop("ASH_SCANNERS", None)
     env.update(
         REFUSED_STARTS=str(root / "refused-starts.log"),
         ASH_ENABLED_CANARY=CANARY,

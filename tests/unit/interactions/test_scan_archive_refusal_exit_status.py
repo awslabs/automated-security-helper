@@ -47,6 +47,9 @@ def _scan(base: Path, archives: dict[str, bytes]) -> tuple[int, str, Path]:
     output = base / "out"
     env = dict(os.environ)
     env.pop("ASH_CONFIG", None)
+    # A caller's ASH_SCANNERS, the environment variable of the deprecated
+    # --scanners, would reach the scan beside the scanner --add-scanners names.
+    env.pop("ASH_SCANNERS", None)
     env.update({"ASH_OFFLINE": "YES", "NO_COLOR": "1", "COLUMNS": "200"})
     completed = subprocess.run(
         [
