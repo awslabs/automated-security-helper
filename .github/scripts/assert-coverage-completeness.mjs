@@ -126,7 +126,9 @@ const TEST_SOURCE = /(^|\/)test\/|\.test\.|\.spec\./;
 /**
  * The module specifiers of the import forms the node test runner loads: static
  * imports and re-exports (the name list may span lines), a side-effect import,
- * and a dynamic import with a literal. Capture group 2 is the specifier.
+ * and a dynamic import with a literal. They are matched on the code `maskLiterals`
+ * returns, where a string holds its own number, so capture group 2 is the number of the
+ * literal that holds the specifier.
  */
 const IMPORT_SPECIFIERS = [
   /(?:^|[\s;{}])(?:import|export)\s[^'"`;]*?\bfrom\s*(['"])([^'"\n]+)\1/g,
@@ -297,41 +299,158 @@ function loadExclusions(file) {
   });
 }
 
+/** The words after which a `/` starts a regular-expression literal and not a division. */
+const REGEX_AFTER_WORD = new Set([
+  'await',
+  'case',
+  'delete',
+  'do',
+  'else',
+  'in',
+  'instanceof',
+  'new',
+  'of',
+  'return',
+  'throw',
+  'typeof',
+  'void',
+  'yield',
+]);
+
 /**
- * `source` with its comments blanked and its string and template literals left as
- * written, so a `//` inside a string is not read as a comment and an import that
- * is only commented out is not read as an import.
+ * `source` as the census reads it for imports: the code, and the string literals set
+ * aside from it.
  *
- * Limit: a regular-expression literal that holds a quote or a comment marker can
- * confuse this reader. The failure is loud, because an import after such a literal
- * reads as missing and the entry is reported; it can never pass an entry.
+ * Comments are removed. The text of every string literal moves into `literals`, and the
+ * code keeps the string's own quotes around its number, so an import specifier can still
+ * be matched and then read back (`import x from '0'` means the first literal). The text of
+ * a template literal and of a regular-expression literal is dropped; the code inside a
+ * template's `${ }` is kept as code, since an import there runs.
+ *
+ * What holds: text in a comment or in a string, template or regular-expression literal is
+ * never read as code, so none of it can supply an import. A string with no closing quote
+ * ends at the end of its line, as in JavaScript, so a quote this reader takes for the
+ * start of a string (inside a regular expression it failed to recognize, say) costs the
+ * rest of that one line and no more. That mistake can hide an import, which the census
+ * then reports as missing; it cannot add one.
+ *
+ * What does not: the census checks that a test file names the module, not that the code
+ * holding the import ever runs, so a dynamic import in a function nothing calls counts.
  */
-function withoutComments(source) {
-  let out = '';
+function maskLiterals(source) {
+  const literals = [];
+  const { length } = source;
   let i = 0;
-  while (i < source.length) {
-    const ch = source[i];
-    const next = source[i + 1];
-    if (ch === '/' && next === '/') {
-      // Stop at the newline and leave it, so line structure survives.
-      while (i < source.length && source[i] !== '\n') i += 1;
-    } else if (ch === '/' && next === '*') {
-      const end = source.indexOf('*/', i + 2);
-      i = end === -1 ? source.length : end + 2;
-      out += ' ';
-    } else if (ch === '"' || ch === "'" || ch === '`') {
-      let j = i + 1;
-      while (j < source.length && source[j] !== ch) {
-        j += source[j] === '\\' ? 2 : 1;
-      }
-      out += source.slice(i, j + 1);
-      i = j + 1;
-    } else {
-      out += ch;
-      i += 1;
+
+  // A string literal's text. It ends at its closing quote, or at its line's end when
+  // it has none.
+  function readString(quote) {
+    let j = i + 1;
+    while (j < length && source[j] !== quote && source[j] !== '\n') {
+      j += source[j] === '\\' ? 2 : 1;
     }
+    const text = source.slice(i + 1, j);
+    i = source[j] === quote ? j + 1 : j;
+    return text;
   }
-  return out;
+
+  // Skip a regular-expression literal that starts at `i`. False, with `i` unchanged,
+  // when its line holds no closing slash, which means the slash was a division.
+  function skipRegex() {
+    let j = i + 1;
+    let inClass = false;
+    while (j < length && source[j] !== '\n') {
+      const ch = source[j];
+      if (ch === '\\') {
+        j += 2;
+      } else if (ch === '[') {
+        inClass = true;
+        j += 1;
+      } else if (ch === ']') {
+        inClass = false;
+        j += 1;
+      } else if (ch === '/' && !inClass) {
+        j += 1;
+        while (j < length && /[A-Za-z]/.test(source[j])) j += 1;
+        i = j;
+        return true;
+      } else {
+        j += 1;
+      }
+    }
+    return false;
+  }
+
+  // A template literal that starts at `i`: its text is dropped and the code inside each
+  // `${ }` is kept.
+  function readTemplate() {
+    i += 1;
+    let inner = '';
+    while (i < length && source[i] !== '`') {
+      if (source[i] === '\\') {
+        i += 2;
+      } else if (source[i] === '$' && source[i + 1] === '{') {
+        i += 2;
+        inner += ` ${readCode(true)} `;
+      } else {
+        i += 1;
+      }
+    }
+    i += 1;
+    return `\`${inner}\``;
+  }
+
+  // The code from `i` on, to the end of the source or, inside a `${ }`, to its closing
+  // brace. `previous` says whether the last thing read was a value, so a slash after it
+  // divides and a slash after anything else starts a regular expression.
+  function readCode(insideTemplate) {
+    let out = '';
+    let depth = 0;
+    let previous = 'operator';
+    while (i < length) {
+      const ch = source[i];
+      const next = source[i + 1];
+      if (ch === '/' && next === '/') {
+        while (i < length && source[i] !== '\n') i += 1;
+      } else if (ch === '/' && next === '*') {
+        const end = source.indexOf('*/', i + 2);
+        i = end === -1 ? length : end + 2;
+        out += ' ';
+      } else if (ch === '"' || ch === "'") {
+        out += `${ch}${literals.push(readString(ch)) - 1}${ch}`;
+        previous = 'value';
+      } else if (ch === '`') {
+        out += readTemplate();
+        previous = 'value';
+      } else if (ch === '/' && previous !== 'value' && skipRegex()) {
+        out += '0';
+        previous = 'value';
+      } else if (/[A-Za-z0-9_$]/.test(ch)) {
+        let j = i;
+        while (j < length && /[A-Za-z0-9_$]/.test(source[j])) j += 1;
+        const word = source.slice(i, j);
+        out += word;
+        i = j;
+        previous = REGEX_AFTER_WORD.has(word) ? 'operator' : 'value';
+      } else {
+        if (insideTemplate && ch === '{') {
+          depth += 1;
+        } else if (insideTemplate && ch === '}') {
+          if (depth === 0) {
+            i += 1;
+            return out;
+          }
+          depth -= 1;
+        }
+        out += ch;
+        i += 1;
+        if (!/\s/.test(ch)) previous = ch === ')' || ch === ']' ? 'value' : 'operator';
+      }
+    }
+    return out;
+  }
+
+  return { code: readCode(false), literals };
 }
 
 /**
@@ -346,11 +465,11 @@ function withoutComments(source) {
  * run.
  */
 function importsModule(source, testPath, modulePath) {
-  const code = withoutComments(source);
+  const { code, literals } = maskLiterals(source);
   const baseDir = path.posix.dirname(testPath);
   for (const pattern of IMPORT_SPECIFIERS) {
     for (const match of code.matchAll(pattern)) {
-      const specifier = match[2];
+      const specifier = literals[Number(match[2])];
       if (!specifier.startsWith('./') && !specifier.startsWith('../')) continue;
       if (path.posix.join(baseDir, specifier) === modulePath) return true;
     }
