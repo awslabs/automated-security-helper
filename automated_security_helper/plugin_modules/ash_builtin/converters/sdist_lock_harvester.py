@@ -42,6 +42,7 @@ from automated_security_helper.utils.scan_output_dirs import record_converted_so
 from automated_security_helper.utils.scanned_tree import TreeInputRefused
 from automated_security_helper.utils.sdist_harvest import (
     ECOSYSTEM_LOCKFILES,
+    HARVEST_ADVISORY_READERS,
     HARVEST_DIR_NAME,
     HARVEST_MANIFEST_NAME,
     HARVEST_SKIPPED_RULE,
@@ -49,7 +50,7 @@ from automated_security_helper.utils.sdist_harvest import (
     HarvestManifest,
     default_harvest_cache_root,
     flagged_packages_in_uv_lock,
-    harvest_advisory_readers_enabled,
+    harvest_advisory_readers_that_run,
     harvest_lockfiles_from_sdist,
     harvest_options_of,
 )
@@ -191,7 +192,8 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
 
         Counted without network, by convert()'s own rules: none with the harvest
         disabled, and none with the syft scanner disabled and neither grype nor
-        trivy enabled, since convert() then returns before the walk. Otherwise
+        trivy running (enabled in its section and kept by the run's scanner
+        selection), since convert() then returns before the walk. Otherwise
         every configured lockfile in the scan set that no ignore path skips,
         whether or not syft is on: with it off, convert() still walks them to
         name the packages it does not fetch. The fetch decision is per package
@@ -203,8 +205,8 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
             options = harvest_options_of(config)
             if not options["enabled"]:
                 return 0
-            if not options["syft_enabled"] and not harvest_advisory_readers_enabled(
-                config
+            if not options["syft_enabled"] and not harvest_advisory_readers_that_run(
+                config, getattr(self.context, "scanner_selection", None)
             ):
                 return 0
             ignore_paths = self._ignore_paths_skipping_harvest()
@@ -547,7 +549,8 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
         one cause does not scatter into a record per lockfile.
 
         With the syft scanner disabled nothing is fetched. grype and trivy still
-        read the harvested lockfiles, so for those of them that run each flagged
+        read the harvested lockfiles, so for those of them that run (enabled in
+        its section and kept by the run's scanner selection) each flagged
         package is named in a skip record, and a lockfile that cannot be read is
         named itself: a refused one as it is with syft on, and one that does not
         parse in a skip record that fails no gate, since nothing would have been
@@ -565,12 +568,15 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
         syft_off = not options["syft_enabled"]
         readers: List[str] = []
         if syft_off:
-            readers = harvest_advisory_readers_enabled(config)
+            readers = harvest_advisory_readers_that_run(
+                config, getattr(self.context, "scanner_selection", None)
+            )
             if not readers:
                 ASH_LOGGER.debug(
                     "sdist lockfile harvest skipped: the syft scanner is disabled "
-                    "(scanners.syft.enabled) and neither grype nor trivy reads "
-                    "the harvested lockfiles"
+                    "(scanners.syft.enabled) and no scanner that reads the "
+                    f"harvested lockfiles ({', '.join(HARVEST_ADVISORY_READERS)}) "
+                    "runs"
                 )
                 return []
         lockfile_names = list(cast(Iterable[str], options["lockfiles"]))

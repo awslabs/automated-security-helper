@@ -3,6 +3,7 @@
 import os
 import secrets
 import warnings
+from dataclasses import dataclass
 from pathlib import Path
 from pydantic import (
     BaseModel,
@@ -14,7 +15,17 @@ from pydantic import (
     model_validator,
 )
 from pydantic.json_schema import SkipJsonSchema
-from typing import Annotated, Any, Dict, List, Optional, Set, TYPE_CHECKING
+from typing import (
+    Annotated,
+    Any,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+)
 
 from automated_security_helper.base.forward_refs import OnceOnlyResolver
 from automated_security_helper.core.asset import Asset, AssetKind
@@ -126,6 +137,24 @@ def scans_container_image(context: Any) -> bool:
     """
     asset = getattr(context, "asset", None)
     return getattr(asset, "kind", None) == AssetKind.CONTAINER_IMAGE
+
+
+@dataclass(frozen=True)
+class ScannerSelection:
+    """The scanner selection one run's engine was given.
+
+    ``enabled`` is the ``--scanners`` allowlist with the exclusions taken out
+    (empty: no narrowing, every scanner), ``excluded`` the ``--exclude-scanners``
+    names, and ``python_only`` whether the run is Python-only. The scan phase is
+    handed the same three as arguments; a plugin that runs before it, and is
+    handed only the context, reads them from ``PluginContext.scanner_selection``.
+    The names are kept as written: a reader compares them through
+    ``utils.scanner_names.selection_key``, as the scan phase does.
+    """
+
+    enabled: Tuple[str, ...] = ()
+    excluded: Tuple[str, ...] = ()
+    python_only: bool = False
 
 
 # One PluginContext is built per run and handed to every converter, scanner and
@@ -346,6 +375,40 @@ class PluginContext(BaseModel):
         nothing in the log to say why.
         """
         return self._lock_notices
+
+    # Private, like _scan_id: per-run state no dump or schema carries.
+    _scanner_selection: Optional[ScannerSelection] = PrivateAttr(default=None)
+
+    @property
+    def scanner_selection(self) -> Optional[ScannerSelection]:
+        """The scanner selection this context's run was given, or None.
+
+        Recorded by ``ScanExecutionEngine`` when it is built
+        (``record_scanner_selection``). On the context because a converter runs
+        before the scan phase and is handed only the context: the sdist lock
+        harvester reads it to tell whether grype or trivy will read what it did
+        not harvest. None for a context no engine was built over, such as one a
+        library hands a phase itself: no selection is known, so none narrows.
+        """
+        return self._scanner_selection
+
+    def record_scanner_selection(
+        self,
+        *,
+        enabled: Iterable[str] = (),
+        excluded: Iterable[str] = (),
+        python_only: bool = False,
+    ) -> None:
+        """Record this run's scanner selection; see ``scanner_selection``.
+
+        The names are copied, so a later change to the caller's lists does not
+        reach the record.
+        """
+        self._scanner_selection = ScannerSelection(
+            enabled=tuple(enabled),
+            excluded=tuple(excluded),
+            python_only=bool(python_only),
+        )
 
     @field_validator("config")
     def validate_config(cls, value):
