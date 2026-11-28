@@ -903,6 +903,41 @@
     },
     {
       "after": {
+        "text": "a: 1\r\n# about c\r\nc: 3\r\n"
+      },
+      "before": {
+        "text": "a: 1\r\nb: 2 # inline\r\n# about c\r\nc: 3\r\n"
+      },
+      "droppedComments": 1,
+      "edit": {
+        "op": "delete",
+        "path": [
+          "b"
+        ]
+      },
+      "how": "patch",
+      "id": "delete-keeps-crlf"
+    },
+    {
+      "after": {
+        "text": "list:\r\n  - a\r\n  - b\r\n"
+      },
+      "before": {
+        "text": "list:\r\n  - a\r\n"
+      },
+      "droppedComments": 0,
+      "edit": {
+        "op": "append",
+        "path": [
+          "list"
+        ],
+        "value": "b"
+      },
+      "how": "patch",
+      "id": "append-keeps-crlf"
+    },
+    {
+      "after": {
         "text": "a: 1\nb: 2\nc: 3"
       },
       "before": {
@@ -1603,6 +1638,35 @@
       "how": "refused",
       "id": "refuse-an-edit-when-the-text-is-not-readable",
       "reason": "unreadable"
+    },
+    {
+      "before": {
+        "text": "x: 0\ra: 1\r# about b\rb: 2\r"
+      },
+      "edit": {
+        "op": "delete",
+        "path": [
+          "a"
+        ]
+      },
+      "how": "refused",
+      "id": "refuse-a-delete-in-a-file-whose-lines-end-at-a-lone-carriage-return",
+      "reason": "line-breaks"
+    },
+    {
+      "before": {
+        "text": "a: [1]\r# trailing\r"
+      },
+      "edit": {
+        "op": "append",
+        "path": [
+          "a"
+        ],
+        "value": 2
+      },
+      "how": "refused",
+      "id": "refuse-an-append-in-a-file-whose-lines-end-at-a-lone-carriage-return",
+      "reason": "line-breaks"
     }
   ],
   "format": "yaml-oracle/1",

@@ -469,6 +469,61 @@ test('an edit the editor will not make is refused with a reason', () => {
   }
 });
 
+// The reader, like PyYAML, ends a line at a lone carriage return, a next-line character,
+// a line separator and a paragraph separator, and accepts a file that breaks its lines
+// there. The writer's line arithmetic sees only "\n" and "\r\n".
+const ODD_BREAKS = [
+  ['a lone carriage return', '\r'],
+  ['a next-line character', String.fromCharCode(0x85)],
+  ['a line separator', String.fromCharCode(0x2028)],
+  ['a paragraph separator', String.fromCharCode(0x2029)],
+];
+
+test('a file with a line break the writer does not see is refused by both planners, for every edit', () => {
+  const edits = [
+    { op: 'set', path: ['a'], value: 5 },
+    { op: 'delete', path: ['a'] },
+    { op: 'append', path: ['list'], value: 'z' },
+    { op: 'set', path: ['new'], value: 1 },
+    { op: 'delete', path: ['nothing'] },
+  ];
+  for (const [name, character] of ODD_BREAKS) {
+    const text = `x: 0${character}a: 1${character}# about b${character}b: 2${character}list:${character}  - x${character}`;
+    const doc = readYaml(text);
+    assert.equal(doc.ok, true, name);
+    assert.equal(doc.plainBreaks, false, name);
+    for (const edit of edits) {
+      for (const [planner, plan] of [['patch', patch], ['reemit', reemit]]) {
+        const result = plan(text, edit);
+        const label = `${name}, ${edit.op} ${edit.path.join('.')}, ${planner}`;
+        assert.equal(result.ok, false, label);
+        assert.equal(result.final, true, label);
+        assert.equal(result.reason, 'line-breaks', label);
+        assert.equal(typeof result.message, 'string', label);
+      }
+      assert.equal(editBound(doc, edit), null, name);
+      assert.equal(patchBound(doc, edit), null, name);
+    }
+  }
+});
+
+test('a file with CRLF line breaks is still patched line by line', () => {
+  const text = 'a: 1\r\n# about b\r\nb: 2\r\nlist:\r\n  - x\r\n';
+  assert.equal(readYaml(text).plainBreaks, true);
+  assert.equal(
+    patch(text, { op: 'set', path: ['a'], value: 5 }).text,
+    'a: 5\r\n# about b\r\nb: 2\r\nlist:\r\n  - x\r\n',
+  );
+  assert.equal(
+    patch(text, { op: 'delete', path: ['b'] }).text,
+    'a: 1\r\n# about b\r\nlist:\r\n  - x\r\n',
+  );
+  assert.equal(
+    patch(text, { op: 'append', path: ['list'], value: 'y' }).text,
+    'a: 1\r\n# about b\r\nb: 2\r\nlist:\r\n  - x\r\n  - y\r\n',
+  );
+});
+
 test('a shape a line patch does not handle is passed on, not refused', () => {
   const cases = [
     ['a list in flow style', 'list: [a]\n', { op: 'append', path: ['list'], value: 'b' }],

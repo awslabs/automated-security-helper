@@ -276,6 +276,74 @@ test('a delete that no line patch can make without losing a comment is written a
   assert.equal(result.message, 'Comments inside a were not kept.');
 });
 
+test('a file with a line break the writer does not see is refused for every edit, before any planner runs', () => {
+  const breaks = [
+    ['a lone carriage return', '\r'],
+    ['a next-line character', String.fromCharCode(0x85)],
+    ['a line separator', String.fromCharCode(0x2028)],
+    ['a paragraph separator', String.fromCharCode(0x2029)],
+  ];
+  const edits = [
+    { op: 'set', path: ['a'], value: 5 },
+    { op: 'delete', path: ['a'] },
+    { op: 'append', path: ['list'], value: 'z' },
+    { op: 'delete', path: ['nothing'] },
+  ];
+  for (const [name, character] of breaks) {
+    const text = `x: 0${character}a: 1${character}# about b${character}b: 2${character}`;
+    for (const edit of edits) {
+      const label = `${name}, ${edit.op} ${edit.path.join('.')}`;
+      const result = applyEdit(text, edit);
+      assert.equal(result.ok, false, label);
+      assert.equal(result.how, 'refused', label);
+      assert.equal(result.reason, 'line-breaks', label);
+      assert.match(result.message, /line breaks/, label);
+      assert.equal('text' in result, false, label);
+    }
+  }
+});
+
+test('the gate does not let a planner past a file whose line breaks it cannot see', () => {
+  // The text a line patch would write for the delete, with the comment above `b` lost: the
+  // helpers took the whole file for one line, so the byte check had nothing to compare.
+  const text = 'x: 0\ra: 1\r# about b\rb: 2\r';
+  const edit = { op: 'delete', path: ['a'] };
+  const lossy = writes('x: 0\rb: 2\r');
+  const kept = writes('x: 0\r# about b\rb: 2\r');
+  for (const planner of [lossy, kept]) {
+    const result = applyEdit(text, edit, { patch: planner, reemit: planner });
+    assert.equal(result.ok, false);
+    assert.equal(result.how, 'refused');
+    assert.equal(result.reason, 'line-breaks');
+  }
+  // The same text with every break written as a line feed is an ordinary file.
+  const ordinary = applyEdit(text.replaceAll('\r', '\n'), edit);
+  assert.equal(ordinary.how, 'patch');
+  assert.equal(ordinary.text, 'x: 0\n# about b\nb: 2\n');
+});
+
+test('a file with CRLF line breaks is still patched, for a set, a delete and an append', () => {
+  const text = 'a: 1\r\n# about b\r\nb: 2\r\nlist:\r\n  - x\r\n';
+  assert.deepEqual(applyEdit(text, { op: 'set', path: ['a'], value: 5 }), {
+    ok: true,
+    how: 'patch',
+    text: 'a: 5\r\n# about b\r\nb: 2\r\nlist:\r\n  - x\r\n',
+    droppedComments: 0,
+  });
+  assert.deepEqual(applyEdit(text, { op: 'delete', path: ['b'] }), {
+    ok: true,
+    how: 'patch',
+    text: 'a: 1\r\n# about b\r\nlist:\r\n  - x\r\n',
+    droppedComments: 0,
+  });
+  assert.deepEqual(applyEdit(text, { op: 'append', path: ['list'], value: 'y' }), {
+    ok: true,
+    how: 'patch',
+    text: 'a: 1\r\n# about b\r\nb: 2\r\nlist:\r\n  - x\r\n  - y\r\n',
+    droppedComments: 0,
+  });
+});
+
 test('the gate keeps every digit of an integer beyond 2**53', () => {
   const text = 'limit: 9007199254740993\nother: 1\n';
   const edit = { op: 'set', path: ['other'], value: 2 };
