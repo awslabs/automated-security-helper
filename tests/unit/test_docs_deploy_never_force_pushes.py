@@ -68,11 +68,21 @@ What it does not cover
 * Triggers other than ``push``, such as ``create`` and ``workflow_run``.
 * A job condition on an event field the probe context leaves out, such as
   ``github.event.created``. It reads as null, so the job is judged not to run.
-* A deletion of gh-pages (``git push --delete``), which no rule here reads.
+* A deletion of gh-pages with ``git push --delete``, which is not read as a forced
+  push. Rule 3 reads it as a push that may be gh-pages, and rule 2 reads a forced
+  ``:gh-pages`` refspec by its destination.
 * Tag names. Triggers are evaluated for a fixed set of names and for names built from
   the workflow's own tag filters, so an unusual filter may need a name added.
-* A script handed to ``eval``, ``xargs``, ``ssh``, a here-string or a pipe into a
-  shell, a command built at run time, and a command substitution inside quotes.
+* A script handed to ``eval``, ``ssh``, a here-string or a pipe into a shell, a command
+  built at run time, and a command substitution inside quotes.
+* ``env -S '<command>'``, which runs the command its string holds.
+* A shell other than ``bash``, ``sh``, ``zsh`` and ``dash``, such as ``ksh -c`` and
+  ``ash -c``.
+* A step whose ``shell:`` key names another interpreter. Its script is read as shell
+  text, so a push written in the syntax of that interpreter is not read.
+* An abbreviated long option, such as ``git push --mirr`` for ``--mirror``.
+* A force set outside the command: a ``+`` refspec configured as
+  ``remote.<name>.push``, or ``remote.<name>.mirror``.
 * A shell string or here-document nested more than ``MAX_SHELL_DEPTH`` deep.
 * Anything outside the repository, such as a ruleset on gh-pages.
 """
