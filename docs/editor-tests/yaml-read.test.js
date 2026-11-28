@@ -191,7 +191,8 @@ test('the value tree names a key by what it resolves to, not by how it is writte
   const words = read('yes: a\ntrue: b\nOn: c\n');
   assert.deepStrictEqual(words.value.pairs, [[true, 'c']]);
   assert.equal(words.warnings.filter((warning) => warning.code === 'duplicate-key').length, 2);
-  assert.deepStrictEqual(read('1: a\nx: b\ntrue: c\n').value.pairs, [[1, 'c'], ['x', 'b']]);
+  // The key written again is its last writing, so the entry moves after x and is true.
+  assert.deepStrictEqual(read('1: a\nx: b\ntrue: c\n').value.pairs, [['x', 'b'], [true, 'c']]);
 
   const mixed = read('m: {null: a, on: b, 7: c, 1.5: d, x: e}\n');
   assert.deepStrictEqual(mixed.value.m.pairs, [[null, 'a'], [true, 'b'], [7, 'c'], [1.5, 'd'], ['x', 'e']]);
