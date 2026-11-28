@@ -1074,6 +1074,27 @@ def _absolute_path_entries() -> List[str]:
     ]
 
 
+def _which_in_path_entry(entry: str, name: str) -> Optional[str]:
+    """The file ``shutil.which`` finds for ``name`` in one PATH entry, or None.
+
+    This is how a scan reads a directory PATH names (``_executable_candidates``), and
+    how ``ash dependencies install --no-inherit-system-tools`` reads a virtualenv's
+    scripts directory, so the two take the same names there. Which names ``which``
+    takes is its own rule. On Windows with Python 3.12 or later it is ``name`` with
+    each suffix of PATHEXT, and the bare ``name`` only when it already ends in one, so
+    a file with no extension is not found and ``<tool>.com`` is. Before 3.12 a command
+    with a directory part is checked as written, with no PATHEXT.
+
+    ``name`` is joined onto ``entry``, so ``which`` is given a command with a
+    directory part and looks in that directory alone. It never searches the working
+    directory, which is usually the tree being scanned and which
+    ``shutil.which(name, path=entry)`` searches first on Windows whatever ``path``
+    says. ``entry`` must be absolute: a relative one names a directory under the
+    working directory.
+    """
+    return shutil.which(os.path.join(entry, name))
+
+
 def _which_outside_working_directory(cmd: str) -> Optional[str]:
     """``shutil.which(cmd)``, except that nothing is found through the cwd.
 
@@ -1392,7 +1413,7 @@ def _executable_candidates(command: str) -> Iterator[str]:
             if _is_anchored(first):
                 yield first
             for entry in _absolute_path_entries():
-                found = shutil.which(os.path.join(entry, name))
+                found = _which_in_path_entry(entry, name)
                 if found and found != first:
                     yield found
         # Anchored only: a relative ASH_BIN_PATH would be read against the cwd.

@@ -218,10 +218,12 @@ identical copy of a pinned tool skips its download.
 
 `--no-inherit-system-tools` ignores those copies. A global `checkov` on `PATH` does not
 stop the install, and the result counts only what was installed into a location ASH or
-its provider manages: uv's tool listing, the virtualenv you named, ASH's own environment,
-and the ASH bin directory. A system copy that was set aside is named in the output. Programs
-ASH never installs, such as Node.js for cdk-nag, are still found on `PATH`. The option
-affects the install and its report only; a scan finds tools exactly as before.
+its provider manages: uv's tool listing, the virtualenv you named when its scripts
+directory is on `PATH` (where a scan finds a tool installed there), ASH's own
+environment, and the ASH bin directory. A system copy that was set aside is named in the
+output. Programs ASH never installs, such as Node.js for cdk-nag, are still found on
+`PATH`. The option affects the install and its report only; a scan finds tools exactly
+as before.
 
 ### Virtualenvs
 
