@@ -157,11 +157,24 @@
 - **The reusable scan workflow refuses an `ash-args` option that takes a value and has
   none after it**, such as a trailing `--source-dir`, with an error that names its
   position. A `--source-dir` in `ash-args` still names the directory scanned.
-- **The reusable scan workflow runs `ash scan workspace` when `ash-args` names a
-  workspace.** A `--workspace FILE` in `ash-args`, with the `--workspace-config` that
-  goes with it, becomes `ash scan workspace FILE` on an installed ASH that has the
-  subject, and stays as written on one that does not. The workflow asks the installed
-  ASH first, as it does for the other spellings.
+- **The reusable scan workflow refuses `--cli-json-input` in `ash-args`**, whether its
+  value follows a space or an equals sign, with an error that names its position. The
+  step checks `ash-args` word by word and cannot see what a document of parameters sets,
+  so write those options as words of `ash-args`.
+- **The reusable scan workflow runs `ash scan workspace`, `ash scan image` or
+  `ash scan git` when `ash-args` names what to scan.** A `--workspace FILE` in
+  `ash-args`, with the `--workspace-config` that goes with it, becomes
+  `ash scan workspace FILE`. An `--image REF` becomes `ash scan image REF`, and an
+  `--image-archive FILE` or `--image-layout DIR` becomes `ash scan image --archive FILE`
+  or `ash scan image --layout DIR`. A `--source-git URL`, with the `--git-ref` and
+  `--git-depth` that go with it, becomes `ash scan git URL`. Each becomes its command
+  on an installed ASH that has the subject, and stays as written on one that does not.
+  The workflow asks the installed ASH first, as it does for the other spellings.
+- **The reusable scan workflow routes `ash-args` to a scan subject only when it names
+  one workspace, one clone or any number of images.** With a `--workspace-config`,
+  `--git-ref` or `--git-depth` alone, a `--workspace` or `--source-git` given twice,
+  options of two subjects, or a `--source-dir` as well, `ash-args` stays on
+  `ash scan fs` as written.
 - **A `--source-dir DIR` in the `extraScanArguments` of the CDK `ASHScanStep` names the
   directory scanned on ASH 3.9 as well**, as `ash scan fs DIR`; the build failed with a
   usage error before. The step refuses these at synth and says what to write instead: a
@@ -513,8 +526,13 @@
   being run from the working directory, which is usually the repository being scanned.
   The same path given as `-OCIRunner` is used as written, as before.
 - **The reusable scan workflow reads the installed ASH's help from the runner's temp
-  directory with `--no-config`**, so a config file in the checkout cannot change which
-  commands the step finds.
+  directory, and names the scan's config to it by its absolute path.** When the step
+  has a config (the `config` input, or the file read from `config-ref`), each help
+  command gets it as `--config` and as `ASH_CONFIG`, so a path written relative to the
+  checkout names the same file from the temp directory, and an ASH that reads its config
+  before it answers `--help` reads the file the scan reads. No `uvx` call in the job
+  passes `--no-config`, so the help commands run with the runner's own uv settings, as
+  the scan does, and resolve the same ASH the scan installs.
 - **The `--changed-files-only` help describes a workspace scan.** It says a workspace
   scan reads the changes of each project from that project's own repository and skips a
   project where nothing changed, and it no longer sends a reader of
