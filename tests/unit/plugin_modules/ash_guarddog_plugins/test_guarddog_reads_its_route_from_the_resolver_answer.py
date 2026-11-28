@@ -29,7 +29,7 @@ cfn-lint's.
 A probe that timed out opens a retry window in which the runner's availability
 check keeps answering "unavailable" without probing again, and the resolver, which
 never reads that window, can answer the uv form in the same moment. Every run of
-the scan passes that check, which refuses a uv run while it says no and starts
+the scan goes through that check, which refuses a uv run while it says no and starts
 nothing in its place, so a uv answer there is not a route the scan can run. The
 tests of that input put the window's answer where the unit tests' tool guard puts
 uv-absent's, and let the mixin's own check, version probe and gates read it.
@@ -453,6 +453,50 @@ def test_a_copy_that_falls_short_is_missing_with_the_reason(
     assert verifier.asked == [(COPY, TOOL, extras, constraint)]
 
 
+@pytest.mark.parametrize(
+    ("uv_found", "summary", "offers_a_constraint"),
+    [
+        (True, SHORT_OF_THE_CONSTRAINT, True),
+        (True, PROBE_EXITED, False),
+        (False, PROBE_EXITED, False),
+    ],
+    ids=["uv-found", "uv-found-probe-exited", "no-uv"],
+)
+def test_an_offline_scan_is_told_to_install_a_copy_before_going_offline(
+    tmp_path, monkeypatch, uv_found, summary, offers_a_constraint
+):
+    """GuardDog's remedy in an offline scan, as checkov's and cfn-lint's: ASH installs
+    nothing then, so the remedy for a copy that falls short names a copy to install
+    before going offline, with the install command where a uv is found and the
+    ``tool_version`` where the version constraint is all the copy fails. It offers
+    neither installing uv nor a run through uv once the check passes.
+
+    Without the fix: the remedy read as online, "install uv, so that ASH installs and
+    runs guarddog itself" with no uv, and a run through uv once the check passes with
+    one."""
+    scanner = _scanner(tmp_path)
+    verifier = _Verifier(
+        _verdict("unsatisfied", version="2.9.0", detail="short", summary=summary)
+    )
+    _without_uv(monkeypatch, scanner, [COPY], verifier)
+    monkeypatch.setattr(
+        guarddog_module, "find_uv_or_none", lambda: UV if uv_found else None
+    )
+    monkeypatch.setattr(GuardDogScanner, "_is_offline_mode", lambda self: True)
+
+    assert scanner.validate_plugin_dependencies() is False
+
+    reason = scanner.dependency_unavailable_reason or ""
+    assert f"guarddog cannot be used: {summary}. " in reason
+    assert "ASH does not install tools in offline mode" in reason
+    assert "before going offline" in reason
+    assert "install uv" not in reason
+    assert "so that ASH installs" not in reason
+    assert "once uv's availability check passes" not in reason
+    assert ("uv tool install" in reason) is uv_found
+    assert ("options.tool_version" in reason) is offers_a_constraint
+
+
 @pytest.mark.parametrize("answered", ["3.2.0", None], ids=["a-version", "none"])
 def test_a_copy_that_satisfies_runs_directly_with_its_own_version(
     tmp_path, monkeypatch, answered
@@ -533,7 +577,7 @@ def test_a_uv_answer_inside_the_window_runs_a_copy_that_satisfies_directly(
 ):
     """The runner's probe of uv timed out, so inside its retry window the availability
     check says no, while the resolver's own probe answers the uv form. Every run of
-    the scan passes that check, which refuses a uv run and starts nothing in its
+    the scan goes through that check, which refuses a uv run and starts nothing in its
     place, so the uv route the answer names cannot run now. The copy on PATH that a
     direct run would start is verified against the scan's requirement as the copy a
     binary answer names is, and a copy that satisfies it runs: its own version is

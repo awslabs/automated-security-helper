@@ -17,6 +17,10 @@ right cause.
   is blamed; the resolver's own cause is reported.
 * A probe that could not run carries the spawn's own error into the verdict:
   "could not execute" alone read the same for every cause.
+* A copy whose version falls short of the constraint names any shortfall of its
+  environment too, each as its own part of the summary, so
+  ``only_the_constraint_falls_short`` answers True only for the constraint's part
+  alone.
 """
 
 from __future__ import annotations
@@ -26,6 +30,7 @@ import stat
 import subprocess  # nosec B404
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -473,3 +478,256 @@ class TestAProbeThatCouldNotRunNamesItsCause:
         )
         assert verdict.status == "unverifiable"
         assert verdict.detail == "could not execute /opt/bin/bandit"
+
+
+#: uv's words for a requirement whose package is not in the environment it judges.
+_ABSENT = (
+    "No solution found when resolving dependencies:\n"
+    "  Because the package was not found in the environment and you require it, we "
+    "can conclude that your requirements are unsatisfiable."
+)
+
+
+class TestAVersionShortfallLeavesNoOtherCauseUnnamed:
+    """A copy whose version falls short of the constraint can fall short in its
+    environment too: the package can be absent there, or its requirement can fail to
+    resolve whatever its version. The verdict names each shortfall as its own part of
+    the summary, so a caller that offers a ``tool_version`` the copy meets
+    (``only_the_constraint_falls_short``) offers it only when the version is all the
+    copy fails."""
+
+    @staticmethod
+    def _probes(constraint, resolves, missing=()):
+        """uv's dry runs over a copy whose version falls short of ``constraint``: the
+        ``--no-deps`` probe and every run of a requirement that holds ``constraint``
+        do not resolve, nor does a run that asks for an extra in ``missing``, and any
+        other run resolves only when ``resolves`` says so. Records each run's
+        requirement with its ``no_deps``."""
+        calls = []
+
+        def _dry_run_stub(uv, interpreter, requirement, target=None, no_deps=False):
+            calls.append((requirement, no_deps))
+            if (
+                no_deps
+                or constraint in requirement
+                or any(f"[{extra}]" in requirement for extra in missing)
+                or not resolves
+            ):
+                return ("unsatisfied", _ABSENT)
+            return ("satisfied", "")
+
+        return calls, _dry_run_stub
+
+    def test_a_package_its_environment_lacks_is_named_beside_the_constraint(
+        self, monkeypatch
+    ):
+        """A copy whose package is not installed in the environment the dry run
+        judges (another Python's user site, say): every dry run fails, the
+        constraint probe included, and no constraint the copy meets would make it
+        usable. The requirement without the constraint is dry-run once, with its
+        dependencies, and its failure is named as its own part.
+
+        Without the fix: the summary named the version constraint alone, and
+        ``only_the_constraint_falls_short`` answered True."""
+        calls, stub = self._probes(">=99.0", resolves=False)
+        monkeypatch.setattr(pre_installed_tool, "_dry_run", stub)
+        verdict = _judge(
+            "/opt/bin/checkov",
+            "checkov",
+            [],
+            ">=99.0",
+            "checkov>=99.0",
+            "/opt/uv",
+            "/opt/venv/bin/python",
+            None,
+            "its environment",
+            None,
+            values=(),
+        )
+        assert verdict.status == "unsatisfied"
+        assert verdict.summary == (
+            "the installed package does not satisfy the version constraint; "
+            "the requirement does not resolve in its environment"
+        )
+        assert pre_installed_tool.only_the_constraint_falls_short(verdict) is False
+        assert "installed checkov does not satisfy '>=99.0'" in verdict.detail
+        assert "because the package was not found" in verdict.detail
+        assert calls == [
+            ("checkov>=99.0", False),
+            ("checkov>=99.0", True),
+            ("checkov", False),
+        ]
+
+    def test_a_bare_package_that_does_not_resolve_is_named_beside_the_constraint(
+        self, monkeypatch
+    ):
+        """With an extra, the bare package is dry-run first. When it does not
+        resolve, no extra is blamed, and the constraint probe fails too: the
+        requirement without the constraint is dry-run as well, and its failure is
+        named as its own part.
+
+        Without the fix: the summary named the version constraint alone."""
+        calls, stub = self._probes(">=99.0", resolves=False)
+        monkeypatch.setattr(pre_installed_tool, "_dry_run", stub)
+        verdict = _judge(
+            "/opt/bin/cfn-lint",
+            "cfn-lint",
+            ["sarif"],
+            ">=99.0",
+            "cfn-lint[sarif]>=99.0",
+            "/opt/uv",
+            "/opt/venv/bin/python",
+            None,
+            "its environment",
+            None,
+            values=(),
+        )
+        assert verdict.missing_extras == ()
+        assert verdict.summary == (
+            "the installed package does not satisfy the version constraint; "
+            "the requirement does not resolve in its environment"
+        )
+        assert calls == [
+            ("cfn-lint[sarif]>=99.0", False),
+            ("cfn-lint", False),
+            ("cfn-lint>=99.0", True),
+            ("cfn-lint[sarif]", False),
+        ]
+
+    def test_a_copy_short_of_its_version_alone_names_the_constraint_alone(
+        self, monkeypatch
+    ):
+        """The control: with the requirement resolving once the constraint is left
+        out, the version is all the copy fails, and the summary is the constraint's
+        part alone. It passes with and without the fix."""
+        _calls, stub = self._probes(">=99.0", resolves=True)
+        monkeypatch.setattr(pre_installed_tool, "_dry_run", stub)
+        verdict = _judge(
+            "/opt/bin/checkov",
+            "checkov",
+            [],
+            ">=99.0",
+            "checkov>=99.0",
+            "/opt/uv",
+            "/opt/venv/bin/python",
+            None,
+            "its environment",
+            None,
+            values=(),
+        )
+        assert verdict.summary == pre_installed_tool.CONSTRAINT_ONLY_SHORTFALL
+        assert pre_installed_tool.only_the_constraint_falls_short(verdict) is True
+
+    def test_a_missing_extra_is_named_without_a_second_cause(self, monkeypatch):
+        """The control for a missing extra: it already names why the requirement
+        without the constraint fails, so that requirement is not dry-run again and no
+        second cause is added. It passes with and without the fix."""
+        calls, stub = self._probes(">=99.0", resolves=True, missing=("sarif",))
+        monkeypatch.setattr(pre_installed_tool, "_dry_run", stub)
+        verdict = _judge(
+            "/opt/bin/cfn-lint",
+            "cfn-lint",
+            ["sarif"],
+            ">=99.0",
+            "cfn-lint[sarif]>=99.0",
+            "/opt/uv",
+            "/opt/venv/bin/python",
+            None,
+            "its environment",
+            None,
+            values=(),
+        )
+        assert verdict.missing_extras == ("sarif",)
+        assert verdict.summary == (
+            "missing extra: sarif; "
+            "the installed package does not satisfy the version constraint"
+        )
+        assert calls == [
+            ("cfn-lint[sarif]>=99.0", False),
+            ("cfn-lint", False),
+            ("cfn-lint[sarif]", False),
+            ("cfn-lint>=99.0", True),
+        ]
+
+    @pytest.mark.parametrize(
+        ("status", "summary", "only"),
+        [
+            ("unsatisfied", pre_installed_tool.CONSTRAINT_ONLY_SHORTFALL, True),
+            (
+                "unsatisfied",
+                (
+                    f"{pre_installed_tool.CONSTRAINT_ONLY_SHORTFALL}; "
+                    "the requirement does not resolve in its environment"
+                ),
+                False,
+            ),
+            (
+                "unsatisfied",
+                f"missing extra: sarif; {pre_installed_tool.CONSTRAINT_ONLY_SHORTFALL}",
+                False,
+            ),
+            ("satisfied", pre_installed_tool.CONSTRAINT_ONLY_SHORTFALL, False),
+        ],
+        ids=[
+            "constraint-alone",
+            "constraint-and-environment",
+            "extra-and-constraint",
+            "satisfied",
+        ],
+    )
+    def test_only_the_constraint_falls_short_reads_the_whole_summary(
+        self, status, summary, only
+    ):
+        """The helper answers True for the constraint's part alone, and for no
+        summary that holds it beside another part: a test of containment would offer
+        a ``tool_version`` for a missing extra or a requirement that does not
+        resolve, which no constraint fixes. It passes with and without the fix."""
+        verdict = SimpleNamespace(status=status, summary=summary)
+        assert pre_installed_tool.only_the_constraint_falls_short(verdict) is only
+
+    def test_a_requirement_uv_cannot_check_without_the_constraint_is_named_too(
+        self, monkeypatch
+    ):
+        """When the dry run of the requirement without the constraint cannot answer
+        (a timeout, or a uv failure that says nothing about the requirement), the
+        verifier cannot tell whether the version is all the copy fails. It names that
+        as its own part, so a caller does not offer a ``tool_version`` that may fix
+        nothing.
+
+        Without the fix: the summary named the version constraint alone, and
+        ``only_the_constraint_falls_short`` answered True."""
+        calls = []
+
+        def _dry_run_stub(uv, interpreter, requirement, target=None, no_deps=False):
+            calls.append((requirement, no_deps))
+            if requirement == "checkov":
+                return ("unverifiable", "could not run uv to check 'checkov'")
+            return ("unsatisfied", _ABSENT)
+
+        monkeypatch.setattr(pre_installed_tool, "_dry_run", _dry_run_stub)
+        verdict = _judge(
+            "/opt/bin/checkov",
+            "checkov",
+            [],
+            ">=99.0",
+            "checkov>=99.0",
+            "/opt/uv",
+            "/opt/venv/bin/python",
+            None,
+            "its environment",
+            None,
+            values=(),
+        )
+        assert verdict.status == "unsatisfied"
+        assert verdict.summary == (
+            "the installed package does not satisfy the version constraint; "
+            "uv could not verify the requirement without the version constraint "
+            "in its environment"
+        )
+        assert pre_installed_tool.only_the_constraint_falls_short(verdict) is False
+        assert "could not verify the requirement without" in verdict.detail
+        assert calls == [
+            ("checkov>=99.0", False),
+            ("checkov>=99.0", True),
+            ("checkov", False),
+        ]

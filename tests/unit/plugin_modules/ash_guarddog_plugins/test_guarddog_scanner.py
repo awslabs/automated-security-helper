@@ -2303,11 +2303,13 @@ def test_the_hit_limit_bootstrap_refuses_a_guarddog_without_per_rule_limits(
 #
 # A probe of uv that timed out opens a retry window in which the runner's check keeps
 # answering "unavailable" without probing again. The resolver never reads that window,
-# so it can answer the uv form inside it, and every run of the scan passes the check,
-# which refuses a uv run and starts nothing in its place. These tests run the real
-# dependency check, the real scan and the mixin's own gates over the window's answer.
-# Only the resolver, the verifier, the PATH lookup, uv's version read and the
-# subprocess are stood in for. One test is the exception:
+# so it can answer the uv form inside it, and every run of the scan goes through the
+# check, which refuses a uv run and starts nothing in its place. These tests run the
+# real dependency check, the real scan and the mixin's own gates over the window's
+# answer. Only the resolver, the verifier, the PATH lookup, uv's version read and the
+# subprocess are stood in for, and the sandbox-refused case of the max_hits test also
+# stands in for the runner's recorded refusal (``UVToolRunner.unavailable_reason``).
+# One test is the exception:
 # test_a_direct_route_keeps_its_copys_version_and_asks_uv_nothing uses ``fake``,
 # which replaces the dependency check, and has no uv answer, since it reads only the
 # version a scan on a direct route names.

@@ -4,14 +4,17 @@ The check does not pass when uv is absent, when its probe failed, and for the
 runner's retry window after a probe of uv timed out or was killed, so uv may well
 be installed. In that branch checkov and cfn-lint take the binary the resolver
 names and verify it against the scan's requirement before running it, and bandit
-does the same in its resolved-command check. They share the shape of guarddog's
-check of a copy on PATH:
+does the same in its resolved-command check. checkov's and cfn-lint's checks share
+the shape of guarddog's check of a copy on PATH; bandit's shares only the last item
+below:
 
 - A copy that falls short is MISSING, and the reason names the verifier's
   one-line summary of the shortfall and a remedy that fits the host and the
   shortfall: with a uv found, the install command and a run once the check
   passes, and a ``tool_version`` the copy meets only when the version constraint
-  is all it fails; with none, installing uv. It never names the copy's path or
+  is all it fails; with none, installing uv. In an offline scan, where ASH
+  installs nothing, the remedy names a copy to install before going offline
+  instead of a run through uv or installing uv. It never names the copy's path or
   the verifier's detail, which the ERROR line keeps. The detail quotes the scan's
   requirement in the spelling the options validator stored, and an
   environment-read ``tool_version`` was written in another spelling, which the
@@ -23,8 +26,11 @@ check of a copy on PATH:
   the failure. A uv answer reads no hook: the uv route it keeps reads the hook on
   its own run path.
 
-Only the availability check, the resolver, the verifier, the uv lookup and the
-version probe the dependency check runs first are stood in for.
+The tests of a copy that falls short of more than its version run the verifier's
+own judgment, with uv's dry runs under it stood in for. Otherwise only the
+availability check, the resolver, the verifier, the uv lookup, the offline mode,
+the version probe the dependency check runs first and, in the hook tests and the
+tests of an environment-read constraint, the plugin's values hook are stood in for.
 """
 
 from __future__ import annotations
@@ -75,6 +81,10 @@ SHORT_OF_THE_CONSTRAINT = (
     "the installed package does not satisfy the version constraint"
 )
 PROBE_EXITED = "its --version probe exited 1"
+
+#: The verifier's summary part for a requirement that does not resolve in the copy's
+#: environment, alone or beside the constraint's part.
+DOES_NOT_RESOLVE = "the requirement does not resolve in its environment"
 
 #: ``tool_version`` as an environment variable can hold it, with a space between the
 #: operator and the version. The options validator stores it without one, so what the
@@ -155,15 +165,22 @@ def _a_values_hook_that_raises(self: Any) -> tuple[str, ...]:
 
 
 def _with_uv_unavailable(
-    monkeypatch, scanner, module, answer, verifier=_never_verified, uv=None
+    monkeypatch,
+    scanner,
+    module,
+    answer,
+    verifier=_never_verified,
+    uv=None,
+    offline=False,
 ) -> None:
     """The scanner's dependency check as it runs while uv's availability check does
-    not pass: the resolver answers ``answer``, ``verifier`` judges the copy, and the
-    scanner's own lookup of uv finds ``uv``. The version probe the check runs first
-    is stood in for."""
+    not pass: the resolver answers ``answer``, ``verifier`` judges the copy, the
+    scanner's own lookup of uv finds ``uv``, and the scan is offline only when
+    ``offline`` says so. The version probe the check runs first is stood in for."""
     cls = type(scanner)
     monkeypatch.setattr(cls, "resolve_deferred_tool_version", lambda self: None)
     monkeypatch.setattr(cls, "_validate_uv_tool_availability", lambda self: False)
+    monkeypatch.setattr(cls, "_is_offline_mode", lambda self: offline)
     monkeypatch.setattr(module, "get_uv_tool_command", lambda *args, **kwargs: answer)
     monkeypatch.setattr(pre_installed_tool, "verify_pre_installed_tool", verifier)
     monkeypatch.setattr(uv_tool_runner, "find_uv_or_none", lambda: uv)
@@ -439,3 +456,148 @@ def test_a_uv_answer_reads_no_values_hook(tmp_path, monkeypatch, make, module, t
     assert scanner.use_uv_tool is True
     assert scanner.dependencies_satisfied is True
     assert scanner.dependency_unavailable_reason is None
+
+
+#: uv's words for a requirement it cannot resolve, as the dry runs below give them.
+UNRESOLVED = (
+    "No solution found when resolving dependencies:\n"
+    "  Because a dependency of the copy is not installed in its environment, we can "
+    "conclude that the requirements are unsatisfiable."
+)
+
+
+def _short_of(monkeypatch, constraint: str, resolves: bool) -> List[tuple[str, bool]]:
+    """uv's dry runs over a copy whose version falls short of ``constraint`` and meets
+    any other: the ``--no-deps`` probe reads the version alone, and a run with the
+    dependencies resolves only when ``resolves`` says so and the requirement does not
+    hold ``constraint``. Returns each requirement asked, with its ``no_deps``."""
+    asked: List[tuple[str, bool]] = []
+
+    def dry_run(uv, interpreter, requirement, target=None, no_deps=False):
+        asked.append((requirement, no_deps))
+        if constraint in requirement or not (no_deps or resolves):
+            return "unsatisfied", UNRESOLVED
+        return "satisfied", ""
+
+    monkeypatch.setattr(pre_installed_tool, "_dry_run", dry_run)
+    return asked
+
+
+def _judged(
+    executable, package, extras=None, version_constraint=None, *, uv_executable, values
+):
+    """Stands in for ``verify_pre_installed_tool`` from its last step on: the copy's
+    ``--version`` probe answered and its interpreter was found, and the verdict is
+    the verifier's own judge over uv's dry runs, which ``_short_of`` stands in for."""
+    return pre_installed_tool._judge(
+        executable,
+        package,
+        list(extras or ()),
+        version_constraint,
+        build_requirement(package, extras, version_constraint),
+        uv_executable,
+        "/opt/venv/bin/python",
+        None,
+        "its environment (/opt/venv/bin/python)",
+        "0.0.1",
+        values=values,
+    )
+
+
+@SCANNERS
+def test_a_copy_short_of_more_than_its_version_is_offered_no_constraint(
+    tmp_path, monkeypatch, make, module, tool
+):
+    """The verifier's own judgment under the check, with uv's dry runs stood in for:
+    a copy whose version falls short of the scan's constraint and whose requirement
+    does not resolve in its environment either. The first run's reason names both
+    shortfalls and offers no ``tool_version``, since a constraint this copy meets
+    leaves it unusable: the second run, with such a constraint, refuses the copy for
+    its requirement alone. cfn-lint's requirement carries its ``sarif`` extra, so its
+    bare package is dry-run first; checkov's carries none.
+
+    Without the fix: the first reason named the version constraint alone and offered
+    a ``tool_version``, and the second run refused the copy for a cause the first did
+    not name."""
+    first = make(tmp_path, tool_version=">=99.0")
+    _short_of(monkeypatch, first._get_tool_version_constraint(), resolves=False)
+    copy = [f"/opt/bin/{tool}"]
+    _with_uv_unavailable(monkeypatch, first, module, copy, _judged, uv=UV)
+    assert first.validate_plugin_dependencies() is False
+    second = make(tmp_path, tool_version=">=0.1")
+    _with_uv_unavailable(monkeypatch, second, module, copy, _judged, uv=UV)
+    assert second.validate_plugin_dependencies() is False
+
+    first_reason = first.dependency_unavailable_reason or ""
+    second_reason = second.dependency_unavailable_reason or ""
+    # The control: the second run refuses the copy for its requirement alone.
+    assert f"{tool} cannot be used: {DOES_NOT_RESOLVE}. " in second_reason
+    # The first run named that cause too, and offered no constraint.
+    assert (
+        f"{tool} cannot be used: {SHORT_OF_THE_CONSTRAINT}; {DOES_NOT_RESOLVE}. "
+        in first_reason
+    )
+    assert "options.tool_version" not in first_reason
+
+
+@SCANNERS
+def test_a_copy_short_of_its_version_alone_is_offered_a_constraint_it_meets(
+    tmp_path, monkeypatch, make, module, tool
+):
+    """The control of the test above: with the requirement resolving in its
+    environment once the constraint is left out, the version is all the copy fails,
+    and the reason names the constraint alone and offers a ``tool_version`` this
+    copy meets. It passes with and without the fix; a failure at either means the
+    verifier names a shortfall the copy does not have."""
+    scanner = make(tmp_path, tool_version=">=99.0")
+    _short_of(monkeypatch, scanner._get_tool_version_constraint(), resolves=True)
+    _with_uv_unavailable(
+        monkeypatch, scanner, module, [f"/opt/bin/{tool}"], _judged, uv=UV
+    )
+
+    assert scanner.validate_plugin_dependencies() is False
+
+    reason = scanner.dependency_unavailable_reason or ""
+    assert f"{tool} cannot be used: {SHORT_OF_THE_CONSTRAINT}. " in reason
+    assert f"scanners.{tool}.options.tool_version" in reason
+
+
+@SCANNERS
+@SHORTFALLS
+def test_an_offline_scan_is_told_to_install_a_copy_before_going_offline(
+    tmp_path, monkeypatch, make, module, tool, uv_found, summary, offers_a_constraint
+):
+    """In an offline scan ASH installs nothing, so the remedy for a copy that falls
+    short names a copy to install before going offline, with the install command
+    where a uv is found and the ``tool_version`` where the version constraint is all
+    the copy fails. It offers neither installing uv nor a run through uv once the
+    check passes.
+
+    Without the fix: the remedy read as online, "install uv, so that ASH installs and
+    runs <tool> itself" with no uv, and a run through uv once the check passes with
+    one."""
+    scanner = make(tmp_path)
+    verifier = _Verifier(
+        _verdict("unsatisfied", version="0.0.1", detail="short", summary=summary)
+    )
+    _with_uv_unavailable(
+        monkeypatch,
+        scanner,
+        module,
+        [f"/opt/bin/{tool}"],
+        verifier,
+        uv=UV if uv_found else None,
+        offline=True,
+    )
+
+    assert scanner.validate_plugin_dependencies() is False
+
+    reason = scanner.dependency_unavailable_reason or ""
+    assert f"{tool} cannot be used: {summary}. " in reason
+    assert "ASH does not install tools in offline mode" in reason
+    assert "before going offline" in reason
+    assert "install uv" not in reason
+    assert "so that ASH installs" not in reason
+    assert "once uv's availability check passes" not in reason
+    assert ("uv tool install" in reason) is uv_found
+    assert ("options.tool_version" in reason) is offers_a_constraint
