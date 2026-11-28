@@ -48,6 +48,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scann
     CheckovScanner,
     CheckovScannerConfig,
     CheckovScannerConfigOptions,
+    _KNOWN_DIRECTORY_NAMES,
     _link_named_in_refusal,
     _skip_path_root,
     _source_relative_path,
@@ -163,7 +164,9 @@ class TestLinkSkipValues:
         (source / "app").mkdir()
         _symlink_or_skip(source / "node_modules" / "pkg" / "link.tf", outside)
         _symlink_or_skip(source / "app" / "link.tf", outside)
-        assert CheckovScanner._links_leaving_tree(source) == ["app/link.tf"]
+        assert CheckovScanner._links_leaving_tree(
+            source, skipped_directories=_KNOWN_DIRECTORY_NAMES, tf_files_skipped=True
+        ) == ["app/link.tf"]
 
     def test_the_filesystem_root_gives_single_slash_values(self, tmp_path):
         scanner = _scanner(tmp_path / "src", tmp_path / "out")

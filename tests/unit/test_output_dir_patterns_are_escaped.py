@@ -632,9 +632,12 @@ def test_a_finding_in_an_output_dir_with_a_parenthesis_is_dropped_from_checkovs_
     kept = _kept_uris("checkov", scanner, context)
 
     assert kept == ["main.tf"], kept
-    assert not [v for v in named._values(seen["argv"], "--skip-path") if "out" in v], (
-        seen["argv"]
-    )
+    # Told nothing about the directory: the only values are those for the known
+    # directories (none on Windows), so none names it. Not a search for the text
+    # "out": those values start with the source's own path, and the temporary
+    # directory's name can hold it.
+    sent = named._values(seen["argv"], "--skip-path")
+    assert sent == scanner._known_directory_skip_patterns(source), seen["argv"]
     warned = _warnings(capture)
     if os.sep == "/":
         assert any(

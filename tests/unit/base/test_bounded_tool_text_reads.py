@@ -317,6 +317,12 @@ _ALLOWED_SIZED_READS = {
     ): "one operator rules file through open_in_scanned_tree, bound+1, "
     "RulesBundleUnavailable over the cap; operator input, not tool output",
     (
+        "plugin_modules/ash_builtin/scanners/checkov_scanner.py",
+        "_read_for_module_sources",
+    ): "a .tf or .hcl file of the scanned tree at _MODULE_SOURCE_READ_LIMIT + 1, "
+    "parsed for module sources, the target refused over the cap; operator "
+    "input, not tool output",
+    (
         "plugin_modules/ash_builtin/scanners/gitleaks_scanner.py",
         "GitleaksScanner._read_tree_ignore_file",
     ): "the tree's .gitleaksignore at MAX_IGNORE_FILE_BYTES + 1, raised over the "

@@ -299,6 +299,32 @@
   or a reference that carries its digest, even when an engine is detected, and a time
   budget it cannot work out no longer fails the scan.
 
+- **checkov scans a project inside a directory named `venv`, `.venv` or
+  `node_modules`.** ASH passed checkov `--skip-path` values for those directories
+  that matched a directory of that name anywhere in a file's absolute path, so for
+  a project inside one, such as a package under a virtualenv's `site-packages`,
+  every file was skipped and checkov reported nothing. The values now start with
+  the scanned directory's path, so they skip those directories below it only. On
+  Windows no such value is sent. A file link from one of the three directories
+  that points outside the scanned directory is left out there only under a
+  directory `CKV_IGNORED_DIRECTORIES` names (by default `node_modules`) and when
+  it is not a `.tf` file; otherwise it stops the checkov scan of that directory.
+  On every platform, a file link that checkov's terraform parser reads because a
+  local module source names its directory (a `.tf`, `.hcl`, `terraform.tfvars`,
+  `terraform.tfvars.json`, `*.auto.tfvars` or `*.auto.tfvars.json` file) now
+  stops the scan, since checkov applies no `--skip-path` value there. ASH judges
+  every path checkov might take to such a directory (as written, through links,
+  and as the operating system resolves an absolute source), so a source that
+  reaches its directory through a link that leaves the scanned tree stops the scan
+  too, as does a target with a `.tf` or `.hcl` file larger than ASH reads (4 MiB)
+  to look for module sources. Also on
+  Windows, `scanners.checkov.options.skip_path` values are now checked against
+  checkov's terraform module finder without ASH's values before them, so a value
+  such as `tests/*`, which stopped the scan before, now reaches checkov there, and
+  one such as `(a[b]c)` now stops it. In checkov's default mode its secrets
+  framework keeps its own unanchored list of these names and still skips such a
+  project; with `--enable-secret-scan-all-files` it reads it.
+
 ### Features
 
 - **Symbol suppressions are bound to their file's content hash in `.ash.lock`.**
