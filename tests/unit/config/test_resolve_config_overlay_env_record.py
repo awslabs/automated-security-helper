@@ -216,13 +216,20 @@ def _view(config) -> dict[str, Any]:
 
 
 def _read_its_own_value(config, value: str, place) -> None:
-    """The resolve read ``value`` at ``place``: a rewrite there resolved to it."""
-    found = [
-        rewrite.resolved
-        for rewrite in (config._written_references or [])
-        if tuple(rewrite.path) == place
+    """The resolve read ``value`` at ``place``: one of the project's reads there
+    resolved to it, and the redaction masks it. The read stays among the
+    configuration's references when the operator's file writes over its place;
+    only the record's placement and the displayed set leave it."""
+    read = [
+        reference.resolved
+        for reference in (config._environment_references or ())
+        if not reference.key and tuple(reference.path) == place
     ]
-    assert value in found, ("no rewrite resolved to this resolve's value", place, found)
+    assert value in read, ("no read resolved to this resolve's value", place, read)
+    assert value in (config._environment_values or []), (
+        "the redaction does not mask the value read",
+        place,
+    )
 
 
 @pytest.mark.parametrize(

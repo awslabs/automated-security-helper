@@ -38,9 +38,12 @@ written.
 
 A field whose own validation respells what it reads holds a text that is neither
 the variable's nor holds it: a reporter's ``output_format`` lowercases it, and a
-``tool_version`` takes the canonical form of a specifier set, or the option's
-default for one it refuses. The answer shows the reference there as well, whatever
-spelling the variable holds.
+``tool_version`` takes the option's default for a text that is no specifier set.
+The answer shows the reference there as well, whatever spelling the variable
+holds. A ``tool_version`` the field would give back in another spelling of a
+specifier set is refused at the field by name instead: the load's reference guard
+reads the field's own validation and refuses such a text, so no answer holds that
+spelling.
 """
 
 import json
@@ -793,14 +796,39 @@ def test_a_respelled_literal_is_shown_as_the_field_holds_it(
 
 
 @_ROUTES
-def test_a_tool_version_the_field_canonicalizes_shows_the_reference(
+def test_a_tool_version_the_field_would_respell_is_refused_by_name(
     tmp_path, monkeypatch, answer
 ):
-    """A ``tool_version`` takes the canonical form of a specifier set, so the
-    text the variable gave (``>= 1.7.8, <1.7.97``) is held as ``>=1.7.8,<1.7.97``,
-    which is neither the text nor holds it. The answer shows the reference, and
-    none of the specifier set."""
+    """A ``tool_version`` takes the canonical form of a specifier set, so a text
+    the variable gives in another spelling (``>= 1.7.8, <1.7.97``) would be held
+    as ``>=1.7.8,<1.7.97``, which is neither the text nor holds it, and which the
+    redaction would not match where something other than a view prints it. The
+    load refuses the reference at the field instead, naming the field and the
+    variable, so the answer holds no configuration and neither spelling of the
+    set."""
     monkeypatch.setenv("ASH_TEST_TOOL_RANGE", ">= 1.7.8, <1.7.97")
+
+    result = answer(
+        tmp_path,
+        monkeypatch,
+        _operators_tool_version("bandit", "${ASH_TEST_TOOL_RANGE}"),
+    )
+
+    assert result.get("success") is False, sorted(result)
+    assert "scanners" not in result
+    error = str(result.get("error", ""))
+    assert "ASH_TEST_TOOL_RANGE" in error, error
+    assert "tool_version" in error, error
+    assert "1.7.97" not in json.dumps(result, default=str)
+
+
+@_ROUTES
+def test_a_tool_version_in_the_canonical_spelling_is_shown_by_its_reference(
+    tmp_path, monkeypatch, answer
+):
+    """The control: the same set in its canonical spelling is held as the variable
+    gave it, so the load keeps it and the answer shows the reference."""
+    monkeypatch.setenv("ASH_TEST_TOOL_RANGE", ">=1.7.8,<1.7.97")
 
     result = answer(
         tmp_path,
