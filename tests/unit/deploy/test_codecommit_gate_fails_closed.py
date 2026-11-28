@@ -290,6 +290,8 @@ def test_no_gate_owned_option_can_be_set_from_extra_args(
 #: through the real CLI. Without that, a typo in the frozenset would leave this table green
 #: while the hole stayed open: the refusal would fire on a spelling ASH does not accept, and
 #: the spelling ASH does accept would sail past.
+#: ``--cli-json-input`` is the exception: the CLI opens its document while it parses, so
+#: its control writes one of its own at a temporary path.
 _NARROWING_OPTIONS_WITH_VALUES = [
     ("--scanners", "bandit", "scans one scanner and reports the other nine as SKIPPED"),
     (
@@ -328,6 +330,31 @@ _NARROWING_OPTIONS_WITH_VALUES = [
         "HEAD~1",
         "filters findings to one commit's diff before the exit code is computed",
     ),
+    (
+        "--cli-json-input",
+        "/opt/ash/scan.json",
+        "a document sets options the command line leaves unset",
+    ),
+    (
+        "--baseline",
+        "/opt/ash/base.json",
+        "findings already in the saved results stop counting toward the exit code",
+    ),
+    (
+        "--ash-config-from-host",
+        "/opt/ash/host.yaml",
+        "replaces the file ASH_CONFIG names, which the gate sets to its own config",
+    ),
+    (
+        "--config-file-from-scanned-repository",
+        "/opt/ash/ash.yaml",
+        "that file of the gate's config chain loses what only an operator may set",
+    ),
+    (
+        "--config-file-from-another-checkout",
+        "/opt/ash/ash.yaml",
+        "the same limits, for a file judged to be in another checkout",
+    ),
 ]
 
 #: The same class, spelled as flags that take no value. ``--full`` and its aliases are ASH's
@@ -345,6 +372,18 @@ _NARROWING_FLAGS = [
     ("--use-existing", "answers from a prior results file instead of scanning"),
     ("--no-use-existing", "the other polarity of the same option"),
     ("--changed-files-only", "drops findings outside a git diff from the verdict"),
+    ("--honor-ignore-files", "outvotes a base config that turns ignore files off"),
+    ("--no-honor-ignore-files", "the other polarity of the same option"),
+    (
+        "--config-from-scanned-repository",
+        "the gate's config loses what only an operator's file may set",
+    ),
+    # Not narrowings of the selection: whether an over-age content database fails the
+    # scan is part of the verdict, so the pair is the gate's to decide, and nothing in
+    # the gate's scan should run a program from the pull request.
+    ("--allow-stale-content-db", "a stale content database stops failing the scan"),
+    ("--no-allow-stale-content-db", "the other polarity of the same option"),
+    ("--allow-in-tree-tools", "lets a program in the pull request run in the scan"),
 ]
 
 
@@ -400,6 +439,123 @@ def test_no_reserved_flag_can_be_set_from_extra_args(
         gate.run_scan(tmp_path / "src", "low", True)
 
     assert not captured, f"{flag} was honored: {why}"
+
+
+#: Flags that end ``ash scan`` with exit 0 before any scanner starts. Exit 0 is outcome
+#: "pass", so each of them would answer the pull request with a pass about a scan that
+#: never ran. ``test_a_flag_that_ends_the_run_exits_0_before_any_scanner_starts`` runs
+#: each one through the real CLI.
+_FLAGS_THAT_END_THE_RUN = [
+    ("--help", "prints the help, the answer the gate's own probe asks for"),
+    ("--version", "prints the version line and exits before the scan starts"),
+    ("--generate-cli-skeleton", "prints the --cli-json-input template and exits"),
+]
+
+
+@pytest.mark.parametrize(
+    "flag, why",
+    _FLAGS_THAT_END_THE_RUN,
+    ids=[flag for flag, _ in _FLAGS_THAT_END_THE_RUN],
+)
+def test_no_flag_that_ends_the_run_before_a_scan_can_be_set_from_extra_args(
+    gate, monkeypatch, tmp_path, flag, why
+):
+    """A run that ends before a scanner starts exits 0, which the gate reads as a pass.
+
+    ``--fail-on-incomplete-scanners`` does not help: no scan phase runs, so there is no
+    scanner status for it to read.
+    """
+    captured = _capture_argv(gate, monkeypatch, tmp_path)
+    monkeypatch.setenv("ASH_SCAN_EXTRA_ARGS", flag)
+
+    with pytest.raises(RuntimeError):
+        gate.run_scan(tmp_path / "src", "low", True)
+
+    assert not captured, f"{flag} was honored: {why}"
+
+
+@pytest.mark.parametrize(
+    "flag, marker",
+    [
+        ("--help", "Usage"),
+        ("--version", "automated-security-helper v"),
+        ("--generate-cli-skeleton", '"source_dir"'),
+    ],
+    ids=["--help", "--version", "--generate-cli-skeleton"],
+)
+def test_a_flag_that_ends_the_run_exits_0_before_any_scanner_starts(
+    monkeypatch, flag, marker
+):
+    """The positive control behind the refusal above, run through the real CLI.
+
+    ``check_completeness_flag`` refuses to scan unless ``ash scan --help`` exits 0, and
+    this asks the same of each flag: exit 0 with its own output, and no scan started.
+    ``run_ash_scan`` is replaced so that a flag which failed to end the run would show
+    up here as a call rather than start a real scan.
+    """
+    from typer.testing import CliRunner
+
+    import automated_security_helper.cli.scan as scan_module
+    from automated_security_helper.cli.main import app
+
+    started: list = []
+    monkeypatch.setattr(
+        scan_module, "run_ash_scan", lambda *args, **kwargs: started.append(args)
+    )
+
+    result = CliRunner().invoke(app, ["scan", flag])
+
+    assert result.exit_code == 0, (flag, result.exit_code, result.output[-2000:])
+    assert marker in result.output, (flag, result.output[-2000:])
+    assert started == [], f"{flag} started a scan"
+
+
+def test_every_eager_option_of_ash_scan_is_reserved():
+    """``click`` processes an eager option before every other one, the gate's included.
+
+    The two eager options ``ash scan`` declares end the run: ``--help`` prints the help
+    and ``--generate-cli-skeleton`` prints the ``--cli-json-input`` template, each with
+    exit 0 and before any scanner starts. They are read from the real command through
+    ``Command.get_params``, which is where ``click`` adds ``--help``, so an eager option
+    added to ``ash scan`` later fails this until the gate reserves it.
+    """
+    import typer.main
+
+    from automated_security_helper.cli.main import app
+
+    scan_command = typer.main.get_command(app).commands["scan"]
+    ctx = scan_command.make_context("scan", [], resilient_parsing=True)
+    eager = {
+        spelling
+        for param in scan_command.get_params(ctx)
+        if param.is_eager
+        for spelling in (*param.opts, *param.secondary_opts)
+    }
+    gate_module = _load_gate()
+    reserved = (
+        gate_module.GATE_OWNED_SCAN_OPTIONS | gate_module.GATE_OWNED_SHORT_OPTIONS
+    )
+
+    assert eager, "ash scan declares no eager option, so this check read nothing"
+    assert eager <= reserved, (
+        f"these eager options of ash scan are not reserved: {sorted(eager - reserved)}"
+    )
+
+
+def test_a_cli_json_input_document_sets_an_option_the_gate_does_not_pass(tmp_path):
+    """The positive control behind refusing ``--cli-json-input``.
+
+    A document's values apply to the options the command line leaves unset (the
+    precedence list in ``automated_security_helper/cli/json_input.py``), and the gate
+    passes only its own options on the command line. So the document could set the
+    scanner selection, which the refusal reads only as tokens and never sees here.
+    """
+    document = tmp_path / "scan.json"
+    document.write_text('{"scanners": ["bandit"]}', encoding="utf-8")
+
+    params = _resolve_scan_params(["ash", "scan", "--cli-json-input", str(document)])
+
+    assert tuple(params["scanners"]) == ("bandit",), params["scanners"]
 
 
 @pytest.mark.parametrize(
@@ -486,9 +642,12 @@ def test_every_reserved_spelling_is_one_the_cli_actually_accepts():
     from automated_security_helper.cli.main import app
 
     scan_command = typer.main.get_command(app).commands["scan"]
+    # get_params, not .params: click adds --help to the parameters it parses there,
+    # and the gate reserves --help.
+    ctx = scan_command.make_context("scan", [], resilient_parsing=True)
     declared = {
         spelling
-        for param in scan_command.params
+        for param in scan_command.get_params(ctx)
         for spelling in (*param.opts, *param.secondary_opts)
     }
     gate_module = _load_gate()
@@ -516,6 +675,28 @@ def test_every_reserved_spelling_is_one_the_cli_actually_accepts():
         (["--config", "/tmp/none.yaml"], "config", "/tmp/none.yaml"),  # nosec B108
         (["-c", "/tmp/none.yaml"], "config", "/tmp/none.yaml"),  # nosec B108
         (["-c/tmp/none.yaml"], "config", "/tmp/none.yaml"),  # nosec B108
+        (["--baseline", "/opt/ash/base.json"], "baseline", "/opt/ash/base.json"),
+        (["--allow-stale-content-db"], "allow_stale_content_db", True),
+        (["--no-allow-stale-content-db"], "allow_stale_content_db", False),
+        (
+            ["--ash-config-from-host", "/opt/ash/host.yaml"],
+            "ash_config_from_host",
+            "/opt/ash/host.yaml",
+        ),
+        (["--honor-ignore-files"], "honor_ignore_files", True),
+        (["--no-honor-ignore-files"], "honor_ignore_files", False),
+        (["--config-from-scanned-repository"], "config_from_scanned_repository", True),
+        (
+            ["--config-file-from-scanned-repository", "/opt/ash/ash.yaml"],
+            "config_file_from_scanned_repository",
+            ("/opt/ash/ash.yaml",),
+        ),
+        (
+            ["--config-file-from-another-checkout", "/opt/ash/ash.yaml"],
+            "config_file_from_another_checkout",
+            ("/opt/ash/ash.yaml",),
+        ),
+        (["--allow-in-tree-tools"], "allow_in_tree_tools", True),
     ],
 )
 def test_a_reserved_option_would_really_have_narrowed_the_scan(
