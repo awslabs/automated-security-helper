@@ -2136,15 +2136,18 @@ def legacy_move_caveats(source: ConfigSource, subject: str) -> List[str]:
     * JSON is read as JSON only under a ``.json`` name, and the YAML loader skips only
       spaces between tokens, so it refuses a tab anywhere in the file; a tab inside a
       JSON string is refused by JSON itself, so every tab of a JSON file that loads is
-      between tokens. YAML also refuses a key whose colon is on another line and, inside
-      quotes, reads U+0085, U+2028 and U+2029 as line breaks and refuses DEL, the other
-      C1 controls, U+FFFE and U+FFFF, each of which a JSON string holds as written; it
-      reads the two escapes of a surrogate pair as two characters, where JSON reads one;
-      and it reads ``Infinity`` and a number that has an exponent but no decimal point,
-      or no sign after the ``e``, as text. Each such character written as its escape, a
-      character above U+FFFF written as itself, such a number written with a decimal
-      point and a sign after the ``e``, and ``Infinity`` written as ``.inf`` are read as
-      JSON reads them;
+      between tokens. YAML also refuses a key whose colon is on another line, or more
+      than 1,024 characters after the key's opening quote mark, and, inside quotes,
+      reads U+0085, U+2028 and U+2029 as line breaks and refuses DEL, the other C1
+      controls, U+FFFE and U+FFFF, each of which a JSON string holds as written; it
+      reads the two escapes of a surrogate pair as two characters, where JSON reads
+      one; and it reads ``Infinity``, ``-Infinity``, ``NaN`` and a number that has an
+      exponent but no decimal point, or no sign after the ``e``, as text. Each such
+      character written as its escape, a character above U+FFFF written as itself,
+      such a number written with a decimal point and a sign after the ``e``,
+      ``Infinity``, ``-Infinity`` and ``NaN`` written as ``.inf``, ``-.inf`` and
+      ``.nan``, and such a long key written with a question mark and a space before it
+      are read as JSON reads them;
     * a TOML string value that starts with ``${`` is a reference to the environment. In
       YAML a quoted value is one only when it is tagged ``!ENV``, and an unquoted
       value ends at a space followed by ``#`` and is refused when it holds a ``:``
@@ -2161,9 +2164,10 @@ def legacy_move_caveats(source: ConfigSource, subject: str) -> List[str]:
       reads it leaves out a line break that directly follows the opening marks and, in a
       basic one, an unescaped backslash that ends a line (only spaces or tabs after it
       on that line) with the spaces, tabs and line breaks after it. Written as a
-      one-line double-quoted string, with each other line break as the escape for a line
-      feed, each backslash and double quote of a literal one escaped, and a basic one's
-      escapes kept and its unescaped double quotes escaped, it is read as TOML reads it;
+      one-line double-quoted string, with each other line break (a line feed, or a
+      carriage return and a line feed) as the escape for a line feed, each backslash
+      and double quote of a literal one escaped, and a basic one's escapes kept and
+      its unescaped double quotes escaped, it is read as TOML reads it;
     * in any TOML string, YAML reads a U+0085, U+2028 or U+2029 written as itself inside
       quotes as a line break, so U+0085 is not kept, U+2028 and U+2029 are kept, and the
       spaces and tabs beside any of the three are dropped; and it refuses a file that
@@ -2172,10 +2176,15 @@ def legacy_move_caveats(source: ConfigSource, subject: str) -> List[str]:
       that holds one becomes double-quoted, with its backslashes and double quotes
       escaped;
     * a TOML number that has an exponent but no decimal point, no sign after the ``e``
-      or an underscore after it, that is octal (``0o``), or that is ``inf``, is read by
-      YAML as text, which a field that takes a number refuses; written with a decimal
-      point, a sign after the ``e`` and no underscore after it, in decimal, or as
-      ``.inf``, it is read as TOML reads it.
+      or an underscore after the ``e``, that is octal (``0o``), or that is ``inf`` or
+      ``nan`` with or without a sign, is read by YAML as text, which a field that
+      takes a number refuses; written with a decimal point and, after the ``e``, a
+      sign and no underscore, in decimal, as ``.inf`` with its sign, or as ``.nan``,
+      it is read as TOML reads it;
+    * a TOML key written in YAML as usual is refused when its colon is more than 1,024
+      characters after the key's first character; written after a question mark and a
+      space, with its colon, a space and its value on the next line and the colon
+      under the question mark, it is read as TOML reads it.
 
     A ``pyproject.toml`` table is edited where it is and has none.
     """
@@ -2197,8 +2206,15 @@ def legacy_move_caveats(source: ConfigSource, subject: str) -> List[str]:
             "four-digit Unicode escape and each character above U+FFFF that is "
             "written as two escapes as the character itself, give each number that "
             "has an exponent a decimal point and a sign after the e, such as 1.0e+3 "
-            "for 1e3, write Infinity as .inf, and keep each key on the same line as "
-            "its colon: otherwise YAML reads another value or refuses the file"
+            "for 1e3, and keep each key on the same line as its colon: otherwise "
+            "YAML reads another value or refuses the file"
+        )
+        caveats.append(
+            "In the moved file, write Infinity, -Infinity and NaN as .inf, -.inf and "
+            ".nan, and put a question mark and a space before each key whose colon is "
+            "more than 1,024 characters after its opening quote mark: YAML reads the "
+            "JSON spelling of each number as text and refuses such a key without the "
+            "question mark"
         )
     if is_toml_file(source.path) and not is_pyproject(source.path):
         caveats.append(
@@ -2214,7 +2230,8 @@ def legacy_move_caveats(source: ConfigSource, subject: str) -> List[str]:
             "line break that directly follows the opening marks and, from three "
             "double quote marks, an unescaped backslash that ends a line (only "
             "spaces or tabs after it on that line), with the spaces, tabs and line "
-            "breaks after it; write each other line feed as \\n; from three single "
+            "breaks after it; write each other line break (a line feed, or a carriage "
+            "return and a line feed) as \\n; from three single "
             "quote marks, also write each backslash as \\\\ and each double quote as "
             '\\"; from three double quote marks, keep each escape and write each '
             'unescaped double quote as \\"'
@@ -2228,10 +2245,17 @@ def legacy_move_caveats(source: ConfigSource, subject: str) -> List[str]:
             "line breaks and refuses a file that holds one of the others"
         )
         caveats.append(
-            "Give each number that has an exponent a decimal point and a sign after "
-            "the e, with no underscore after it, such as 1.0e+3 for 1e3, write each "
-            "octal number, such as 0o17, in decimal, and write inf as .inf: YAML "
-            "reads another spelling of each as text"
+            "Give each number that has an exponent a decimal point and, after the e, "
+            "a sign and no underscore, such as 1.0e+3 for 1e3, write each octal "
+            "number, such as 0o17, in decimal, and write inf, +inf and -inf as .inf, "
+            "+.inf and -.inf, and nan, +nan and -nan as .nan: YAML reads the TOML "
+            "spelling of each as text"
+        )
+        caveats.append(
+            "Write each key whose colon would be more than 1,024 characters after the "
+            "key's first character after a question mark and a space, and put its "
+            "colon, a space and its value on the next line, the colon under the "
+            "question mark: without the question mark YAML refuses such a key"
         )
     return caveats
 
