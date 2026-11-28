@@ -17,7 +17,7 @@ What it holds
   unknown keys the way the journey loader does, and apply the copy rules to captions
   with ``count_words`` and ``caption_problems``, the one counter those rules use.
   ``load_storyboard`` also refuses the YAML that PyYAML resolves silently: anchors,
-  aliases, merge keys, and a key given twice in one mapping.
+  aliases, every explicit tag, merge keys, and a key given twice in one mapping.
 * the retimer: ``retime`` rewrites the measured output times of every scene into the
   scene's own budget. Output is shortened to fit and never stretched.
 * the scrub scan: ``scan_text`` and ``scan_cast`` look for tokens that must not appear
@@ -34,10 +34,11 @@ What it holds
 
 Dependencies
 ------------
-The standard library only. PyYAML is imported inside ``_load_yaml``, the one function
-that reads YAML; ``load_storyboard`` reads through it, and ``parse_storyboard`` takes
-data that is already parsed. This module imports no ``pty``, ``termios`` or
-``fcntl``, and tests/unit/docs/test_cast_core.py checks that on the syntax tree.
+The standard library only. The one import that reaches PyYAML is the sibling module
+``_strict_yaml``, inside ``_load_yaml``, the one function that reads YAML;
+``load_storyboard`` reads through it, and ``parse_storyboard`` takes data that is
+already parsed. This module imports no ``pty``, ``termios`` or ``fcntl``, and
+tests/unit/docs/test_cast_core.py checks both on the syntax tree.
 
 Times
 -----
@@ -54,6 +55,7 @@ import json
 import math
 import operator
 import re
+import sys
 import unicodedata
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from pathlib import Path
@@ -959,118 +961,31 @@ def parse_storyboard(
     )
 
 
-_MERGE_TAG = "tag:yaml.org,2002:merge"
-
-
-def _refuse_yaml_features(yaml: Any, text: str, source: str) -> None:
-    """Refuse anchors and aliases, as a journey file's loader does.
-
-    This reads the parser's events and builds no data, so each refusal names the line
-    and the anchor or alias at fault. A merge key is not found here, because its text
-    does not say what PyYAML will do with it: ``_refuse_merge_keys`` reads the tag the
-    composer resolved instead. ``yaml`` is the PyYAML module.
-    """
-    for event in yaml.parse(text, Loader=yaml.SafeLoader):
-        where = f"{source}: line {event.start_mark.line + 1}"
-        if isinstance(event, yaml.AliasEvent):
-            _fail(
-                where,
-                f"the YAML alias *{event.anchor} is not part of storyboard schema "
-                f"{STORYBOARD_SCHEMA}; write the value out",
-            )
-        anchor = getattr(event, "anchor", None)
-        if anchor:
-            _fail(
-                where,
-                f"the YAML anchor &{anchor} is not part of storyboard schema "
-                f"{STORYBOARD_SCHEMA}; write the value out",
-            )
-
-
-def _refuse_merge_keys(yaml: Any, root: Any, source: str) -> None:
-    """Refuse every node PyYAML resolves as a merge key, found by its resolved tag.
-
-    The composer has already resolved each spelling, so the tag says what PyYAML will
-    do and the text does not. A plain ``<<``, ``! <<``, ``! "<<"``, ``!<!> <<`` and
-    ``!!merge`` with any word all carry the merge tag. PyYAML tests only the tag of a
-    key, whatever node it sits on, so a flow sequence or mapping written after
-    ``!!merge`` carries it too. PyYAML merges the mapping after such a key into the
-    mapping that holds it, so a merged value can be supplied or dropped without a
-    word. A quoted ``"<<"`` with no tag resolves to a string and is an ordinary key.
-    The nodes are read in document order, so the refusal names the first one. ``yaml``
-    is the PyYAML module.
-    """
-    pending = [root]
-    while pending:
-        node = pending.pop()
-        if node.tag == _MERGE_TAG:
-            _fail(
-                f"{source}: line {node.start_mark.line + 1}",
-                "the YAML merge key '<<' is not part of storyboard schema "
-                f"{STORYBOARD_SCHEMA}; write each key out",
-            )
-        if isinstance(node, yaml.SequenceNode):
-            pending.extend(reversed(node.value))
-        elif isinstance(node, yaml.MappingNode):
-            for key_node, value_node in reversed(node.value):
-                pending.extend((value_node, key_node))
-
-
-def _refuse_repeated_keys(yaml: Any, node: Any, source: str, path: str = "") -> None:
-    """Refuse a key given twice in one mapping, in any mapping of the document.
-
-    PyYAML keeps the last of a repeated key without a word, so a caption written
-    twice in a scene would replace the first. Two keys are the same when they are
-    scalars with the same tag and the same text. ``path`` names the mapping in the
-    message, and ``yaml`` is the PyYAML module.
-    """
-    if isinstance(node, yaml.SequenceNode):
-        for index, item in enumerate(node.value):
-            _refuse_repeated_keys(yaml, item, source, f"{path}[{index}]")
-    elif isinstance(node, yaml.MappingNode):
-        first_line: dict[tuple[str, str], int] = {}
-        for key_node, value_node in node.value:
-            child = path
-            if isinstance(key_node, yaml.ScalarNode):
-                line = key_node.start_mark.line + 1
-                identity = (key_node.tag, key_node.value)
-                if identity in first_line:
-                    place = f"in {path}" if path else "at the top level"
-                    _fail(
-                        f"{source}: line {line}",
-                        f"the key {key_node.value!r} is given twice {place} (first on "
-                        f"line {first_line[identity]}); the later value would replace "
-                        "the earlier one",
-                    )
-                first_line[identity] = line
-                child = f"{path}.{key_node.value}" if path else key_node.value
-            _refuse_repeated_keys(yaml, value_node, source, child)
-
-
 def _load_yaml(text: str, source: str) -> object:
     """``text`` as YAML data, refusing what schema 1 has no use for.
 
-    PyYAML is imported here and nowhere else in this module. ``yaml.safe_load``
-    accepts anchors, aliases and merge keys and keeps the last of a key given twice,
-    so a caption written twice in a scene would replace the first without a word.
-    Each is refused by name instead.
+    The reading is done by ``_strict_yaml``, the sibling module the journey generator
+    reads through too. This is the one function of the module that imports it, so the
+    module needs no PyYAML to import, parse or retime. ``yaml.safe_load`` accepts
+    anchors, aliases, tags and merge keys and keeps the last of a key given twice, so a
+    caption written twice in a scene would replace the first without a word. Each is
+    refused by name instead. The module's own directory is on ``sys.path`` only for the
+    import, because a caller may have loaded this module by its path.
     """
-    import yaml
-
+    here = str(Path(__file__).resolve().parent)
+    added = here not in sys.path
+    if added:
+        sys.path.insert(0, here)
     try:
-        _refuse_yaml_features(yaml, text, source)
-        loader = yaml.SafeLoader(text)
-        try:
-            node = loader.get_single_node()
-            if node is None:
-                return None
-            _refuse_merge_keys(yaml, node, source)
-            _refuse_repeated_keys(yaml, node, source)
-            return loader.construct_document(node)
-        finally:
-            loader.dispose()
-    except yaml.YAMLError as exc:
-        raise StoryboardError(f"{source}: not valid YAML: {exc}") from exc
+        import _strict_yaml
+    finally:
+        if added:
+            sys.path.remove(here)
+    schema = f"storyboard schema {STORYBOARD_SCHEMA}"
+    try:
+        return _strict_yaml.load(text, source, schema)
+    except _strict_yaml.StrictYamlError as exc:
+        raise StoryboardError(str(exc)) from exc
 
 
 def load_storyboard(
@@ -1078,9 +993,9 @@ def load_storyboard(
 ) -> Storyboard:
     """Read the storyboard YAML file at ``path`` and validate it.
 
-    The YAML is read by ``_load_yaml``, which refuses anchors, aliases, merge keys and a
-    key given twice in one mapping. Each refusal is a ``StoryboardError`` naming the
-    file, the line and the anchor or key.
+    The YAML is read by ``_load_yaml``, which refuses anchors, aliases, every explicit
+    tag, merge keys and a key given twice in one mapping. Each refusal is a
+    ``StoryboardError`` naming the file, the line and the anchor, tag or key.
     """
     source = str(path)
     try:

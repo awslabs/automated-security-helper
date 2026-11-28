@@ -7,9 +7,9 @@
 # install scene types a line of the README, named by `comment_from`, as a shell comment
 # that is never run.
 #
-# scripts/_cast.py reads this file. It refuses unknown keys, YAML anchors, aliases and
-# merge keys, and a key given twice. It checks every caption against the copy rules and
-# checks that the scene durations, in seconds, add up to 30 to 60 s.
+# scripts/_cast.py reads this file. It refuses unknown keys, YAML anchors, aliases,
+# tags and merge keys, and a key given twice. It checks every caption against the copy
+# rules and checks that the scene durations, in seconds, add up to 30 to 60 s.
 schema: 1
 journey: docs/journeys/getting-started-local.journey.yaml
 terminal: {cols: 100, rows: 30, prompt: "$ "}

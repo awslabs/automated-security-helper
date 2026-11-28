@@ -97,7 +97,9 @@ Each refusal names the segment and is a ``--check`` failure:
   a project, save or fix text with a line that is exactly ``EOF`` (the twin writes
   each through a heredoc that line would end);
 * a marker key that is not one the docs runner reads, an unknown key anywhere in
-  the file, a YAML anchor, alias or merge key;
+  the file, a YAML anchor, alias, tag or merge key, or a key given twice in one
+  mapping (``scripts/_strict_yaml.py`` reads the YAML and refuses each, naming the
+  line);
 * a block ``id`` that is not kebab-case, or that another block of the journey has;
 * a render that does not parse back, through ``scripts/docs_checks.py``, to the
   blocks and markers the journey states, so the static checks and the runner see
@@ -116,9 +118,8 @@ import sys
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-import yaml
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _strict_yaml  # noqa: E402
 from _reference_docs import (  # noqa: E402
     add_docs_root_argument,
     banner,
@@ -201,24 +202,6 @@ def _where(index: int, segment: dict) -> str:
         first = next((line for line in text.splitlines() if line.strip()), "")
         detail = f"{kind}, starts {first[:40]!r}"
     return f"body[{index}] ({detail})"
-
-
-def _refuse_yaml_features(text: str, path: Path) -> None:
-    """Schema v1 has no anchors, aliases or merge keys."""
-    try:
-        for event in yaml.parse(text):
-            if isinstance(event, yaml.AliasEvent) or getattr(event, "anchor", None):
-                raise JourneyError(
-                    f"{path}: YAML anchors and aliases are not part of schema v1"
-                )
-            if (
-                isinstance(event, yaml.ScalarEvent)
-                and event.value == "<<"
-                and event.style is None
-            ):
-                raise JourneyError(f"{path}: YAML merge keys are not part of schema v1")
-    except yaml.YAMLError as exc:
-        raise JourneyError(f"{path}: not valid YAML: {exc}") from exc
 
 
 def _unknown(keys, allowed, where: str) -> None:
@@ -576,8 +559,10 @@ def load_journey(path: Path) -> dict:
     """Parse and validate a journey file; raises JourneyError naming what is wrong."""
     path = Path(path)
     text = path.read_text(encoding="utf-8")
-    _refuse_yaml_features(text, path)
-    journey = yaml.safe_load(text)
+    try:
+        journey = _strict_yaml.load(text, str(path), f"schema v{SCHEMA}")
+    except _strict_yaml.StrictYamlError as exc:
+        raise JourneyError(str(exc)) from exc
     if not isinstance(journey, dict):
         raise JourneyError(f"{path}: a journey is a mapping")
     _unknown(journey, _TOP_KEYS, str(path))
