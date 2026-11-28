@@ -6752,8 +6752,8 @@ def _scan_with_nothing_to_scan(
     config: Optional[Dict[str, Any]] = None,
     *extra: str,
 ) -> Tuple[subprocess.CompletedProcess, Dict[str, str]]:
-    """``ash scan --scanners <scanners>`` of a tree holding ``files``, with ``config``
-    as its own ``.ash.yaml``: the result, and each scanner's status in the
+    """``ash scan fs --only-scanners <scanners>`` of a tree holding ``files``, with
+    ``config`` as its own ``.ash.yaml``: the result, and each scanner's status in the
     results file."""
     tree = _config_scan_tree(tmp_path, files)
     if config is not None:
@@ -6830,14 +6830,14 @@ def test_a_scan_whose_scanners_had_nothing_to_scan_exits_1_and_says_why(
 ) -> None:
     """troubleshoot.md (No selected scanner had a file to scan), and exit-codes.md.
 
-    ``ash scan`` runs offline with ``--scanners`` naming scanners that have nothing to
-    read: detect-secrets in an empty tree, cdk-nag and detect-secrets in an empty tree,
-    and detect-secrets under a project config whose global_settings.ignore_paths
-    matches every path, with one pattern and with five. Each must exit 1 with every
-    selected scanner SKIPPED and the error the page quotes, with the page's scanner
-    names replaced by these: naming the scanners, and for ignore_paths showing its
-    first three patterns with a count of the others. It is not the "Scan ran no
-    scanners:" error.
+    ``ash scan fs`` runs offline with ``--only-scanners`` naming scanners that have
+    nothing to read: detect-secrets in an empty tree, cdk-nag and detect-secrets in an
+    empty tree, and detect-secrets under a project config whose
+    global_settings.ignore_paths matches every path, with one pattern and with five.
+    Each must exit 1 with every selected scanner SKIPPED and the error the page
+    quotes, with the page's scanner names replaced by these: naming the scanners, and
+    for ignore_paths showing its first three patterns with a count of the others. It
+    is not the "Scan ran no scanners:" error.
 
     The page's example names bandit, but offline a bandit the host has not installed
     is MISSING, not SKIPPED, so the cells name scanners that come with ASH:
@@ -6916,10 +6916,10 @@ def test_a_scan_whose_scanners_were_all_turned_off_reports_scan_ran_no_scanners(
 ) -> None:
     """troubleshoot.md (No selected scanner had a file to scan).
 
-    ``--scanners detect-secrets`` with detect-secrets turned off by an override, in a
-    tree with a file it would read, leaves every scanner SKIPPED for another reason
-    than having nothing to scan. The scan must exit 1 with "Scan ran no scanners:"
-    and each scanner's status, and not with the nothing-to-scan error.
+    ``--only-scanners detect-secrets`` with detect-secrets turned off by an override,
+    in a tree with a file it would read, leaves every scanner SKIPPED for another
+    reason than having nothing to scan. The scan must exit 1 with "Scan ran no
+    scanners:" and each scanner's status, and not with the nothing-to-scan error.
     """
     assert_on_page(
         "how-to/troubleshoot.md",
