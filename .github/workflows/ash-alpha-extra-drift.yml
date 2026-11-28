@@ -1,0 +1,138 @@
+name: Alpha Extra Drift
+
+# WHAT THIS GATES
+#
+# [project.optional-dependencies] alpha in pyproject.toml and the alpha-extra group in
+# .github/dependabot.yml both restate which PyPI pins in
+# automated_security_helper/base/plugin_provisioning.py are members of the alpha extra.
+# scripts/sync_alpha_extra.py writes both from that register. Its --fix mode is wired into
+# .pre-commit-config.yaml, so a change to a member pin repairs both files in the commit
+# that causes it. This workflow is the --check half, for the changes that never run
+# pre-commit.
+#
+# While no pin is a member, the register, pyproject.toml and the Dependabot block agree by
+# absence: pyproject.toml has no alpha key and the block between the markers is empty.
+# Adding the key without a member, or a member without the key, turns this red the same way
+# a stale pin does.
+#
+# WHY THE CHECK RUNS IN CI, AND WHY IT NEVER REPAIRS
+#
+# Dependabot edits pyproject.toml and uv.lock and nothing else, and it never runs
+# pre-commit. A bump of a member therefore leaves the register on the old pin, and this run
+# is where that shows up: red, on the bump's own pull request. That red is the intended
+# prompt. Check the scanner against the new release, move the pin in the register, run the
+# script with --fix and commit. Repairing in CI would hide the pairing and leave the pushed
+# commit still drifted, and running --fix straight after the bump would write the
+# register's old pin back over it. The script prints the command to run and says which side
+# to change first.
+#
+# PATH FILTERS
+#
+# Four inputs and this file, all of them load-bearing:
+#
+#   - pyproject.toml, where the extra lives. A Dependabot bump touches this and uv.lock.
+#   - automated_security_helper/base/plugin_provisioning.py, the register the script reads.
+#   - .github/dependabot.yml, where the group lives.
+#   - scripts/sync_alpha_extra.py, so a change to the generator is tested by the gate.
+#   - this workflow file, for the same reason.
+#
+# uv.lock is deliberately absent. The lock pins resolved versions; the extra's declared
+# specifiers are what the script compares, and a lock-only change cannot move them.
+#
+# NO TAG TRIGGER
+#
+# The gate judges the content a branch or a queue entry would merge. A tag points at a
+# commit that was already judged there, so a tag push would only repeat that verdict.
+#
+# THE MERGE QUEUE LEG
+#
+# ash-unified-ci.yml declares merge_group, and merge_group is a distinct event from both
+# push and pull_request. A gate that omits it does not run on queue entries, which is
+# where this one earns its keep: PR A bumps a member in pyproject.toml, PR B edits the
+# register, each passes alone, and the queue combines them into the drift this exists to
+# catch.
+#
+# merge_group takes no paths filter -- GitHub scopes paths to push, pull_request and
+# pull_request_target only -- so this leg is unfiltered and runs on every queue entry. That
+# is the wanted behavior rather than a limitation worked around: a queue entry merges
+# several pull requests, so the change that introduces drift may have touched none of the
+# filtered paths. Filtering here would also break the queue outright once this becomes a
+# required check, because a skipped required check never reports and the merge waits on a
+# verdict that never arrives.
+
+on:
+  push:
+    branches:
+      - "*"
+    paths:
+      - "pyproject.toml"
+      - "automated_security_helper/base/plugin_provisioning.py"
+      - ".github/dependabot.yml"
+      - "scripts/sync_alpha_extra.py"
+      - ".github/workflows/ash-alpha-extra-drift.yml"
+  pull_request:
+    branches:
+      - "*"
+    paths:
+      - "pyproject.toml"
+      - "automated_security_helper/base/plugin_provisioning.py"
+      - ".github/dependabot.yml"
+      - "scripts/sync_alpha_extra.py"
+      - ".github/workflows/ash-alpha-extra-drift.yml"
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch: {}
+
+# Least privilege: this workflow only reads the repository and runs one script.
+permissions:
+  contents: read
+
+concurrency:
+  # One in-flight run per pull request or branch; pushing again supersedes the previous
+  # run.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # A newer run on any ref other than main or a tag supersedes the one in progress: a
+  # fresh push to a pull request or a branch makes the previous head's run moot, and a
+  # second dispatch on a branch replaces the first. Runs on main and on tags are never
+  # cancelled; each is the only report its commit gets. A merge_group entry has its own
+  # per-entry ref, so a second run in its group only means the entry was rebuilt and the
+  # earlier run's answer is for a queue entry that no longer exists.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  alpha-extra-matches-register:
+    name: alpha extra and its Dependabot group match the register
+    # ubuntu-slim, as the CDK Extra Drift job: the same two steps, and the script is
+    # standard-library Python run under a uv-managed 3.13 with --no-project, so nothing is
+    # arch-specific and the slim runner's 1 CPU, 5 GB and 15-minute cap are enough. That
+    # job measured a peak of about 0.87 GB and 0.2 minutes.
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    # THIRD-PARTY ACTIONS ARE PINNED BY COMMIT SHA, NOT BY TAG
+    #
+    # A tag is a mutable pointer: whoever controls the action's repository can move it to
+    # any commit, and every workflow naming the tag picks that up on its next run with no
+    # diff here to review. A 40-character commit SHA is immutable. The trailing comment is
+    # what Dependabot reads to know which release a SHA corresponds to, and it rewrites both
+    # together, so pinning does not mean going stale. Do not "simplify" these back to a tag.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # No uv cache. The check runs with --no-project, so it installs no packages: a run
+      # leaves about 16 KB of interpreter metadata in ~/.cache/uv, and the 3.13 interpreter
+      # uv may download goes to ~/.local/share/uv/python, outside that path, so a cache step
+      # would move nothing worth a step. setup-uv's own cache stays off for the reason the
+      # other workflows give: it restores on every event and saves from every ref.
+      - name: Install uv
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          enable-cache: false
+
+      # --check, never --fix. CI reporting drift and silently repairing it would hide the
+      # pairing the register needs, and would leave the pushed commit still drifted. The
+      # script prints the exact command to run locally.
+      - name: Check the alpha extra and its Dependabot group against the register
+        run: uv run --no-project --python 3.13 python scripts/sync_alpha_extra.py --check

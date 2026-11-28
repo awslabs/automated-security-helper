@@ -54,6 +54,7 @@ CANCEL_OUTSIDE_MAIN_AND_TAGS = (
 SUPERSEDING = {
     "ash-actions-pinned.yml",
     "ash-agent-plugins-drift.yml",
+    "ash-alpha-extra-drift.yml",
     "ash-cdk-extra-drift.yml",
     "ash-docs-ci-runners.yml",
     "ash-iac-drift.yml",

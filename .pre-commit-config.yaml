@@ -51,6 +51,29 @@ repos:
         verbose: true
         pass_filenames: false
         files: ^(pyproject\.toml|automated_security_helper/plugin_modules/ash_builtin/scanners/cdk_nag_scanner\.py|scripts/sync_cdk_extra_fallback\.py)$
+      # The alpha extra's counterpart of sync-cdk-extra-fallback above, with the same command
+      # shape for the same reasons: --fix so the repair lands in the commit that causes the
+      # drift, --no-project because the script needs only the standard library, and
+      # --python 3.13 so it reads pyproject.toml with tomllib. It writes
+      # [project.optional-dependencies] alpha in pyproject.toml and the alpha-extra group
+      # between the generated markers of .github/dependabot.yml from the PyPI pins in
+      # automated_security_helper/base/plugin_provisioning.py. While no pin is a member it
+      # writes nothing: pyproject.toml has no alpha key and the Dependabot block is empty.
+      #
+      # `files:` lists everything the script reads or writes, plus the script itself: the
+      # register, pyproject.toml and .github/dependabot.yml.
+      #
+      # It does not run `uv lock`, which is a project command. When it changes the extra it
+      # prints a reminder to run it, and tests/unit/test_homebrew_formula_install.py fails a
+      # commit that skipped the relock. tests/unit/test_alpha_extra_sync_gate.py pins this
+      # entry.
+      - id: sync-alpha-extra
+        name: Sync the alpha extra and its Dependabot group with the register
+        entry: uv run --no-project --python 3.13 python scripts/sync_alpha_extra.py --fix
+        language: system
+        verbose: true
+        pass_filenames: false
+        files: ^(pyproject\.toml|automated_security_helper/base/plugin_provisioning\.py|\.github/dependabot\.yml|scripts/sync_alpha_extra\.py)$
       # The CI lint gate (ash-unified-ci.yml) runs `uv run --group dev ruff check .`
       # and `uv run --group dev ruff format --check .` over the whole tree, and these
       # two run the same commands here, so a commit that would fail that gate fails
