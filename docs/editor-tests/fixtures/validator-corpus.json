@@ -127,6 +127,23 @@
       "valid": true
     },
     {
+      "editor": {
+        "findings": [
+          {
+            "row": "reference-in-typed-field",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "fail-on-findings-reference-carriage-return-ok",
+      "instance": "${CI_STRICT:a\rb}",
+      "keyword": null,
+      "path": "fail_on_findings",
+      "pointer": null,
+      "valid": true
+    },
+    {
       "id": "fail-on-findings-word-bad",
       "instance": "yes",
       "keyword": "anyOf",
@@ -369,6 +386,25 @@
       "id": "document-reference-in-typed-field-ok",
       "instance": {
         "fail_on_findings": "${CI_STRICT}"
+      },
+      "keyword": null,
+      "path": "",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "reference-in-typed-field",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "document-reference-carriage-return-ok",
+      "instance": {
+        "fail_on_findings": "${CI_STRICT:a\rb}"
       },
       "keyword": null,
       "path": "",
@@ -1860,6 +1896,23 @@
       },
       "id": "scan-timeout-reference-ok",
       "instance": "${ASH_SCAN_TIMEOUT:60}",
+      "keyword": null,
+      "path": "scanners.bandit.options.scan_timeout",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "reference-in-typed-field",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "scan-timeout-reference-carriage-return-ok",
+      "instance": "${ASH_SCAN_TIMEOUT:6\r0}",
       "keyword": null,
       "path": "scanners.bandit.options.scan_timeout",
       "pointer": null,

@@ -175,6 +175,45 @@ test('a reference where a scan accepts it is not a finding', () => {
   assert.deepEqual(judgeField('global_settings.severity_threshold', '${LEVEL}').findings, []);
 });
 
+// The schema's pattern for a reference lets a carriage return through a default, and the
+// loader's recognizer stops at one. So this text is a reference to the schema and an ordinary
+// string to ASH, and a boolean or a number takes no string: ASH refuses the file either way.
+const WITH_CARRIAGE_RETURN = '${CI_STRICT:a\rb}';
+
+test('text the schema reads as a reference and ASH does not is refused where a reference is', () => {
+  const field = judgeField('fail_on_findings', WITH_CARRIAGE_RETURN);
+  assert.equal(field.valid, false);
+  assert.deepEqual(projected(field), [{ row: 'reference-in-typed-field', severity: 'error' }]);
+  assert.equal(field.findings[0].pointer, '');
+
+  const document = judgeField('', { fail_on_findings: WITH_CARRIAGE_RETURN });
+  assert.equal(document.valid, false);
+  assert.deepEqual(projected(document), [{ row: 'reference-in-typed-field', severity: 'error' }]);
+  assert.equal(document.findings[0].pointer, '/fail_on_findings');
+
+  const timeout = judgeField('scanners.bandit.options.scan_timeout', '${ASH_SCAN_TIMEOUT:6\r0}');
+  assert.equal(timeout.valid, false);
+  assert.deepEqual(projected(timeout), [{ row: 'reference-in-typed-field', severity: 'error' }]);
+
+  // A string the schema refuses stays the schema's failure, and a field that takes a string
+  // or one of a set of names takes this text, as it takes any reference.
+  assert.deepEqual(projected(judgeField('fail_on_findings', 'yes')), [{ row: null, severity: 'error' }]);
+  assert.deepEqual(judgeField('project_name', WITH_CARRIAGE_RETURN).findings, []);
+  assert.deepEqual(judgeField('global_settings.severity_threshold', WITH_CARRIAGE_RETURN).findings, []);
+});
+
+test('the sentence for a value at a field that takes no reference is true for a reference and for any other string', () => {
+  const sentence = (value, kind) =>
+    `The value ${value} is not accepted in this ${kind} field: a reference is refused here, and so is any other string. ${REFUSES}`;
+  for (const text of ['${CI_STRICT}', '!ENV ${CI_STRICT}', WITH_CARRIAGE_RETURN]) {
+    const result = judgeField('fail_on_findings', text);
+    assert.equal(result.findings.length, 1, JSON.stringify(text));
+    assert.equal(result.findings[0].message, sentence(text, 'boolean'));
+  }
+  const timeout = judgeField('scanners.bandit.options.scan_timeout', '${ASH_SCAN_TIMEOUT:60}');
+  assert.equal(timeout.findings[0].message, sentence('${ASH_SCAN_TIMEOUT:60}', 'integer'));
+});
+
 test('a comma-separated string of formats says to write a list', () => {
   const result = judgeField('output_formats', 'sarif, html');
   assert.match(result.findings[0].message, /Write as a list/);
