@@ -1448,7 +1448,7 @@ def record_operator_reporters(
             the load's wording flags, so a load with no scanned tree never
             claims one.
 
-    A reporter that sends findings off the host runs with its section from
+    A reporter that sends findings off the host is built from its section in
     *operator* (``reporter_section``), so each value or key *operator*'s files
     read from the environment under ``reporters`` is one the scan's messages
     can quote: it joins the values *config* redacts.
@@ -1708,7 +1708,9 @@ def reporter_section(config: Optional["AshConfig"], reporter_class: type) -> Any
 
     operator = getattr(config, "_operator_reporters", None)
     if operator is None:
-        warn_of_appends_an_off_host_reporter_runs_with(config, None, key, section)
+        warn_of_appends_an_off_host_reporter_runs_with(
+            config, None, key, section, reporter_class
+        )
         return section
     operator_section = _reporter_section_of(operator, key)
     if (
@@ -1739,6 +1741,6 @@ def reporter_section(config: Optional["AshConfig"], reporter_class: type) -> Any
             extra=NO_MARKUP,
         )
     warn_of_appends_an_off_host_reporter_runs_with(
-        config, operator, key, operator_section
+        config, operator, key, operator_section, reporter_class
     )
     return operator_section

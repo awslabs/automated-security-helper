@@ -255,13 +255,16 @@
   items, and ASH logs one warning that names the key, once in each run. It is logged
   when ASH applies the overrides to the configuration a command runs with (in
   `ash merge`, the lowest-indexed shard's record), where a list that the config file
-  already sets is extended with no warning, and when it builds a reporter that sends
-  findings off the host from such a list, even one the config file sets: a scan builds
-  that reporter from the operator's configuration and the overrides, not from a
-  config file the scanned repository could write, and `ash report` and `ash merge`
-  build it from ASH's defaults and the overrides, and a config file they read sets
-  none of its section (for a reporter that declares destination options, none of
-  those options and not its `enabled`).
+  already sets is extended with no warning, and by `ash config update --set` for the
+  file it writes. ASH logs the same warning when it builds a reporter that sends
+  findings off the host from such a list, if the run has not named the key yet, which
+  is the case where the configuration the command runs with sets that list. A scan
+  builds that reporter from the operator's configuration and the overrides, not from
+  a config file the scanned repository could write. In `ash report` and `ash merge`,
+  ASH's defaults and the overrides give the whole section of such a reporter that
+  declares no destination options, and the destination options and `enabled` of one
+  that does; a config file the command reads sets none of them. The warning says
+  where the part of the reporter's section that holds the list came from.
 - **`./ash` keeps the container's stdin open for the commands that read it, not for
   whole command groups.** `./ash results inspect findings` now gets its keyboard
   input, as `./ash inspect findings` does. `config wizard`, `inspect findings`,

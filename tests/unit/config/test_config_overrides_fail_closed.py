@@ -42,7 +42,11 @@ from automated_security_helper.config.resolve_config import (
     build_config,
     resolve_config,
 )
-from automated_security_helper.config.untrusted_source import REPORT_CONFIG_FILE
+from automated_security_helper.config.untrusted_source import (
+    MERGE_CONFIG_FILE,
+    REPORT_CONFIG_FILE,
+    REPORT_CONFIG_FILE_IN_TREE,
+)
 from automated_security_helper.core.constants import ASH_EXIT_CODES
 from automated_security_helper.core.exceptions import (
     ASHConfigValidationError,
@@ -688,6 +692,7 @@ class _LocalListReporter(ReporterPluginBase[_LocalListConfig]):
 class _RelayOptions(ReporterOptionsBase):
     destinations: List[str] = ["plugin-default"]
     label: str = "plugin-label"
+    tags: List[str] = ["plugin-tag"]
 
 
 class _RelayConfig(ReporterPluginConfigBase):
@@ -713,6 +718,8 @@ _LOCAL_ITEM = "appended-local-3b7c"
 _CAPTURE = "reporters.orbit-capture.options.destinations"
 _RELAY = "reporters.orbit-relay.options.destinations"
 _RELAY_ITEM = "appended-relay-9c4a"
+_RELAY_TAGS = "reporters.orbit-relay.options.tags"
+_RELAY_TAG_ITEM = "appended-relay-tag-6b2e"
 
 
 def _scan_with_a_view(tmp_path: Path, key: str, item: str, operator_base: AshConfig):
@@ -1301,7 +1308,7 @@ class TestAppendOntoAnUntypedPluginOption:
     def test_an_off_host_reporter_run_from_a_view_that_started_the_list_is_warned_of(
         self, caplog, tmp_path
     ):
-        """A reporter that sends findings off the host runs with the reporters
+        """A reporter that sends findings off the host is built from the reporters
         view's section, and the view started the list from the appended item, though
         the repository's file wrote one. Building the reporter names the key, once,
         without its value."""
@@ -1321,6 +1328,11 @@ class TestAppendOntoAnUntypedPluginOption:
         assert _UPLINK_ITEM not in warnings[0]
         assert "from the operator's configuration and the overrides" in warnings[0]
         assert "ASH's defaults" not in warnings[0]
+        assert (
+            "it is built from the operator's configuration and the overrides, not "
+            "from a config file the scanned repository could write" in warnings[0]
+        )
+        assert "runs with" not in warnings[0]
 
     def test_a_reporter_that_stays_on_the_host_is_not_warned_of(self, caplog, tmp_path):
         """A reporter that writes only a local file runs with the section its scan
@@ -1391,7 +1403,11 @@ class TestAppendOntoAnUntypedPluginOption:
         assert section["options"]["destinations"] == [_UPLINK_ITEM]
         warnings = _warnings_naming(caplog, _UPLINK)
         assert len(warnings) == 1, [r.getMessage() for r in caplog.records]
-        assert "(in ash merge, from ASH's defaults and the overrides)" in warnings[0]
+        assert (
+            "ash merge given no config file takes its section from ASH's defaults "
+            "and the overrides (another command, from its own configuration and "
+            "the overrides)" in warnings[0]
+        )
         assert "ash report and ash merge take" not in warnings[0]
         assert "runs with" not in warnings[0]
 
@@ -1430,7 +1446,7 @@ class TestAppendOntoAnUntypedPluginOption:
         assert len(warnings) == 1, [r.getMessage() for r in caplog.records]
         assert (
             "ash report and ash merge take its section from ASH's defaults and the "
-            "overrides" in warnings[0]
+            "overrides, not from the config files they read" in warnings[0]
         )
         assert "the operator's configuration" not in warnings[0]
         assert "runs with" not in warnings[0]
@@ -1438,10 +1454,11 @@ class TestAppendOntoAnUntypedPluginOption:
     def test_only_declared_destinations_come_from_the_defaults_given_a_named_file(
         self, caplog, tmp_path
     ):
-        """A reporter that sends findings off the host and declares a destination
-        option takes that option and ``enabled`` from ASH's defaults and the overrides
-        in ``ash report`` and ``ash merge``, and its other options from the named
-        file. The append started the declared list there, so building the reporter
+        """With no reporters view recorded, a reporter that sends findings off the
+        host and declares a destination option takes that option and ``enabled`` from
+        ASH's defaults and the overrides in ``ash report`` and ``ash merge``, and its
+        other options from the named file: the file's ``enabled: true`` is not
+        honored. The append started the declared list there, so building the reporter
         names the key once, and the warning says so, though the command's own
         configuration extended the file's list."""
         override = f'{_RELAY}+=["{_RELAY_ITEM}"]'
@@ -1449,10 +1466,11 @@ class TestAppendOntoAnUntypedPluginOption:
             {
                 "reporters": {
                     "orbit-relay": {
+                        "enabled": True,
                         "options": {
                             "destinations": ["named-file"],
                             "label": "named-file-label",
-                        }
+                        },
                     }
                 }
             }
@@ -1472,15 +1490,180 @@ class TestAppendOntoAnUntypedPluginOption:
 
         assert section["options"]["destinations"] == [_RELAY_ITEM]
         assert section["options"]["label"] == "named-file-label"
+        assert section["enabled"] is False
         appended = [
             text for text in _warnings_naming(caplog, _RELAY) if f"{_RELAY}+=" in text
         ]
         assert len(appended) == 1, [r.getMessage() for r in caplog.records]
-        assert "from ASH's defaults and the overrides" in appended[0]
         assert (
-            "when it declares destination options, only those options and enabled"
+            "ash report and ash merge take its destination options and enabled from "
+            "ASH's defaults and the overrides, not from the config files they read"
             in appended[0]
         )
+        assert "only those options" not in appended[0]
+
+    def test_with_a_view_the_destinations_come_from_the_defaults_given_a_named_file(
+        self, caplog, tmp_path
+    ):
+        """With a reporters view recorded for the named file (a file under the
+        working directory or in a git checkout), ``ash report`` and ``ash merge``
+        build such a reporter from the view, confined: its destination options and
+        ``enabled`` come from ASH's defaults and the overrides, and its other options
+        from the view, not from the named file. The warning for the declared list
+        says so and does not say the other options come from the file."""
+        from automated_security_helper.config.resolve_config import (
+            _with_reporter_overrides,
+        )
+
+        override = f'{_RELAY}+=["{_RELAY_ITEM}"]'
+        named_file = AshConfig.model_validate(
+            {
+                "reporters": {
+                    "orbit-relay": {
+                        "options": {
+                            "destinations": ["named-file"],
+                            "label": "named-file-label",
+                        }
+                    }
+                }
+            }
+        )
+        operator_base = AshConfig.model_validate(
+            {"reporters": {"orbit-relay": {"options": {"label": "operator-label"}}}}
+        )
+
+        with caplog.at_level("WARNING", logger="ash"):
+            config = apply_config_overrides(
+                named_file, [override], warn_unread_appends=True
+            )
+            view = _with_reporter_overrides(operator_base, [override], config)
+            record_operator_reporters(config, view, [tmp_path / ".ash.yaml"])
+            confine_off_host_reporters_to_overrides(
+                config,
+                [tmp_path / ".ash.yaml"],
+                [override],
+                REPORT_CONFIG_FILE_IN_TREE,
+            )
+            confine_declared_reporter_destinations(
+                config, [_RelayReporter], source=REPORT_CONFIG_FILE_IN_TREE
+            )
+            section = reporter_section(config, _RelayReporter)
+
+        assert section["options"]["destinations"] == [_RELAY_ITEM]
+        assert section["options"]["label"] == "operator-label"
+        appended = [
+            text for text in _warnings_naming(caplog, _RELAY) if f"{_RELAY}+=" in text
+        ]
+        assert len(appended) == 1, [r.getMessage() for r in caplog.records]
+        assert (
+            "ash report and ash merge take its destination options and enabled from "
+            "ASH's defaults and the overrides, not from the config files they read"
+            in appended[0]
+        )
+        assert "only those options" not in appended[0]
+
+    def test_with_a_view_an_undeclared_list_comes_from_the_view_given_a_named_file(
+        self, caplog, tmp_path
+    ):
+        """With a reporters view recorded for the named file, a list of such a
+        reporter that it does not declare as a destination option comes from the
+        view, not from the named file. The view started it from the appended item
+        though the named file wrote one, so building the reporter names the key, and
+        the warning says the reporter's other options come from the operator's
+        configuration and the overrides, not from ASH's defaults."""
+        from automated_security_helper.config.resolve_config import (
+            _with_reporter_overrides,
+        )
+
+        override = f'{_RELAY_TAGS}+=["{_RELAY_TAG_ITEM}"]'
+        named_file = AshConfig.model_validate(
+            {
+                "reporters": {
+                    "orbit-relay": {
+                        "options": {
+                            "label": "named-file-label",
+                            "tags": ["named-file-tag"],
+                        }
+                    }
+                }
+            }
+        )
+        operator_base = AshConfig.model_validate(
+            {"reporters": {"orbit-relay": {"options": {"label": "operator-label"}}}}
+        )
+
+        with caplog.at_level("WARNING", logger="ash"):
+            config = apply_config_overrides(
+                named_file, [override], warn_unread_appends=True
+            )
+            view = _with_reporter_overrides(operator_base, [override], config)
+            record_operator_reporters(config, view, [tmp_path / ".ash.yaml"])
+            confine_off_host_reporters_to_overrides(
+                config,
+                [tmp_path / ".ash.yaml"],
+                [override],
+                REPORT_CONFIG_FILE_IN_TREE,
+            )
+            confine_declared_reporter_destinations(
+                config, [_RelayReporter], source=REPORT_CONFIG_FILE_IN_TREE
+            )
+            section = reporter_section(config, _RelayReporter)
+
+        own = config.get_plugin_config("reporter", "orbit-relay")
+        assert own["options"]["tags"] == ["named-file-tag", _RELAY_TAG_ITEM]
+        assert section["options"]["tags"] == [_RELAY_TAG_ITEM]
+        assert section["options"]["label"] == "operator-label"
+        appended = [
+            text
+            for text in _warnings_naming(caplog, _RELAY_TAGS)
+            if f"{_RELAY_TAGS}+=" in text
+        ]
+        assert len(appended) == 1, [r.getMessage() for r in caplog.records]
+        assert (
+            "its options other than its destination options come from the operator's "
+            "configuration and the overrides, not from a config file the scanned "
+            "repository could write" in appended[0]
+        )
+        assert "ASH's defaults" not in appended[0]
+        assert "it is built from" not in appended[0]
+
+    def test_an_undeclared_list_comes_from_the_named_file_in_ash_merge(
+        self, caplog, tmp_path
+    ):
+        """``ash merge`` given a config file it cannot place in a tree builds such a
+        reporter from that file and the overrides, and the confinement leaves a list
+        the reporter does not declare as a destination option as the file and the
+        overrides made it. The append started that list, so building the reporter
+        names the key, and the warning says the list comes from the config files and
+        the overrides, not from ASH's defaults."""
+        override = f'{_RELAY_TAGS}+=["{_RELAY_TAG_ITEM}"]'
+        named_file = AshConfig.model_validate(
+            {"reporters": {"orbit-relay": {"options": {"label": "named-file-label"}}}}
+        )
+
+        with caplog.at_level("WARNING", logger="ash"):
+            operator_config = apply_config_overrides(named_file, [override])
+            confine_off_host_reporters_to_overrides(
+                operator_config, [tmp_path / "ash.yaml"], [override], MERGE_CONFIG_FILE
+            )
+            confine_declared_reporter_destinations(
+                operator_config, [_RelayReporter], source=MERGE_CONFIG_FILE
+            )
+            section = reporter_section(operator_config, _RelayReporter)
+
+        assert section["options"]["tags"] == [_RELAY_TAG_ITEM]
+        assert section["options"]["label"] == "named-file-label"
+        appended = [
+            text
+            for text in _warnings_naming(caplog, _RELAY_TAGS)
+            if f"{_RELAY_TAGS}+=" in text
+        ]
+        assert len(appended) == 1, [r.getMessage() for r in caplog.records]
+        assert (
+            "ash report and ash merge take its options other than its destination "
+            "options from the config files they read and the overrides" in appended[0]
+        )
+        assert "ASH's defaults" not in appended[0]
 
     @pytest.mark.parametrize(
         ("then_key", "named", "applications"),

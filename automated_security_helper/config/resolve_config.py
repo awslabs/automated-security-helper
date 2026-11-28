@@ -115,6 +115,8 @@ from automated_security_helper.config.path_trust import (
 )
 from automated_security_helper.config.reporter_trust import (
     confine_reporter_destinations,
+    declared_destination_options,
+    declared_off_host_sections,
 )
 from automated_security_helper.config.restrictions_kept import keep_restrictions
 from automated_security_helper.config.secret_verification_trust import (
@@ -568,8 +570,10 @@ def _row_of_the_shipped_plugin_reading(
 #: the application that builds a command's own configuration asks for the warning
 #: (``apply_config_overrides(..., warn_unread_appends=True)``): the one
 #: ``build_config`` makes when a command resolves its configuration (a scan's,
-#: ``ash report``'s), the record of the lowest-indexed shard in ``ash merge``, and
-#: the one ``ash config update --set`` makes for the file it writes.
+#: ``ash report``'s), the one ``resolve_config`` makes over the defaults when it finds
+#: no config file, the record of the lowest-indexed shard in ``ash merge`` (or the
+#: merge's own over the defaults when no shard recorded one), and the one
+#: ``ash config update --set`` makes for the file it writes.
 #: The same overrides are applied again to other bases (the trusted reporter view,
 #: the scanner views, the other shards' records, the configuration the off-host
 #: reporters of ``ash merge`` and ``ash report`` run with, the MCP workspace gate),
@@ -647,22 +651,70 @@ def _value_at(section: Any, path: Sequence[str]) -> Any:
     return value
 
 
-#: Where the section of a reporter that sends findings off the host came from, as
-#: the warning below says it; ``warn_of_appends_an_off_host_reporter_runs_with``
-#: chooses one from what the configuration records.
+#: Where the part of an off-host reporter's section that holds a warned list came
+#: from, as the warning below says it. ``_where_the_warned_list_came_from`` chooses
+#: one for each list ``warn_of_appends_an_off_host_reporter_runs_with`` names.
 _BUILT_FROM_THE_OPERATOR_VIEW = (
     "it is built from the operator's configuration and the overrides, not from a "
     "config file the scanned repository could write"
 )
 _BUILT_FROM_ASH_DEFAULTS = (
     "ash report and ash merge take its section from ASH's defaults and the "
-    "overrides (when it declares destination options, only those options and "
-    "enabled), not from the config file they read"
+    "overrides, not from the config files they read"
+)
+_DESTINATIONS_FROM_ASH_DEFAULTS = (
+    "ash report and ash merge take its destination options and enabled from "
+    "ASH's defaults and the overrides, not from the config files they read"
+)
+_OTHER_OPTIONS_FROM_THE_OPERATOR_VIEW = (
+    "its options other than its destination options come from the operator's "
+    "configuration and the overrides, not from a config file the scanned "
+    "repository could write"
+)
+_OTHER_OPTIONS_FROM_THE_FILES_READ = (
+    "ash report and ash merge take its options other than its destination "
+    "options from the config files they read and the overrides"
 )
 _BUILT_FROM_ITS_OWN_CONFIGURATION = (
-    "it is built from the operator's configuration and the overrides (in ash "
-    "merge, from ASH's defaults and the overrides)"
+    "ash merge given no config file takes its section from ASH's defaults and "
+    "the overrides (another command, from its own configuration and the "
+    "overrides)"
 )
+
+
+def _where_the_warned_list_came_from(
+    rest: Sequence[str],
+    from_overrides: bool,
+    viewed: bool,
+    declared: Collection[str],
+    whole: bool,
+) -> str:
+    """The clause the warning gives for a list at *rest*, its keys under the
+    reporter's section, saying where the part of the section that holds it came
+    from. When the command took such a reporter's settings from the defaults and
+    the overrides (*from_overrides*: ``ash report`` and ``ash merge`` given a config
+    file), the confinement gave it ASH's defaults and the overrides for its whole
+    section when it declares no destination options (*whole*), and for its declared
+    destination options (*declared*, ``-`` and ``_`` read as one) and ``enabled``
+    when it does. Its other options come from the view when one is recorded
+    (*viewed*), and otherwise from the config files the command read. Without that,
+    the section is the view's when one is recorded, and otherwise the
+    configuration's own."""
+    if from_overrides and whole:
+        return _BUILT_FROM_ASH_DEFAULTS
+    if from_overrides:
+        if rest and rest[0] == "enabled":
+            return _DESTINATIONS_FROM_ASH_DEFAULTS
+        if len(rest) >= 2 and rest[0] == "options":
+            folded = {name.replace("-", "_") for name in declared}
+            if rest[1].replace("-", "_") in folded:
+                return _DESTINATIONS_FROM_ASH_DEFAULTS
+        if viewed:
+            return _OTHER_OPTIONS_FROM_THE_OPERATOR_VIEW
+        return _OTHER_OPTIONS_FROM_THE_FILES_READ
+    if viewed:
+        return _BUILT_FROM_THE_OPERATOR_VIEW
+    return _BUILT_FROM_ITS_OWN_CONFIGURATION
 
 
 def _warn_that_an_off_host_reporter_runs_with_the_appended_items(
@@ -670,9 +722,9 @@ def _warn_that_an_off_host_reporter_runs_with_the_appended_items(
 ) -> None:
     """Say, once per key in each run, that a reporter that sends findings off the
     host is built from a list a ``+=`` started from its appended items, with no
-    default added. *built_from* says where its section came from (one of the
-    ``_BUILT_FROM_*`` clauses). *section* and *logged_path* are redacted, and the
-    text never names a value."""
+    default added. *built_from* says where the part of its section that holds the
+    list came from (one of the clauses above). *section* and *logged_path* are
+    redacted, and the text never names a value."""
     if not _first_naming_in_this_run(logged_path):
         return
     ASH_LOGGER.warning(
@@ -685,7 +737,7 @@ def _warn_that_an_off_host_reporter_runs_with_the_appended_items(
 
 
 def warn_of_appends_an_off_host_reporter_runs_with(
-    config: Any, operator: Any, key: str, section: Any
+    config: Any, operator: Any, key: str, section: Any, reporter_class: type
 ) -> None:
     """Name each list of *section*, the section ``reporter_section`` gives a reporter
     that sends findings off the host (*key* is its config key), that a ``+=`` started
@@ -698,19 +750,15 @@ def warn_of_appends_an_off_host_reporter_runs_with(
     (``config._trusted_reporter_base``), so that base's record counts too, for a
     list the reporter's section holds as the base does.
 
-    The warning says where the section came from: ASH's defaults and the overrides
-    when the command took such a reporter's settings from them
-    (``_reporters_from_overrides``: ``ash report`` and ``ash merge`` given a config
-    file), the operator's configuration and the overrides when *operator* is the
-    view, and otherwise the configuration's own, which ``ash merge`` given no
-    ``--config`` builds from ASH's defaults and the overrides."""
+    The warning says, for each list, where the part of the section that holds it came
+    from (``_where_the_warned_list_came_from``). *reporter_class* is the reporter's
+    class: what it declares (``declared_destination_options``,
+    ``declared_off_host_sections``) is what the confinement took from ASH's defaults
+    and the overrides when the command took such a reporter's settings from them
+    (``_reporters_from_overrides``)."""
     from_overrides = getattr(config, "_reporters_from_overrides", False) is True
-    if from_overrides:
-        built_from = _BUILT_FROM_ASH_DEFAULTS
-    elif operator is not None:
-        built_from = _BUILT_FROM_THE_OPERATOR_VIEW
-    else:
-        built_from = _BUILT_FROM_ITS_OWN_CONFIGURATION
+    declared = declared_destination_options([reporter_class]).get(key, ())
+    whole = key in declared_off_host_sections([reporter_class])
     sources = [config if operator is None else operator]
     if from_overrides:
         sources.append(getattr(config, "_trusted_reporter_base", None))
@@ -734,7 +782,11 @@ def warn_of_appends_an_off_host_reporter_runs_with(
             started = _value_at(held, path[2:])
             if isinstance(started, list) and started == _value_at(section, path[2:]):
                 _warn_that_an_off_host_reporter_runs_with_the_appended_items(
-                    logged_section, logged_path, built_from
+                    logged_section,
+                    logged_path,
+                    _where_the_warned_list_came_from(
+                        path[2:], from_overrides, operator is not None, declared, whole
+                    ),
                 )
 
 
