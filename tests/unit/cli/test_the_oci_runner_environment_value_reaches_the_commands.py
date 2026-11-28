@@ -13,7 +13,7 @@ relative ``OCI_RUNNER`` would be run from the working directory with no test fai
 These run the commands through the click parser, with ``OCI_RUNNER`` in the
 environment, and watch what the command hands ``run_ash_scan``:
 
-* ``ash scan --mode container`` and ``ash build-image`` refuse a relative
+* ``ash scan --mode container`` and ``ash container build`` refuse a relative
   ``OCI_RUNNER`` with exit 3, name the variable, and start nothing;
 * the same relative path typed after ``--oci-runner`` is read against the working
   directory and handed on;
@@ -77,10 +77,10 @@ def _scan(
 
 
 def _build_image(*arguments: str, **environment: str):
-    """``ash build-image --no-run`` through the parser: (result, stub)."""
+    """``ash container build --no-run`` through the parser: (result, stub)."""
     with patch("automated_security_helper.cli.image.run_ash_scan") as run:
         result = CliRunner().invoke(
-            app, ["build-image", "--no-run", *arguments], env=environment
+            app, ["container", "build", "--no-run", *arguments], env=environment
         )
     return result, run
 

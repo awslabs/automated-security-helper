@@ -54,7 +54,7 @@ def _invoke(args):
 def test_scan_refuses_an_unknown_value(in_tmp, value):
     # --version ends the command before any scan, so a tree that accepts the value
     # exits 0 here.
-    result = _invoke(["scan", "--min-severity", value, "--version"])
+    result = _invoke(["scan", "fs", "--min-severity", value, "--version"])
 
     assert result.exit_code == USAGE_ERROR_EXIT, result.output
     assert "--min-severity" in _plain(result.output)
@@ -62,14 +62,23 @@ def test_scan_refuses_an_unknown_value(in_tmp, value):
 
 @pytest.mark.parametrize("value", [*VALID, "HIGH", "Medium"])
 def test_scan_accepts_each_documented_value_in_any_case(in_tmp, value):
-    result = _invoke(["scan", "--min-severity", value, "--version"])
+    result = _invoke(["scan", "fs", "--min-severity", value, "--version"])
 
     assert result.exit_code == 0, result.output
 
 
 def test_merge_refuses_an_unknown_value(in_tmp):
     result = _invoke(
-        ["merge", "--output-dir", "o", "--results", "r", "--min-severity", "bogus"]
+        [
+            "results",
+            "merge",
+            "--output-dir",
+            "o",
+            "--results",
+            "r",
+            "--min-severity",
+            "bogus",
+        ]
     )
 
     assert result.exit_code == USAGE_ERROR_EXIT, result.output
@@ -81,7 +90,7 @@ def test_merge_accepts_each_value_in_any_case(in_tmp, value):
     """The Terraform executor passes its MinSeverity variable through unchanged."""
     import typer.main
 
-    command = typer.main.get_command(app).commands["merge"]
+    command = typer.main.get_command(app).commands["results"].commands["merge"]
     ctx = command.make_context(
         "merge", ["--output-dir", "o", "--results", "r", "--min-severity", value]
     )
@@ -90,7 +99,16 @@ def test_merge_accepts_each_value_in_any_case(in_tmp, value):
     assert MinSeverity(ctx.params["min_severity"]) == MinSeverity(value.lower())
 
     result = _invoke(
-        ["merge", "--output-dir", "o", "--results", "r", "--min-severity", value]
+        [
+            "results",
+            "merge",
+            "--output-dir",
+            "o",
+            "--results",
+            "r",
+            "--min-severity",
+            value,
+        ]
     )
     # The merge itself then refuses the missing results; the severity was accepted.
     assert "--min-severity" not in _plain(result.output), result.output
@@ -126,12 +144,14 @@ def test_the_cli_choices_are_the_ranked_values():
     from automated_security_helper.workspace.aggregation import _MIN_SEVERITY_RANK
 
     values = [member.value for member in MinSeverity]
-    command = typer.main.get_command(app)
-    for name in ("scan", "merge"):
+    root = typer.main.get_command(app)
+    commands = {
+        "scan": root.commands["scan"],
+        "merge": root.commands["results"].commands["merge"],
+    }
+    for name, command in commands.items():
         param = next(
-            p
-            for p in declared_params(name, command.commands[name])
-            if p.name == "min_severity"
+            p for p in declared_params(name, command) if p.name == "min_severity"
         )
         assert list(param.type.choices) == values, name
     assert values == VALID

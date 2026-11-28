@@ -97,7 +97,7 @@ _RAISING_COMMAND = (
     "def boom(**kwargs):\n"
     f"    raise RuntimeError({_HOSTILE_EXPR})\n"
     "report.get_logger = boom\n"
-    "sys.argv = ['ash', 'report', '--output-dir', 'out']\n"
+    "sys.argv = ['ash', 'results', 'report', '--output-dir', 'out']\n"
 )
 
 
@@ -118,7 +118,7 @@ def test_typer_never_prints_argv_or_repository_text_as_given(tmp_path, case):
     if case == "usage-error":
         body = (
             "import sys\n"
-            f"sys.argv = ['ash', 'scan', '--bad' + {_HOSTILE_EXPR}]\n"
+            f"sys.argv = ['ash', 'scan', 'fs', '--bad' + {_HOSTILE_EXPR}]\n"
             "from automated_security_helper.cli.entrypoint import main\n"
             "main()\n"
         )
@@ -263,7 +263,7 @@ def test_a_usage_error_keeps_typers_color_and_highlighting_under_github_actions(
     """
     body = (
         "import sys\n"
-        "sys.argv = ['ash', 'scan', '--nope']\n"
+        "sys.argv = ['ash', 'scan', 'fs', '--nope']\n"
         "from automated_security_helper.cli.entrypoint import main\n"
         "main()\n"
     )
@@ -293,7 +293,7 @@ def test_a_traceback_is_as_wide_as_the_console(tmp_path):
         "def boom(**kwargs):\n"
         "    raise RuntimeError('w ' * 70)\n"
         "report.get_logger = boom\n"
-        "sys.argv = ['ash', 'report', '--output-dir', 'out']\n"
+        "sys.argv = ['ash', 'results', 'report', '--output-dir', 'out']\n"
         "from automated_security_helper.cli.entrypoint import main\n"
         "main()\n"
     )

@@ -99,11 +99,17 @@ class TestScanRefusesWhatItDoesNotDeclare:
     @pytest.mark.parametrize(
         "args, fragment",
         [
-            pytest.param(["--scaners", "bandit"], "--scaners", id="misspelled-option"),
             pytest.param(
-                ["--fail-on-finding"], "--fail-on-finding", id="misspelled-gate-flag"
+                ["fs", "--scaners", "bandit"], "--scaners", id="misspelled-option"
             ),
-            pytest.param(["--sourc-dir", "src"], "--sourc-dir", id="misspelled-path"),
+            pytest.param(
+                ["fs", "--fail-on-finding"],
+                "--fail-on-finding",
+                id="misspelled-gate-flag",
+            ),
+            pytest.param(
+                ["fs", "--sourc-dir", "src"], "--sourc-dir", id="misspelled-path"
+            ),
             pytest.param(["extra1", "extra2"], "extra1", id="positional-arguments"),
         ],
     )
@@ -122,6 +128,7 @@ class TestScanRefusesWhatItDoesNotDeclare:
             result = _invoke(
                 [
                     "scan",
+                    "fs",
                     "--no-progress",
                     "--sourc-dir",
                     "src",
@@ -138,14 +145,14 @@ class TestScanRefusesWhatItDoesNotDeclare:
         document = in_tmp / "params.json"
         document.write_text(json.dumps({"version": True}), encoding="utf-8")
 
-        result = _invoke(["scan", "--cli-json-input", str(document)])
+        result = _invoke(["scan", "fs", "--cli-json-input", str(document)])
 
         assert result.exit_code == 0, result.output
         assert "automated-security-helper v" in result.stdout
 
     def test_cli_json_input_from_stdin(self, in_tmp):
         result = _invoke(
-            ["scan", "--cli-json-input", "-"], input=json.dumps({"version": True})
+            ["scan", "fs", "--cli-json-input", "-"], input=json.dumps({"version": True})
         )
 
         assert result.exit_code == 0, result.output
@@ -161,6 +168,7 @@ class TestOptionsBeforeASubcommand:
                     "--source-dir",
                     "elsewhere",
                     "scan",
+                    "fs",
                     "--no-progress",
                     "--output-dir",
                     "out",
@@ -175,7 +183,7 @@ class TestOptionsBeforeASubcommand:
         probe = _OrchestratorProbe()
         with patch(ORCHESTRATOR_CREATE, side_effect=probe):
             result = _invoke(
-                ["--source-dir", "does-not-exist", "scan", "--no-progress"]
+                ["--source-dir", "does-not-exist", "scan", "fs", "--no-progress"]
             )
 
         assert probe.source_dirs == []
@@ -193,6 +201,7 @@ class TestOptionsBeforeASubcommand:
                     "--source-dir",
                     "elsewhere",
                     "scan",
+                    "fs",
                     "--no-progress",
                     "--source-dir",
                     "src",
@@ -204,10 +213,10 @@ class TestOptionsBeforeASubcommand:
     @pytest.mark.parametrize(
         "args",
         [
-            pytest.param(["--version", "scan"], id="flag"),
-            pytest.param(["--mode", "local", "scan", "--version"], id="choice"),
+            pytest.param(["--version", "scan", "fs"], id="flag"),
+            pytest.param(["--mode", "local", "scan", "fs", "--version"], id="choice"),
             pytest.param(
-                ["--min-severity", "HIGH", "--no-progress", "scan", "--version"],
+                ["--min-severity", "HIGH", "--no-progress", "scan", "fs", "--version"],
                 id="several",
             ),
         ],
@@ -235,8 +244,8 @@ class TestOptionsBeforeASubcommand:
                 ["--fail-on-findings"], {"fail_on_findings": True}, id="positive-flag"
             ),
             pytest.param(
-                ["--scanners", "bandit", "--scanners", "semgrep"],
-                {"scanners": ["bandit", "semgrep"]},
+                ["--add-scanners", "bandit", "--add-scanners", "semgrep"],
+                {"add_scanners": ["bandit", "semgrep"]},
                 id="repeated-option",
             ),
             pytest.param(
@@ -255,7 +264,7 @@ class TestOptionsBeforeASubcommand:
         """What reaches the scan, not only that something did: a negative flag stays
         negative, and a repeated option stays one value per use."""
         with patch("automated_security_helper.cli.scan.run_ash_scan") as run:
-            result = _invoke([*before, "scan", "--no-progress", "--source-dir", "src"])
+            result = _invoke([*before, "scan", "fs", "src", "--no-progress"])
 
         assert result.exit_code == 0, result.output
         given = run.call_args.kwargs
@@ -271,7 +280,14 @@ class TestOptionsBeforeASubcommand:
         _write_results(in_tmp / "elsewhere-out")
 
         result = _invoke(
-            ["--output-dir", "elsewhere-out", "report", "--format", "flat-json"]
+            [
+                "--output-dir",
+                "elsewhere-out",
+                "results",
+                "report",
+                "--format",
+                "flat-json",
+            ]
         )
 
         assert result.exit_code == 0, result.output
@@ -279,12 +295,14 @@ class TestOptionsBeforeASubcommand:
     @pytest.mark.parametrize(
         "args, flag",
         [
-            pytest.param(["--source-dir", "src", "report"], "--source-dir"),
-            pytest.param(["--no-progress", "report"], "--no-progress"),
-            pytest.param(["--scanners", "bandit", "config", "get"], "--scanners"),
-            pytest.param(["--version", "merge"], "--version"),
+            pytest.param(["--source-dir", "src", "results", "report"], "--source-dir"),
+            pytest.param(["--no-progress", "results", "report"], "--no-progress"),
             pytest.param(
-                ["-f", "sarif", "build-image", "--no-run"],
+                ["--add-scanners", "bandit", "config", "get"], "--add-scanners"
+            ),
+            pytest.param(["--version", "results", "merge"], "--version"),
+            pytest.param(
+                ["-f", "sarif", "container", "build", "--no-run"],
                 "takes -f as --force",
             ),
         ],
@@ -312,27 +330,37 @@ class TestOptionsBeforeASubcommand:
     @pytest.mark.parametrize(
         "args, typed",
         [
-            pytest.param(["--scanners", "bandit", "report"], "--scanners", id="long"),
-            pytest.param(["--scanners=bandit", "report"], "--scanners", id="equals"),
             pytest.param(
-                ["--scanners", "--offline", "report"], "--scanners", id="value-token"
+                ["--add-scanners", "bandit", "results", "report"],
+                "--add-scanners",
+                id="long",
+            ),
+            pytest.param(
+                ["--add-scanners=bandit", "results", "report"],
+                "--add-scanners",
+                id="equals",
+            ),
+            pytest.param(
+                ["--add-scanners", "--offline", "results", "report"],
+                "--add-scanners",
+                id="value-token",
             ),
         ],
     )
     def test_the_refusal_names_the_spelling_that_was_typed(self, in_tmp, args, typed):
-        """A token that is the option's VALUE ("--offline" after --scanners) is
+        """A token that is the option's VALUE ("--offline" after --add-scanners) is
         not a spelling, so it is not the one named."""
         result = _invoke(args)
 
         assert result.exit_code == USAGE_ERROR_EXIT, result.output
-        assert f"'ash report' does not take {typed}," in _plain(result.output)
+        assert f"'ash results report' does not take {typed}," in _plain(result.output)
 
     @pytest.mark.parametrize(
         "args",
         [
-            pytest.param(["--format", "text", "report"], id="long-alias"),
-            pytest.param(["-f", "text", "report"], id="short-alias"),
-            pytest.param(["--formats=text", "report"], id="equals-form"),
+            pytest.param(["--format", "text", "results", "report"], id="long-alias"),
+            pytest.param(["-f", "text", "results", "report"], id="short-alias"),
+            pytest.param(["--formats=text", "results", "report"], id="equals-form"),
         ],
     )
     def test_a_root_option_reaches_the_subcommand_option_spelled_the_same(
@@ -351,17 +379,17 @@ class TestOptionsBeforeASubcommand:
         assert "ASH SECURITY SCAN REPORT" in result.stdout, result.stdout[:400]
 
     def test_the_subcommands_help_is_shown(self, in_tmp):
-        result = _invoke(["--source-dir", "src", "report", "--help"])
+        result = _invoke(["--source-dir", "src", "results", "report", "--help"])
 
         assert result.exit_code == 0, result.output
-        assert "Usage: ash report" in _plain(result.output)
+        assert "Usage: ash results report" in _plain(result.output)
 
     def test_names_every_option_the_subcommand_does_not_take(self, in_tmp):
-        result = _invoke(["--offline", "--scanners", "bandit", "report"])
+        result = _invoke(["--offline", "--add-scanners", "bandit", "results", "report"])
 
         assert result.exit_code == USAGE_ERROR_EXIT, result.output
         text = _plain(result.output)
-        assert "--offline" in text and "--scanners" in text
+        assert "--offline" in text and "--add-scanners" in text
 
     def test_an_environment_variable_is_not_an_option_given_before(
         self, in_tmp, monkeypatch
@@ -375,7 +403,14 @@ class TestOptionsBeforeASubcommand:
         monkeypatch.setenv("ASH_SOURCE_DIR", str(in_tmp / "src"))
 
         result = _invoke(
-            ["report", "--output-dir", "elsewhere-out", "--format", "flat-json"]
+            [
+                "results",
+                "report",
+                "--output-dir",
+                "elsewhere-out",
+                "--format",
+                "flat-json",
+            ]
         )
 
         assert "does not take" not in _plain(result.output)
@@ -393,19 +428,21 @@ class TestOptionsBeforeASubcommand:
 class TestBuildImageRefusesWhatItDoesNotDeclare:
     @pytest.mark.parametrize(
         "args",
-        [["--scanners", "bandit"], ["--fail-on-finding"], ["extra"]],
+        [["--add-scanners", "bandit"], ["--fail-on-finding"], ["extra"]],
         ids=["scan-option", "misspelled-option", "positional-argument"],
     )
     def test_is_a_usage_error(self, in_tmp, args):
         with patch("automated_security_helper.cli.image.run_ash_scan") as run:
-            result = _invoke(["build-image", "--no-build", "--no-run", *args])
+            result = _invoke(["container", "build", "--no-build", "--no-run", *args])
 
         assert result.exit_code == USAGE_ERROR_EXIT, result.output
         run.assert_not_called()
 
     def test_its_own_options_work(self, in_tmp):
         with patch("automated_security_helper.cli.image.run_ash_scan") as run:
-            result = _invoke(["build-image", "--no-build", "--no-run", "--offline"])
+            result = _invoke(
+                ["container", "build", "--no-build", "--no-run", "--offline"]
+            )
 
         assert result.exit_code == 0, result.output
         assert run.call_args.kwargs["offline"] is True

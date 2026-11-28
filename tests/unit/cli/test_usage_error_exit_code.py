@@ -348,7 +348,7 @@ class TestTheCodeIsPublished:
             "an unknown option": _invoke(["config", "get", "--bogus"]).exit_code
             == USAGE_ERROR_EXIT,
             "a bad option value": _invoke(
-                ["build-image", "--build-target", "bogus"]
+                ["container", "build", "--build-target", "bogus"]
             ).exit_code
             == USAGE_ERROR_EXIT,
             "the CHANGELOG's bad selection": (
@@ -397,25 +397,42 @@ CLICK_USAGE_ERRORS = [
     pytest.param(["--scaners", "bandit"], "No such option", id="root-unknown-option"),
     pytest.param(["scna"], "No such command", id="unknown-command"),
     pytest.param(["--mode", "bogus"], "Invalid value", id="root-bad-choice"),
-    pytest.param(["scan", "--mode", "bogus"], "Invalid value", id="scan-bad-mode"),
     pytest.param(
-        ["scan", "--strategy", "sideways"], "Invalid value", id="scan-bad-strategy"
+        ["scan", "fs", "--mode", "bogus"], "Invalid value", id="scan-bad-mode"
     ),
     pytest.param(
-        ["scan", "--shard-index", "first"], "Invalid value", id="scan-not-an-int"
+        ["scan", "fs", "--strategy", "sideways"],
+        "Invalid value",
+        id="scan-bad-strategy",
+    ),
+    pytest.param(
+        ["scan", "fs", "--shard-index", "first"], "Invalid value", id="scan-not-an-int"
     ),
     pytest.param(
         ["scan", "fs", "--no-progress", "src", "--output-formats", "pdf"],
         "not a valid format",
         id="scan-bad-output-format",
     ),
-    pytest.param(["merge"], "Missing option", id="merge-missing-required-option"),
     pytest.param(
-        ["merge", "--output-dir", "o", "--results", "r", "--output-formats", "pdf"],
+        ["results", "merge"], "Missing option", id="merge-missing-required-option"
+    ),
+    pytest.param(
+        [
+            "results",
+            "merge",
+            "--output-dir",
+            "o",
+            "--results",
+            "r",
+            "--output-formats",
+            "pdf",
+        ],
         "pdf",
         id="merge-bad-output-format",
     ),
-    pytest.param(["report", "--bogus"], "No such option", id="report-unknown-option"),
+    pytest.param(
+        ["results", "report", "--bogus"], "No such option", id="report-unknown-option"
+    ),
     pytest.param(["config"], "Missing command", id="group-without-a-command"),
     pytest.param(["config", "get", "--bogus"], "No such option", id="config-get"),
     pytest.param(["plugin", "list", "--bogus"], "No such option", id="plugin-list"),
@@ -423,12 +440,14 @@ CLICK_USAGE_ERRORS = [
         ["dependencies", "install", "--bogus"], "No such option", id="dependencies"
     ),
     pytest.param(
-        ["inspect", "findings", "--bogus"], "No such option", id="inspect-findings"
+        ["results", "inspect", "findings", "--bogus"],
+        "No such option",
+        id="inspect-findings",
     ),
     pytest.param(["mcp", "--bogus"], "No such option", id="mcp"),
     pytest.param(["get-genai-guide", "--bogus"], "No such option", id="genai-guide"),
     pytest.param(
-        ["build-image", "--build-target", "bogus"],
+        ["container", "build", "--build-target", "bogus"],
         "Invalid value",
         id="build-image-bad-choice",
     ),
@@ -499,7 +518,7 @@ def test_a_cli_json_input_error_exits_the_usage_code(in_tmp):
     document = in_tmp / "params.json"
     document.write_text('{"no_such_parameter": 1}', encoding="utf-8")
 
-    result = _invoke(["scan", "--cli-json-input", str(document)])
+    result = _invoke(["scan", "fs", "--cli-json-input", str(document)])
 
     assert result.exit_code == USAGE_ERROR_EXIT, result.output
     assert "unknown key 'no_such_parameter'" in _plain(result.output)
@@ -510,13 +529,13 @@ def test_a_cli_json_input_error_exits_the_usage_code(in_tmp):
     [
         ["--help"],
         ["--version"],
-        ["scan", "--help"],
-        ["scan", "--version"],
+        ["scan", "fs", "--help"],
+        ["scan", "fs", "--version"],
         ["config", "--help"],
-        ["merge", "--help"],
-        ["build-image", "--help"],
+        ["results", "merge", "--help"],
+        ["container", "build", "--help"],
         ["mcp", "--help"],
-        ["scan", "--generate-cli-skeleton"],
+        ["scan", "fs", "--generate-cli-skeleton"],
     ],
     ids=lambda args: " ".join(args),
 )
@@ -549,17 +568,19 @@ class TestAshsOwnRefusalsOfAnInvocation:
         assert result.exit_code == USAGE_ERROR_EXIT, result.output
 
     @pytest.mark.parametrize(
-        "shard_args",
+        "subject, shard_args",
         [
-            ["--shard-index", "0"],
-            ["--shard-count", "2"],
-            ["--shard-index", "2", "--shard-count", "2"],
-            ["--shard-index", "0", "--shard-count", "2", "--workspace", "auto"],
+            (("fs",), ["--shard-index", "0"]),
+            (("fs",), ["--shard-count", "2"]),
+            (("fs",), ["--shard-index", "2", "--shard-count", "2"]),
+            # The workspace subject takes no shard option, so the refusal of a
+            # shard beside a workspace is the form with no subject's own.
+            ((), ["--shard-index", "0", "--shard-count", "2", "--workspace", "auto"]),
         ],
         ids=["index-only", "count-only", "out-of-range", "with-workspace"],
     )
-    def test_an_unusable_shard_selection(self, in_tmp, shard_args):
-        result = self._scan(*shard_args)
+    def test_an_unusable_shard_selection(self, in_tmp, subject, shard_args):
+        result = self._scan(*shard_args, subject=subject)
 
         assert result.exit_code == USAGE_ERROR_EXIT, result.output
 
@@ -609,7 +630,7 @@ class TestAshsOwnRefusalsOfAnInvocation:
         )
 
         result = _invoke(
-            ["report", "--output-dir", "out", "--format", "not-a-reporter"]
+            ["results", "report", "--output-dir", "out", "--format", "not-a-reporter"]
         )
 
         assert result.exit_code == USAGE_ERROR_EXIT, result.output
@@ -661,7 +682,9 @@ class TestNamesASHDoesNotKnow:
 
     def test_report_with_an_unknown_format_and_no_results(self, in_tmp):
         """Checked before the results are read: the name is wrong either way."""
-        result = _invoke(["report", "--output-dir", "out", "--format", "bogus"])
+        result = _invoke(
+            ["results", "report", "--output-dir", "out", "--format", "bogus"]
+        )
 
         assert result.exit_code == USAGE_ERROR_EXIT, result.output
         assert "Reporter plugin 'bogus' not found" in _plain(result.output)
@@ -1468,7 +1491,9 @@ _PLUGIN_MODULE_REFUSAL = re.compile(r"ash_plugin_modules names .*?ASH_PLUGIN_MOD
 
 class TestPathsThatDoNotExist:
     def test_merge_results_that_do_not_exist(self, in_tmp):
-        result = _invoke(["merge", "--output-dir", "out", "--results", "nowhere"])
+        result = _invoke(
+            ["results", "merge", "--output-dir", "out", "--results", "nowhere"]
+        )
 
         assert result.exit_code == USAGE_ERROR_EXIT, result.output
         assert "--results path does not exist: nowhere" in _plain(result.output)
@@ -1480,7 +1505,7 @@ class TestPathsThatDoNotExist:
         It is not read as Rich markup, so a closing tag raises no MarkupError
         and an opening one is not dropped.
         """
-        result = _invoke(["merge", "--output-dir", "out", "--results", name])
+        result = _invoke(["results", "merge", "--output-dir", "out", "--results", name])
 
         assert result.exit_code == USAGE_ERROR_EXIT, result.output
         assert f"--results path does not exist: {name}" in _plain(result.output)
@@ -1489,7 +1514,9 @@ class TestPathsThatDoNotExist:
     def test_merge_results_that_are_neither_a_file_nor_a_directory(self, in_tmp):
         os.mkfifo(in_tmp / "a-pipe")
 
-        result = _invoke(["merge", "--output-dir", "out", "--results", "a-pipe"])
+        result = _invoke(
+            ["results", "merge", "--output-dir", "out", "--results", "a-pipe"]
+        )
 
         assert result.exit_code == USAGE_ERROR_EXIT, result.output
         assert "neither a file nor a directory" in _plain(result.output)
@@ -1507,7 +1534,9 @@ class TestStateProblemsStayAtOne:
         assert "--use-existing" in _plain(result.stderr)
 
     def test_report_without_results(self, in_tmp):
-        result = _invoke(["report", "--output-dir", "out", "--format", "flat-json"])
+        result = _invoke(
+            ["results", "report", "--output-dir", "out", "--format", "flat-json"]
+        )
 
         assert result.exit_code == 1, result.output
 
@@ -1518,7 +1547,9 @@ class TestStateProblemsStayAtOne:
                 "{}", encoding="utf-8"
             )
 
-        result = _invoke(["merge", "--output-dir", "out", "--results", "shards"])
+        result = _invoke(
+            ["results", "merge", "--output-dir", "out", "--results", "shards"]
+        )
 
         assert result.exit_code == 1, result.output
         assert "contains 2 results files" in _plain(result.output)
@@ -1526,7 +1557,9 @@ class TestStateProblemsStayAtOne:
     def test_merge_results_directory_that_holds_no_results(self, in_tmp):
         (in_tmp / "empty-shard").mkdir()
 
-        result = _invoke(["merge", "--output-dir", "out", "--results", "empty-shard"])
+        result = _invoke(
+            ["results", "merge", "--output-dir", "out", "--results", "empty-shard"]
+        )
 
         assert result.exit_code == 1, result.output
         assert "No ash_aggregated_results.json found" in _plain(result.output)
@@ -1547,7 +1580,9 @@ class TestStateProblemsStayAtOne:
         """
         (in_tmp / "shard0.json").write_text(content, encoding="utf-8")
 
-        result = _invoke(["merge", "--output-dir", "out", "--results", "shard0.json"])
+        result = _invoke(
+            ["results", "merge", "--output-dir", "out", "--results", "shard0.json"]
+        )
 
         output = _plain(result.output)
         assert result.exit_code == 1, result.output
