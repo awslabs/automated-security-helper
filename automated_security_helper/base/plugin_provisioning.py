@@ -47,14 +47,16 @@ Registry rules, enforced when the tables are first read (:func:`check_registry`)
 * a pin is a member of a known extra or is excluded from it: one of the two, never both
   and never neither;
 * a pin's specifier is non-empty and holds no ``;`` (a marker has its own field);
-* a cooldown exclusion carries the date the pin leaves the window.
+* a pin's runtime is ``uv-tool`` or ``ash-environment``;
+* a cooldown exclusion carries the date the pin leaves the window, an ISO 8601 date, and
+  an exclusion for any other reason carries none.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import date, timedelta
 from enum import Enum
 from types import MappingProxyType
 from typing import Mapping
@@ -171,20 +173,37 @@ class ExclusionReason(str, Enum):
 
 @dataclass(frozen=True)
 class Exclusion:
-    """The recorded reason a pin is not a member of the ``alpha`` extra."""
+    """The recorded reason a pin is not a member of the ``alpha`` extra.
+
+    ``reason`` is read as an :class:`ExclusionReason`. A plain string that names a
+    member is that member, and a spelling that names none raises when the exclusion is
+    built. A dataclass does not enforce its annotations and :class:`ExclusionReason` is
+    a ``str`` enum, so without that reading the text ``"cooldown"`` is built without
+    error and is not the member the registry tests for.
+    """
 
     reason: ExclusionReason
     #: The cause, in the words of whoever measured it.
     detail: str
     #: When and how the cause was measured, or that it was not a measurement.
     measured: str
-    #: ``COOLDOWN`` only: the UTC date the pin leaves the window.
+    #: ``COOLDOWN`` only: the UTC date the pin leaves the window, an ISO 8601 date such
+    #: as ``2026-12-01``. Empty for every other reason.
     until: str = ""
+
+    def __post_init__(self) -> None:
+        # A plain string that names a member is that member; any other spelling raises.
+        object.__setattr__(self, "reason", ExclusionReason(self.reason))
 
 
 #: The extras a pin can be a member of. The register holds the PyPI pins of the alpha
 #: scanners, which the ``alpha`` extra installs, so that is the only one.
 PIN_EXTRAS: frozenset[str] = frozenset({"alpha"})
+
+#: The runtimes a pin can name: ``uv-tool`` for a scanner that installs into a uv tool
+#: environment of its own, ``ash-environment`` for one that installs into the
+#: environment ASH runs in.
+PIN_RUNTIMES: frozenset[str] = frozenset({"uv-tool", "ash-environment"})
 
 
 @dataclass(frozen=True)
@@ -194,11 +213,12 @@ class PypiPin:
     ``specifier`` is the scanner's own default constraint, verbatim, so the table and
     the scanner say one thing. Markers that restrict where the pin applies go in
     ``python_marker`` and ``platform_marker``, never into the specifier. ``runtime``
-    is ``"uv-tool"`` for a scanner that installs into a uv tool environment of its own
-    and ``"ash-environment"`` for one that installs into the environment ASH runs in.
-    A pin is a member of the extra named by ``extra`` (one of :data:`PIN_EXTRAS`) or
-    is ``excluded`` from it. The registry refuses a pin that is both, a pin that is
-    neither, and an extra it does not know.
+    is one of :data:`PIN_RUNTIMES`: ``"uv-tool"`` for a scanner that installs into a uv
+    tool environment of its own and ``"ash-environment"`` for one that installs into the
+    environment ASH runs in. A pin is a member of the extra named by ``extra`` (one of
+    :data:`PIN_EXTRAS`) or is ``excluded`` from it. The registry refuses a pin that is
+    both, a pin that is neither, an extra it does not know and a runtime it does not
+    know.
     """
 
     distribution: str
@@ -737,20 +757,38 @@ def check_registry(
                     f"unknown extra {pypi_pin.extra!r}; the extras are "
                     f"{', '.join(sorted(PIN_EXTRAS))}"
                 )
+            if pypi_pin.runtime not in PIN_RUNTIMES:
+                raise ProvisioningRegistryError(
+                    f"{scanner!r} pins {pypi_pin.distribution!r} with the unknown "
+                    f"runtime {pypi_pin.runtime!r}; the runtimes are "
+                    f"{', '.join(sorted(PIN_RUNTIMES))}"
+                )
             if not pypi_pin.specifier.strip() or ";" in pypi_pin.specifier:
                 raise ProvisioningRegistryError(
                     f"{scanner!r} pins {pypi_pin.distribution!r} with the specifier "
                     f"{pypi_pin.specifier!r}, which must be non-empty and hold no "
                     "';' (a marker has its own field)"
                 )
-            if (
-                pypi_pin.excluded is not None
-                and pypi_pin.excluded.reason is ExclusionReason.COOLDOWN
-                and not pypi_pin.excluded.until.strip()
-            ):
+            excluded = pypi_pin.excluded
+            if excluded is not None and excluded.reason is ExclusionReason.COOLDOWN:
+                if not excluded.until.strip():
+                    raise ProvisioningRegistryError(
+                        f"{scanner!r}: the cooldown exclusion of "
+                        f"{pypi_pin.distribution!r} carries no 'until' date"
+                    )
+                try:
+                    date.fromisoformat(excluded.until)
+                except ValueError:
+                    raise ProvisioningRegistryError(
+                        f"{scanner!r}: the cooldown exclusion of "
+                        f"{pypi_pin.distribution!r} carries the 'until' value "
+                        f"{excluded.until!r}, which is not an ISO 8601 date"
+                    ) from None
+            elif excluded is not None and excluded.until:
                 raise ProvisioningRegistryError(
-                    f"{scanner!r}: the cooldown exclusion of {pypi_pin.distribution!r} "
-                    "carries no 'until' date"
+                    f"{scanner!r}: the {excluded.reason.value!r} exclusion of "
+                    f"{pypi_pin.distribution!r} carries an 'until' date; only a "
+                    "cooldown exclusion has one"
                 )
 
 
