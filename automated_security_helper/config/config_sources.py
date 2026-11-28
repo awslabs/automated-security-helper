@@ -2133,35 +2133,49 @@ def legacy_move_caveats(source: ConfigSource, subject: str) -> List[str]:
 
     * a relative ``extends`` path is read from the directory of the file that
       names it, so one in a file that leaves ``.ash/`` must be rewritten;
-    * JSON is read as JSON only under a ``.json`` name, and the YAML loader skips
-      only spaces between tokens, so it refuses a tab anywhere in the file; a
-      tab inside a JSON string is refused by JSON itself, so every tab of a JSON
-      file that loads is between tokens;
+    * JSON is read as JSON only under a ``.json`` name, and the YAML loader skips only
+      spaces between tokens, so it refuses a tab anywhere in the file; a tab inside a
+      JSON string is refused by JSON itself, so every tab of a JSON file that loads is
+      between tokens. YAML also refuses a key whose colon is on another line and, inside
+      quotes, reads U+0085, U+2028 and U+2029 as line breaks and refuses DEL, the other
+      C1 controls, U+FFFE and U+FFFF, each of which a JSON string holds as written; it
+      reads the two escapes of a surrogate pair as two characters, where JSON reads one;
+      and it reads ``Infinity`` and a number that has an exponent but no decimal point,
+      or no sign after the ``e``, as text. Each such character written as its escape, a
+      character above U+FFFF written as itself, such a number written with a decimal
+      point and a sign after the ``e``, and ``Infinity`` written as ``.inf`` are read as
+      JSON reads them;
     * a TOML string value that starts with ``${`` is a reference to the environment. In
       YAML a quoted value is one only when it is tagged ``!ENV``, and an unquoted
       value ends at a space followed by ``#`` and is refused when it holds a ``:``
       followed by a space or sits inside ``[...]`` or ``{...}``. A basic or literal
       string, with one quote mark on each side, tagged ``!ENV`` with its quotes
-      kept is read as TOML reads it: a basic string's escapes mean the same in a
-      YAML double-quoted string, and YAML single quotes change only a single quote,
-      which a literal string cannot hold;
+      kept is read as TOML reads it unless its text holds one of the characters
+      named below: a basic string's escapes mean the same in a YAML double-quoted
+      string, and YAML single quotes change only a single quote, which a literal
+      string cannot hold;
     * a multi-line string, with three quote marks on each side on one line or more,
-      cannot keep them: YAML reads three single quote marks as a single-quoted value
-      with a quote mark at each end, which is no reference, or, when the text holds a
-      lone single quote mark, ends the value at that mark and refuses the file or cuts
-      the value short; and it refuses three double quote marks. Its text as TOML reads
-      it leaves out a line break that directly follows the opening marks and, in a basic
-      one, an unescaped backslash that ends a line (only spaces or tabs after it on that
-      line) with the spaces, tabs and line breaks after it. Written as a one-line
-      double-quoted string, with each other line break as the escape for a line feed,
-      each backslash and double quote of a literal one escaped, and a basic one's
+      cannot keep them: with three single quote marks YAML reads another value than
+      TOML does, such as the text with a quote mark at each end, which is no reference,
+      or refuses the file, and it refuses three double quote marks. Its text as TOML
+      reads it leaves out a line break that directly follows the opening marks and, in a
+      basic one, an unescaped backslash that ends a line (only spaces or tabs after it
+      on that line) with the spaces, tabs and line breaks after it. Written as a
+      one-line double-quoted string, with each other line break as the escape for a line
+      feed, each backslash and double quote of a literal one escaped, and a basic one's
       escapes kept and its unescaped double quotes escaped, it is read as TOML reads it;
     * in any TOML string, YAML reads a U+0085, U+2028 or U+2029 written as itself inside
       quotes as a line break, so U+0085 is not kept, U+2028 and U+2029 are kept, and the
       spaces and tabs beside any of the three are dropped; and it refuses a file that
-      holds a C1 control other than U+0085, U+FFFE or U+FFFF. Written as its escape in a
-      double-quoted YAML string, each keeps its TOML meaning; a literal string that
-      holds one becomes double-quoted, with its backslashes and double quotes escaped.
+      holds a C1 control other than U+0085, or U+FFFE or U+FFFF. Written as its escape
+      in a double-quoted YAML string, each keeps its TOML meaning; a literal string
+      that holds one becomes double-quoted, with its backslashes and double quotes
+      escaped;
+    * a TOML number that has an exponent but no decimal point, no sign after the ``e``
+      or an underscore after it, that is octal (``0o``), or that is ``inf``, is read by
+      YAML as text, which a field that takes a number refuses; written with a decimal
+      point, a sign after the ``e`` and no underscore after it, in decimal, or as
+      ``.inf``, it is read as TOML reads it.
 
     A ``pyproject.toml`` table is edited where it is and has none.
     """
@@ -2177,6 +2191,15 @@ def legacy_move_caveats(source: ConfigSource, subject: str) -> List[str]:
             f"it: {ASH_CANONICAL_CONFIG_FILE_NAME} is read as YAML, which refuses "
             "a tab (the parse error gives the tab's line and column)"
         )
+        caveats.append(
+            "Before you move it, also write each DEL (U+007F), C1 control (U+0080 "
+            "to U+009F), U+2028, U+2029, U+FFFE or U+FFFF in a string as its "
+            "four-digit Unicode escape and each character above U+FFFF that is "
+            "written as two escapes as the character itself, give each number that "
+            "has an exponent a decimal point and a sign after the e, such as 1.0e+3 "
+            "for 1e3, write Infinity as .inf, and keep each key on the same line as "
+            "its colon: otherwise YAML reads another value or refuses the file"
+        )
     if is_toml_file(source.path) and not is_pyproject(source.path):
         caveats.append(
             "In the YAML, put !ENV and a space before the opening quote of each "
@@ -2186,12 +2209,12 @@ def legacy_move_caveats(source: ConfigSource, subject: str) -> List[str]:
             "environment"
         )
         caveats.append(
-            "Write such a string that has three quote marks on each side as a "
+            "Write a string that has three quote marks on each side as a "
             "one-line double-quoted string with the text TOML reads: leave out a "
             "line break that directly follows the opening marks and, from three "
             "double quote marks, an unescaped backslash that ends a line (only "
             "spaces or tabs after it on that line), with the spaces, tabs and line "
-            "breaks after it; write each other line break as \\n; from three single "
+            "breaks after it; write each other line feed as \\n; from three single "
             "quote marks, also write each backslash as \\\\ and each double quote as "
             '\\"; from three double quote marks, keep each escape and write each '
             'unescaped double quote as \\"'
@@ -2203,6 +2226,12 @@ def legacy_move_caveats(source: ConfigSource, subject: str) -> List[str]:
             "quotes escaped, with each such character written as its four-digit "
             "Unicode escape: YAML reads U+0085, U+2028 and U+2029 inside quotes as "
             "line breaks and refuses a file that holds one of the others"
+        )
+        caveats.append(
+            "Give each number that has an exponent a decimal point and a sign after "
+            "the e, with no underscore after it, such as 1.0e+3 for 1e3, write each "
+            "octal number, such as 0o17, in decimal, and write inf as .inf: YAML "
+            "reads another spelling of each as text"
         )
     return caveats
 

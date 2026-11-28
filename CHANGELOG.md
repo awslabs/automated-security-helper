@@ -82,14 +82,17 @@
   YAML, so rewrite its settings as YAML in `.ash.yaml` and delete the TOML file, and
   put `!ENV` and a space before the opening quote of each string value whose text
   starts with `${`, and keep its quotes if it has one quote mark on each side,
-  because a quoted YAML value without the tag is read as literal text. Such a string
-  that has three quote marks on each side becomes a one-line double-quoted string
-  with the text TOML reads, and so does any string whose text holds a C1 control
-  (U+0080 to U+009F), U+2028, U+2029, U+FFFE or U+FFFF;
+  because a quoted YAML value without the tag is read as literal text. A string that
+  has three quote marks on each side becomes a one-line double-quoted string with
+  the text TOML reads, and so does any string whose text holds a C1 control (U+0080
+  to U+009F), U+2028, U+2029, U+FFFE or U+FFFF, written with each such character as
+  its escape, and a number with an exponent, an octal number and `inf` are written
+  another way too;
   [Move an existing config to `.ash.yaml`](docs/content/how-to/configure.md#move-config)
-  gives the rules. A JSON config that contains a tab character needs each tab
-  replaced with spaces first, because YAML refuses it. This repository's own config
-  moved the same way.
+  gives the rules. A JSON config needs each tab replaced with spaces first, because
+  YAML refuses it, and some characters and numbers written another way and each key
+  kept on the line of its colon, as the same section says. This repository's own
+  config moved the same way.
 - **A finding moved from an MCP config's generated script back to the config file has a
   new property name and a new id.** The result property that names the generated script
   is now `converted_from`; it was `ash/convertedFrom`, so a tool that reads the old name
