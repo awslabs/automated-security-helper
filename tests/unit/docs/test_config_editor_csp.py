@@ -748,7 +748,7 @@ _Loader.add_multi_constructor("", lambda loader, suffix, node: None)
 
 
 def _mkdocs() -> dict:
-    return yaml.load(MKDOCS_YML.read_text(encoding="utf-8"), Loader=_Loader)
+    return yaml.load(MKDOCS_YML.read_text(encoding="utf-8"), Loader=_Loader)  # nosec B506 - a SafeLoader subclass
 
 
 def _forbidden_settings(config: dict) -> list[str]:
