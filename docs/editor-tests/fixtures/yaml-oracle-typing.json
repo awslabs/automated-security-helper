@@ -1,0 +1,609 @@
+{
+  "cases": [
+    {
+      "id": "typed-keys-quoted-and-plain",
+      "lines": [
+        "\"1\": a",
+        "1: b"
+      ],
+      "value": {
+        "$map": [
+          [
+            "1",
+            "a"
+          ],
+          [
+            1,
+            "b"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "bool-key-spellings-are-one-key",
+      "lines": [
+        "yes: a",
+        "true: b",
+        "On: c"
+      ],
+      "value": {
+        "$map": [
+          [
+            true,
+            "c"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "typed-keys-in-a-flow-mapping",
+      "lines": [
+        "m: {null: a, on: b, 7: c, l: x}"
+      ],
+      "value": {
+        "m": {
+          "$map": [
+            [
+              null,
+              "a"
+            ],
+            [
+              true,
+              "b"
+            ],
+            [
+              7,
+              "c"
+            ],
+            [
+              "l",
+              "x"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "float-tag-accepts-what-python-accepts",
+      "lines": [
+        "a: !!float inf",
+        "b: !!float -Infinity",
+        "c: !!float NaN",
+        "d: !!float \" 1.5 \"",
+        "e: !!float 1_0.5",
+        "f: !!float 1e3",
+        "g: !!float --1",
+        "h: !!float +.5",
+        "i: !!float 1:30",
+        "j: !!float 7"
+      ],
+      "value": {
+        "a": {
+          "$float": "inf"
+        },
+        "b": {
+          "$float": "-inf"
+        },
+        "c": {
+          "$float": "nan"
+        },
+        "d": {
+          "$float": "1.5"
+        },
+        "e": {
+          "$float": "10.5"
+        },
+        "f": {
+          "$float": "1000.0"
+        },
+        "g": {
+          "$float": "1.0"
+        },
+        "h": {
+          "$float": "0.5"
+        },
+        "i": {
+          "$float": "90.0"
+        },
+        "j": {
+          "$float": "7.0"
+        }
+      }
+    },
+    {
+      "id": "int-tag-accepts-what-python-accepts",
+      "lines": [
+        "a: !!int \" 12\"",
+        "b: !!int 0o17",
+        "c: !!int \"\u0661\u0662\"",
+        "d: !!int --5",
+        "e: !!int \"0x 1f\""
+      ],
+      "value": {
+        "a": 12,
+        "b": 15,
+        "c": 12,
+        "d": 5,
+        "e": 31
+      }
+    },
+    {
+      "id": "float-tag-hex-is-an-error",
+      "lines": [
+        "a: !!float 0x10"
+      ],
+      "refuse": {
+        "code": "constructor",
+        "column": 4,
+        "line": 1
+      }
+    },
+    {
+      "id": "float-tag-empty-is-an-error",
+      "lines": [
+        "a: !!float"
+      ],
+      "refuse": {
+        "code": "constructor",
+        "column": 4,
+        "line": 1
+      }
+    },
+    {
+      "id": "float-tag-sign-only-is-an-error",
+      "lines": [
+        "a: !!float \"-\""
+      ],
+      "refuse": {
+        "code": "constructor",
+        "column": 4,
+        "line": 1
+      }
+    },
+    {
+      "id": "duplicate-anchor",
+      "lines": [
+        "a: &x 1",
+        "b: &x 2"
+      ],
+      "refuse": {
+        "code": "anchor",
+        "column": 4,
+        "line": 2
+      }
+    },
+    {
+      "id": "duplicate-anchor-on-collections",
+      "lines": [
+        "a: &x {k: 1}",
+        "b: &x [1]"
+      ],
+      "refuse": {
+        "code": "anchor",
+        "column": 4,
+        "line": 2
+      }
+    },
+    {
+      "id": "int-values-around-two-to-the-53",
+      "lines": [
+        "a: 9007199254740991",
+        "b: 9007199254740992",
+        "c: 9007199254740993",
+        "d: -9007199254740993",
+        "e: 9_007_199_254_740_993",
+        "f: 0x20000000000001",
+        "g: !!int 9007199254740993",
+        "h: 9007199254740992.0"
+      ],
+      "value": {
+        "a": 9007199254740991,
+        "b": {
+          "$int": "9007199254740992"
+        },
+        "c": {
+          "$int": "9007199254740993"
+        },
+        "d": {
+          "$int": "-9007199254740993"
+        },
+        "e": {
+          "$int": "9007199254740993"
+        },
+        "f": {
+          "$int": "9007199254740993"
+        },
+        "g": {
+          "$int": "9007199254740993"
+        },
+        "h": {
+          "$float": "9007199254740992.0"
+        }
+      }
+    },
+    {
+      "id": "int-keys-around-two-to-the-53",
+      "lines": [
+        "9007199254740993: a",
+        "9007199254740992: b",
+        "9007199254740992.0: c"
+      ],
+      "value": {
+        "$map": [
+          [
+            {
+              "$int": "9007199254740993"
+            },
+            "a"
+          ],
+          [
+            {
+              "$float": "9007199254740992.0"
+            },
+            "c"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "repeated-key-takes-the-place-and-spelling-of-its-last-writing",
+      "lines": [
+        "1: a",
+        "x: b",
+        "1.0: c"
+      ],
+      "value": {
+        "$map": [
+          [
+            "x",
+            "b"
+          ],
+          [
+            {
+              "$float": "1.0"
+            },
+            "c"
+          ]
+        ]
+      }
+    }
+  ],
+  "edits": [
+    {
+      "after": {
+        "lines": [
+          "opts:",
+          "  ratio: 1.0",
+          "  list:",
+          "    - a",
+          "    - b"
+        ]
+      },
+      "before": {
+        "lines": [
+          "opts: {ratio: 1.0, list: [a]}"
+        ]
+      },
+      "droppedComments": 0,
+      "edit": {
+        "op": "append",
+        "path": [
+          "opts",
+          "list"
+        ],
+        "value": "b"
+      },
+      "how": "reemit",
+      "id": "reemit-keeps-a-float"
+    },
+    {
+      "after": {
+        "lines": [
+          "m:",
+          "  1: a",
+          "  l: x",
+          "  z: 1"
+        ]
+      },
+      "before": {
+        "lines": [
+          "m: {1: a, l: x}"
+        ]
+      },
+      "droppedComments": 0,
+      "edit": {
+        "op": "set",
+        "path": [
+          "m",
+          "z"
+        ],
+        "value": 1
+      },
+      "how": "reemit",
+      "id": "reemit-keeps-an-int-key"
+    },
+    {
+      "after": {
+        "lines": [
+          "m:",
+          "  null: a",
+          "  true: b",
+          "  z: q"
+        ]
+      },
+      "before": {
+        "lines": [
+          "m: {null: a, on: b}"
+        ]
+      },
+      "droppedComments": 0,
+      "edit": {
+        "op": "set",
+        "path": [
+          "m",
+          "z"
+        ],
+        "value": "q"
+      },
+      "how": "reemit",
+      "id": "reemit-keeps-null-and-boolean-keys"
+    },
+    {
+      "after": {
+        "lines": [
+          "scan:",
+          "  a: 1.0",
+          "  b:",
+          "    - y",
+          "  c: 2500.0",
+          "  d: .inf"
+        ]
+      },
+      "before": {
+        "lines": [
+          "scan: {a: 1.0, b: [x, y], c: 2.5e+3, d: .inf}"
+        ]
+      },
+      "droppedComments": 0,
+      "edit": {
+        "op": "delete",
+        "path": [
+          "scan",
+          "b",
+          0
+        ]
+      },
+      "how": "reemit",
+      "id": "reemit-keeps-floats-and-infinities"
+    },
+    {
+      "after": {
+        "lines": [
+          "global_settings:",
+          "  suppressions:",
+          "    # group A",
+          "    - rule_id: rule-a",
+          "      path: a.py",
+          "    # group B",
+          "    - path: b.py"
+        ]
+      },
+      "before": {
+        "lines": [
+          "global_settings:",
+          "  suppressions:",
+          "    # group A",
+          "    - rule_id: rule-a",
+          "      path: a.py",
+          "    # group B",
+          "    - rule_id: rule-b",
+          "      path: b.py"
+        ]
+      },
+      "droppedComments": 0,
+      "edit": {
+        "op": "delete",
+        "path": [
+          "global_settings",
+          "suppressions",
+          1,
+          "rule_id"
+        ]
+      },
+      "how": "patch",
+      "id": "delete-the-first-key-of-a-compact-item"
+    },
+    {
+      "after": {
+        "lines": [
+          "l:",
+          "  - # about b",
+          "    b: 2",
+          "  - c: 3"
+        ]
+      },
+      "before": {
+        "lines": [
+          "l:",
+          "  - a: 1 # one",
+          "    # about b",
+          "    b: 2",
+          "  - c: 3"
+        ]
+      },
+      "droppedComments": 1,
+      "edit": {
+        "op": "delete",
+        "path": [
+          "l",
+          0,
+          "a"
+        ]
+      },
+      "how": "patch",
+      "id": "delete-the-first-key-of-a-compact-item-with-comments-between"
+    },
+    {
+      "after": {
+        "lines": [
+          "a: 2.0"
+        ]
+      },
+      "before": {
+        "lines": [
+          "a: 1"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a"
+        ],
+        "value": {
+          "$float": "2.0"
+        }
+      },
+      "how": "patch",
+      "id": "set-a-float-value"
+    },
+    {
+      "after": {
+        "lines": [
+          "m:",
+          "  1: a",
+          "  l: x"
+        ]
+      },
+      "before": {
+        "lines": [
+          "m: 1"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "m"
+        ],
+        "value": {
+          "$map": [
+            [
+              1,
+              "a"
+            ],
+            [
+              "l",
+              "x"
+            ]
+          ]
+        }
+      },
+      "how": "patch",
+      "id": "set-a-typed-map-value"
+    },
+    {
+      "after": {
+        "lines": [
+          "m:",
+          "  1: a",
+          "  \"1\": c"
+        ]
+      },
+      "before": {
+        "lines": [
+          "m:",
+          "  1: a",
+          "  \"1\": b"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "m",
+          "1"
+        ],
+        "value": "c"
+      },
+      "how": "patch",
+      "id": "set-a-string-key-beside-an-int-key-of-the-same-text"
+    },
+    {
+      "after": {
+        "lines": [
+          "limit: 9007199254740993 # cap",
+          "other: 2"
+        ]
+      },
+      "before": {
+        "lines": [
+          "limit: 9007199254740993 # cap",
+          "other: 1"
+        ]
+      },
+      "droppedComments": 0,
+      "edit": {
+        "op": "set",
+        "path": [
+          "other"
+        ],
+        "value": 2
+      },
+      "how": "patch",
+      "id": "patch-beside-an-integer-beyond-two-to-the-53"
+    },
+    {
+      "after": {
+        "lines": [
+          "limit: 9007199254740995 # cap",
+          "other: 1"
+        ]
+      },
+      "before": {
+        "lines": [
+          "limit: 9007199254740993 # cap",
+          "other: 1"
+        ]
+      },
+      "droppedComments": 0,
+      "edit": {
+        "op": "set",
+        "path": [
+          "limit"
+        ],
+        "value": {
+          "$int": "9007199254740995"
+        }
+      },
+      "how": "patch",
+      "id": "set-an-integer-beyond-two-to-the-53"
+    },
+    {
+      "after": {
+        "lines": [
+          "opts:",
+          "  limit: 9007199254740993",
+          "  list:",
+          "    - a",
+          "    - b"
+        ]
+      },
+      "before": {
+        "lines": [
+          "opts: {limit: 9007199254740993, list: [a]}"
+        ]
+      },
+      "droppedComments": 0,
+      "edit": {
+        "op": "append",
+        "path": [
+          "opts",
+          "list"
+        ],
+        "value": "b"
+      },
+      "how": "reemit",
+      "id": "reemit-keeps-an-integer-beyond-two-to-the-53"
+    }
+  ],
+  "format": "yaml-oracle/1",
+  "notes": "Cases for the typing of keys and numbers: mappings whose keys are not plain strings, the text an explicit float or integer tag accepts, an anchor written twice, the integers either side of 2**53 as values and as keys, and planted edits that make the editor write an entry again around floats and typed keys, patch or write again beside an integer beyond 2**53, or take the first key of a list item that shares its line with the dash. A float, an integer beyond 2**53 or a mapping with typed keys in an edit's value is written in the corpus's own projection ($float, $int as its digits, $map)."
+}

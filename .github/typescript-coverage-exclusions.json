@@ -33,7 +33,14 @@
     "    stops being tracked, once a package.json / tsconfig / jest or vitest config",
     "    appears in any ancestor directory, or once it turns up in a coverage report.",
     "",
-    "Both kinds are also reported when the census would not have asked about the file at",
+    "  node-test -- the file has a node:test suite. That suite is not a jest run and writes",
+    "    no coverage summary, so no report can measure the file, but the suite exists and",
+    "    loads it. The entry names that suite's test file in a test field. Stale once the",
+    "    file stops being tracked or turns up in a coverage report, and once the test file",
+    "    is untracked, is not a test source (a name with .test. or .spec. in it, or a file",
+    "    under a test/ directory) or no longer imports the file by a relative path.",
+    "",
+    "Every kind is also reported when the census would not have asked about the file at",
     "all -- a path that is not tracked production source needs no exclusion, and an entry",
     "that guards nothing is a stale entry.",
     "",
@@ -87,6 +94,30 @@
       "kind": "no-harness",
       "path": "docs/content/assets/javascripts/vendor/anime.js",
       "reason": "The vendored MIT animejs 4.5.0 build, written whole by docs/ui-tests/vendor-motion.cjs (which checks the upstream license and version before copying). Third-party vendored output, not code this repository authors; no ancestor directory holds a JS harness config, so no harness exists to measure it."
+    },
+    {
+      "kind": "node-test",
+      "path": "docs/content/assets/javascripts/config-editor/yaml-scalars.js",
+      "reason": "A DOM-free module of the docs site's configuration editor: how a plain YAML scalar is read the way ASH's YAML 1.1 loader reads it, and written so that a YAML 1.1 and a YAML 1.2 reader agree. Its tests run under node --test in docs/editor-tests, which writes no jest coverage summary, so no report can measure it.",
+      "test": "docs/editor-tests/yaml-scalars.test.js"
+    },
+    {
+      "kind": "node-test",
+      "path": "docs/content/assets/javascripts/config-editor/yaml-read.js",
+      "reason": "The configuration editor's YAML reader, a DOM-free port of PyYAML's scanner and parser that keeps offsets, styles and comments. Its tests, and the corpus test that compares it with ASH's own loader, run under node --test in docs/editor-tests, which writes no jest coverage summary, so no report can measure it.",
+      "test": "docs/editor-tests/yaml-read.test.js"
+    },
+    {
+      "kind": "node-test",
+      "path": "docs/content/assets/javascripts/config-editor/yaml-write.js",
+      "reason": "The configuration editor's YAML writer: line patches, the block emitter and the new-file text, with no DOM. Its tests run under node --test in docs/editor-tests, which writes no jest coverage summary, so no report can measure it.",
+      "test": "docs/editor-tests/yaml-write.test.js"
+    },
+    {
+      "kind": "node-test",
+      "path": "docs/content/assets/javascripts/config-editor/state.js",
+      "reason": "The configuration editor's document state: edits through the re-read gate, and the history behind undo and redo, with no DOM. Its tests run under node --test in docs/editor-tests, which writes no jest coverage summary, so no report can measure it.",
+      "test": "docs/editor-tests/state.test.js"
     },
     {
       "kind": "no-harness",
