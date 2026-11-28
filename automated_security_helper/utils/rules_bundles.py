@@ -739,6 +739,16 @@ def _is_network_failure(error: BaseException) -> bool:
     )
 
 
+#: The script every rules-bundle install command runs. A constant so that
+#: ``install_providers.classify_install_command`` recognizes these commands by their
+#: exact text, the way ``download_utils`` keeps ``_PINNED_TOOL_INSTALL_SCRIPT``.
+RULES_BUNDLE_INSTALL_SCRIPT = (
+    "import sys; "
+    "from automated_security_helper.utils.rules_bundles import install_rules_bundle; "
+    "install_rules_bundle(sys.argv[1])"
+)
+
+
 def create_rules_bundle_install_command(name: str) -> "CustomCommand":
     """The CustomCommand that installs rules bundle ``name`` in a subprocess.
 
@@ -753,9 +763,6 @@ def create_rules_bundle_install_command(name: str) -> "CustomCommand":
 
     from automated_security_helper.base.plugin_base import CustomCommand
 
-    script = (
-        "import sys; "
-        "from automated_security_helper.utils.rules_bundles import install_rules_bundle; "
-        "install_rules_bundle(sys.argv[1])"
+    return CustomCommand(
+        args=[sys.executable, "-c", RULES_BUNDLE_INSTALL_SCRIPT, name], shell=False
     )
-    return CustomCommand(args=[sys.executable, "-c", script, name], shell=False)

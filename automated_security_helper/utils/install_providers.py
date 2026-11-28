@@ -10,8 +10,9 @@ equivalent when the operator asks for it with ``--providers``:
 
 - ``uv`` and ``pipx`` install Python tools into per-tool environments, ``pip`` installs
   into one interpreter, ``release-download`` is the pinned-release downloader
-  (``utils/download_utils``), ``nix`` realizes the repository flake's pinned
-  toolchain, and ``apt``, ``dnf``, ``yum``, ``zypper``, ``brew``, ``npm``, ``pnpm``,
+  (``utils/download_utils``, and ``utils/rules_bundles`` for a pinned rules bundle),
+  ``nix`` realizes the repository flake's pinned toolchain, and ``apt``, ``dnf``,
+  ``yum``, ``zypper``, ``brew``, ``npm``, ``pnpm``,
   ``conda``, ``choco`` and ``gem`` are one generic system-package shape
   (:class:`PackageManagerProvider`) parameterized by the manager: nothing is special
   cased per manager. ``go`` and ``cargo`` are declared stubs that refuse with "not
@@ -118,6 +119,8 @@ class InstallRequest:
     requirements: Tuple[str, ...] = ()
     #: The interpreter an environment install targets.
     target_python: Optional[str] = None
+    #: True when the plugin declared the command with ``shell=True``.
+    shell: bool = False
 
     @property
     def subject(self) -> str:
@@ -208,6 +211,10 @@ _DOWNLOAD_SCRIPT_MARKER = (
     "automated_security_helper.utils.download_utils import install_"
 )
 _PINNED_SCRIPT_MARKER = "import install_pinned_tool"
+#: The whole ``-c`` script of the command a plugin declares when it cannot install
+#: its tool (``download_utils.refusing_install_command``, and opengrep's refusals of
+#: a version ASH cannot verify): it writes its one argument to stderr and exits 1.
+_REFUSING_SCRIPT = "import sys; sys.exit(sys.argv[1])"
 
 
 def _parse_uv_tool_install(
@@ -267,13 +274,20 @@ def classify_install_command(
     Recognition is by exact shape, the way the installer already recognizes the pinned
     download script and the two environment installs. A shape that is not recognized is
     CUSTOM (run as declared, by the ``custom`` provider) or OPAQUE (a ``uv`` command
-    this parser does not understand: run as declared, by ``uv``).
+    this parser does not understand: run as declared, by ``uv``). The pinned
+    rules-bundle script (``rules_bundles.RULES_BUNDLE_INSTALL_SCRIPT``) is recognized
+    the same way, as a release download.
     """
+    from automated_security_helper.utils.rules_bundles import (
+        RULES_BUNDLE_INSTALL_SCRIPT,
+    )
     from automated_security_helper.utils.uv_tool_runner import UV_NO_CONFIG
 
     parts = tuple(argv)
     if shell or not parts:
-        return InstallRequest(CommandKind.CUSTOM, parts, "custom", tool=tool_key)
+        return InstallRequest(
+            CommandKind.CUSTOM, parts, "custom", tool=tool_key, shell=bool(shell)
+        )
 
     if parts[:3] == ("uv", "tool", "install"):
         parsed = _parse_uv_tool_install(parts[3:])
@@ -320,6 +334,20 @@ def classify_install_command(
             tool = parts[3]
         return InstallRequest(
             CommandKind.RELEASE_DOWNLOAD, parts, "release-download", tool=tool
+        )
+
+    if (
+        len(parts) == 4
+        and parts[0] == sys.executable
+        and parts[1] == "-c"
+        and parts[2] == RULES_BUNDLE_INSTALL_SCRIPT
+    ):
+        # A pinned rules bundle (cfn-guard's rules registry) is a release download
+        # too: its archive is pinned by SHA-256 in utils/tool_downloads.py beside the
+        # binary pins. Matched by its exact script, so release-download runs it as
+        # declared; release-download refuses a custom command it does not recognize.
+        return InstallRequest(
+            CommandKind.RELEASE_DOWNLOAD, parts, "release-download", tool=tool_key
         )
 
     owner = _NATIVE_MANAGERS.get(os.path.basename(parts[0]))
@@ -680,19 +708,31 @@ class ReleaseDownloadProvider(InstallProvider):
                 f"{tool or request.subject} has no pinned release asset "
                 "(tool_downloads)",
             )
-        if request.kind not in (
-            CommandKind.PYTHON_TOOL,
-            CommandKind.PYTHON_ENV,
-            CommandKind.NATIVE_PACKAGE,
-            CommandKind.OPAQUE,
-        ):
-            # Only an install, in a shape the classifier recognizes (a Python tool or
-            # environment install, or a system package), is rebuilt as the tool's
-            # pinned download. Any other command of the tool is the plugin's own,
-            # such as cfn-guard's rules bundle or opengrep's refusal of a version it
-            # cannot verify, and runs as declared: rebuilt from the tool's name it was
-            # one more download of the binary, and the command it stood for never ran.
-            return self._identity(request)
+        if request.kind == CommandKind.CUSTOM:
+            # A custom command is not rebuilt from its tool's name: rebuilt, it was
+            # one more download of the binary, and the command it stood for never
+            # ran. The one ASH declares when a plugin cannot install its tool
+            # installs nothing (it writes why and exits 1), so it runs as declared
+            # and the run fails with its reason. Any other custom command is the
+            # plugin's own shell or download command, which only the custom provider
+            # runs: refused here, it runs when custom is listed, and nothing runs
+            # when it is not. (A pinned rules bundle is a release download, served
+            # above.)
+            argv = request.argv
+            if (
+                not request.shell
+                and len(argv) == 4
+                and argv[0] == sys.executable
+                and argv[1] == "-c"
+                and argv[2] == _REFUSING_SCRIPT
+            ):
+                return self._identity(request)
+            return Refusal(
+                self.name,
+                Capability.CUSTOM_COMMANDS,
+                "the declared command is the plugin's own, not a pinned release "
+                "download; list custom to run it as declared",
+            )
         pairs = [tuple(p) for p in supported_platforms(tool)]
         if (context.platform_name, context.arch) not in pairs:
             return Refusal(
