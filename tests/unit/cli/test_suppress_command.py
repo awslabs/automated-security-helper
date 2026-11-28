@@ -459,29 +459,23 @@ class TestRoundTrip:
         sys.platform == "win32",
         reason="symlink creation needs privileges on Windows",
     )
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason=(
-            "verify looks the config's suppression up with its links followed, "
-            "finds no entry for a file linked out of the source directory, and "
-            "advises an `ash suppress add` that refuses the path"
-        ),
-    )
     def test_verify_gives_no_add_advice_for_a_kept_file_linked_out_of_the_root(
         self, repo, tmp_path_factory
     ):
         # The entry is kept (the test above), so the suppression is recorded.
-        # Only the assertion is the expected failure: a failed setup or a crash
-        # fails the test.
-        added = _add(repo)
-        if added.exit_code != 0:
-            pytest.fail(added.output)
+        # verify looked it up with its links followed only, found no entry, and
+        # advised an `ash suppress add` that refuses a path outside the source
+        # directory. The entry's own line is the one problem left: fix the
+        # file, then refresh it.
+        assert _add(repo).exit_code == 0
         _link_out_of_the_root(repo, tmp_path_factory)
         checked = _run("verify")
-        if checked.crash is not None:
-            pytest.fail(repr(checked.crash))
+        assert checked.crash is None, repr(checked.crash)
+        assert checked.exit_code == 1, checked.output
+        assert "exists but cannot be hashed" in checked.output
+        assert "unlocked:" not in checked.output, checked.output
         assert "ash suppress add" not in checked.output, checked.output
+        assert "1 problem(s)" in checked.output, checked.output
 
     def test_verify_tells_a_suppression_whose_file_is_gone_to_be_removed(self, repo):
         # After the drop the suppression is unrecorded; the `add` command it

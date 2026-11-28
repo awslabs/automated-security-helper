@@ -35,6 +35,7 @@ from automated_security_helper.utils.ash_lock import (
     recorded_scope,
     resolved_lock_key,
     scope_is_recorded,
+    suppression_lock_key,
 )
 from automated_security_helper.utils.console import echo
 from automated_security_helper.utils.log import show_debug_locals
@@ -731,7 +732,9 @@ def verify(
                     "write it quoted"
                 )
                 continue
-            key = resolved_lock_key(root, path)
+            # The file's own key, or the path as written when its links lead
+            # out of the source directory (suppression_lock_key).
+            key = suppression_lock_key(root, path)
             locked = lock.entries.get(key) if key is not None else None
             if locked is None or not scope_is_recorded(locked, rule_id, str(symbol)):
                 if file_is_gone(root, path):

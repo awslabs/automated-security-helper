@@ -347,9 +347,10 @@ def resolved_lock_key(source_dir: Path | str, path: Any) -> Optional[str]:
     """The key the lock holds for ``path`` under ``source_dir``: the file's own
     path, with symbolic links followed, or None when it cannot be one.
 
-    The one key function for every place that writes or looks up an entry for
-    a suppression's file: ``ash suppress add`` and its check for a suppression
-    already in the config, ``ash suppress verify``, and the check of a config
+    The key function for every place that writes or looks up an entry for a
+    suppression's file: ``ash suppress add`` and its check for a suppression
+    already in the config, and, through ``suppression_lock_key``,
+    ``ash suppress verify`` and the check of a config
     (``unlocked_symbol_suppressions``). It is also the key a scan looks up: the
     scan's resolver follows links in a finding's path before it builds its key
     (``SymbolResolver._scope_is_current``). With ``link -> src``, a
@@ -362,7 +363,8 @@ def resolved_lock_key(source_dir: Path | str, path: Any) -> Optional[str]:
     ``path`` is read as ``lock_key`` reads it first (a backslash is a
     separator, a leading ``./`` is dropped), so a path that is no key there
     (absolute, climbing out with ``..``, empty) is none here either, and
-    neither is one whose links lead out of ``source_dir``. A path that names no
+    neither is one whose links lead out of ``source_dir``, which
+    ``suppression_lock_key`` looks up as written. A path that names no
     existing file keeps its spelling, so a pattern or a file that is gone is
     looked up as written.
     """
@@ -375,6 +377,28 @@ def resolved_lock_key(source_dir: Path | str, path: Any) -> Optional[str]:
     except (OSError, RuntimeError, ValueError):
         return None
     return lock_key(relative.as_posix())
+
+
+def suppression_lock_key(source_dir: Path | str, path: Any) -> Optional[str]:
+    """The key a config suppression's lock entry is looked up under, or None
+    when ``path`` cannot be a key (``lock_key``).
+
+    ``resolved_lock_key`` when there is one: with ``link -> src``, a
+    suppression of ``link/app.py`` is looked up under ``src/app.py``, the key
+    ``add`` writes and a scan reads, and an entry recorded under
+    ``link/app.py`` does not stand in for that one. When following the links
+    leaves ``source_dir`` or fails, the path as written: a file locked as a
+    regular file and since replaced by a link out of the source directory
+    keeps its entry under that key, since ``refresh --drop-missing`` keeps the
+    entry of a file that is not gone (``file_is_gone``). Looked up with its
+    links followed only, its suppression read as unrecorded, and the advice
+    was an ``ash suppress add`` that refuses a path outside the source
+    directory. The file still cannot be hashed, so ``ash suppress verify``
+    reports its entry, and a scan does not apply the suppression: its
+    resolver reads no path outside the scan root (``SymbolResolver._resolve``).
+    """
+    key = resolved_lock_key(source_dir, path)
+    return key if key is not None else lock_key(path)
 
 
 def file_is_gone(source_dir: Path | str, path: Any) -> bool:
@@ -1540,13 +1564,14 @@ def unlocked_symbol_suppressions(
     unlocked; an absolute path or one climbing out of the root never is)
     counts as unlocked.
 
-    The file is looked up under ``resolved_lock_key``, the key ``add`` writes
-    and a scan reads: a path through a symbolic link is found under the file
-    it leads to.
+    The file is looked up under ``suppression_lock_key``: a path through a
+    symbolic link is found under the file it leads to, the key ``add`` writes
+    and a scan reads, and a path whose links lead out of the source directory
+    is looked up as written, where the entry kept for such a file is.
     """
     missing = []
     for suppression in symbol_suppressions(suppressions):
-        key = resolved_lock_key(
+        key = suppression_lock_key(
             lock.source_dir, getattr(suppression, "path", None) or ""
         )
         entry = lock.entries.get(key) if key is not None else None
