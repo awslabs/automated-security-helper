@@ -1,0 +1,119 @@
+{
+  "report_id": "ASH-20260115120000-000000000001",
+  "generated_at": "2026-01-15T12:00:00+00:00",
+  "project_name": "ASH",
+  "tool_version": "<ASH_VERSION>",
+  "description": "Automated Security Helper Aggregated Report Post-processor",
+  "summary_stats": {
+    "severity_counts": {
+      "suppressed": 1,
+      "critical": 1,
+      "high": 2,
+      "medium": 3,
+      "low": 3,
+      "info": 1
+    },
+    "start": "2026-01-15T12:00:00+00:00",
+    "end": "2026-01-15T12:00:42+00:00",
+    "duration": 42.0,
+    "total": 10,
+    "actionable": 6,
+    "passed": 3,
+    "failed": 3,
+    "missing": 1,
+    "skipped": 1,
+    "error": 1
+  },
+  "validation_summary": {},
+  "execution_discrepancy_report": {},
+  "shard": null,
+  "expected_scanners": [],
+  "requested_scanners_not_run": null,
+  "plugin_load_errors": {},
+  "ignore_file_exclusions": null,
+  "inputs_not_scanned": null,
+  "support_notices": [
+    {
+      "id": "host.cpu.below-polars-runtime",
+      "scope": "ash",
+      "dimension": "cpu",
+      "level": "unsupported",
+      "behavior": "continues",
+      "message": "This x86-64 processor lacks instructions the installed polars runtime is built for, and polars warns that running on it will likely crash.",
+      "polyfill": null,
+      "found": "avx2, bmi2 and fma are missing (polars-runtime-32 1.44.2).",
+      "facts": {
+        "arch": "amd64",
+        "cpu_level": "compat-only",
+        "polars_runtime": "runtime-32"
+      },
+      "raised": "start",
+      "docs": "how-to/supported-configurations.md#host-cpu-below-polars-runtime",
+      "paths": [
+        {
+          "id": "polars-compat-runtime",
+          "group": "this-machine",
+          "kind": "same-os",
+          "summary": "Add polars' compatibility runtime (its rtcompat extra) to ASH's environment, at the polars version ASH uses.",
+          "docs": "how-to/supported-configurations.md#polars-compat-runtime"
+        },
+        {
+          "id": "arm64-host",
+          "group": "elsewhere",
+          "kind": "other-host",
+          "summary": "Run ASH on an arm64 machine: Linux on arm64 or a Mac with Apple silicon.",
+          "docs": "how-to/supported-configurations.md#arm64-host"
+        },
+        {
+          "id": "ci-runner",
+          "group": "elsewhere",
+          "kind": "ci-runner",
+          "summary": "Run the scan in CI on a hosted runner; ASH's reusable GitHub workflow runs on ubuntu-latest by default.",
+          "docs": "how-to/supported-configurations.md#ci-runner"
+        }
+      ]
+    },
+    {
+      "id": "host.sandbox.landlock-below-6",
+      "scope": "ash",
+      "dimension": "sandbox",
+      "level": "degraded",
+      "behavior": "continues",
+      "message": "Abstract Unix sockets and signals to processes outside the sandbox are not restricted, because the kernel's Landlock ABI is below 6.",
+      "polyfill": null,
+      "found": "Landlock ABI 5.",
+      "facts": {
+        "sandbox_mode": "auto",
+        "sandbox_backend": "landlock",
+        "sandbox_loss": "landlock-below-6"
+      },
+      "raised": "decision",
+      "docs": "how-to/supported-configurations.md#host-sandbox-landlock-below-6",
+      "paths": [
+        {
+          "id": "newer-kernel-landlock",
+          "group": "this-machine",
+          "kind": "same-os",
+          "summary": "Use a Linux kernel whose Landlock ABI is 6 or later, or the bwrap backend.",
+          "docs": "how-to/supported-configurations.md#newer-kernel-landlock"
+        }
+      ]
+    },
+    {
+      "id": "scanner.guarddog.sandbox-replaced",
+      "scope": "guarddog",
+      "dimension": "tool sandbox",
+      "level": "polyfilled",
+      "behavior": "continues",
+      "message": "GuardDog runs inside ASH's sandbox-exec confinement instead of its own kernel sandbox.",
+      "polyfill": "guarddog-ash-sandbox",
+      "found": null,
+      "facts": {
+        "tool_sandbox": "replaced"
+      },
+      "raised": "decision",
+      "docs": "how-to/supported-configurations.md#scanner-guarddog-sandbox-replaced",
+      "paths": []
+    }
+  ]
+}

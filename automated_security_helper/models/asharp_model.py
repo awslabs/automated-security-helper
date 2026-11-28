@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
@@ -47,10 +48,14 @@ from typing import (
     Annotated,
     Dict,
     Any,
+    Iterable,
     Iterator,
+    Literal,
     Optional,
+    Tuple,
     Union,
     List,
+    get_args,
 )
 from automated_security_helper.schemas.sarif_schema_model import (
     PropertyBag,
@@ -906,6 +911,497 @@ def new_report_id(
     return f"{prefix}-{instant.strftime('%Y%m%d%H%M%S')}-{token}"
 
 
+#: The words a support notice is written in, as static types, so a field that holds
+#: one refuses any other. They are spelled here and not taken from
+#: base/support_register.py, whose enums they mirror (as ``SeverityThresholdText`` in
+#: models/vocab.py mirrors its enum): the register builds and checks every declaration
+#: it holds when it is imported, and a results file has to load without that, because
+#: ``ash report`` and ``ash merge`` read notices and never evaluate a row.
+#: tests/unit/models/test_support_notice_binds_to_the_register.py holds each of them
+#: equal to the register's enum, and the fact names equal to the register's ``FIELDS``,
+#: so a member or a fact added there fails here.
+SupportLevelText = Literal["polyfilled", "degraded", "unsupported"]
+SupportBehaviorText = Literal[
+    "continues", "skips-scanner", "scanner-missing", "scanner-error", "refuses"
+]
+SupportRaisedText = Literal["start", "decision"]
+UpgradePathKindText = Literal[
+    "same-os", "container", "wsl", "other-os", "other-host", "ci-runner"
+]
+UpgradePathGroupText = Literal["this-machine", "elsewhere"]
+
+#: The names a notice's facts may have: the facts the register's host readers fill, in
+#: its order, ``os_release`` (a free-text version string) among them. A closed list, so
+#: a notice cannot record a host name or a user name as a fact, whatever its value is.
+SupportFactNameText = Literal[
+    "os",
+    "host_os",
+    "os_release",
+    "arch",
+    "translation",
+    "cpu_level",
+    "polars_runtime",
+    "libc",
+    "python_in_range",
+    "python_build",
+    "install_channel",
+    "run_mode",
+    "wsl",
+    "shell",
+    "image_arch_matches",
+    "sandbox_mode",
+    "sandbox_backend",
+    "sandbox_loss",
+    "express_requested",
+    "express_available",
+    "tool_sandbox",
+    "ignore_paths",
+]
+_SUPPORT_FACT_NAMES = frozenset(get_args(SupportFactNameText))
+
+#: The path kinds that change the machine the scan runs on. Every other kind moves the
+#: scan to another machine, another operating system or a CI runner.
+_THIS_MACHINE_PATH_KINDS = frozenset({"same-os", "container", "wsl"})
+
+#: A path on the machine that wrote a notice: an absolute path (``/home/alice/.venv``),
+#: a home path (``~/.cache``, ``~alice``), a drive path (``C:\Users\alice``), a path
+#: relative to a drive's own directory (``C:Users\alice``), a path from the root of the
+#: current drive (``\Users\alice``), a network share (``\\server\share``,
+#: ``//server/share``), a root whose leading separator is doubled (``//home/alice``),
+#: an extended-length or device path (``\\?\C:\Users\alice``, ``\\.\C:\Users\alice``)
+#: or a file URI in any case (``file:///home/alice``, ``FILE:///home/alice``). It has
+#: to start a token, so a slash inside a word (``windows/arm64``, ``n/a``), the path of
+#: a URL and a relative path (``./check``) are not one.
+#:
+#: Two separators in a row start a share or a doubled root whatever they are, slash or
+#: backslash in any mix, and however many, unless a colon comes before them: that is
+#: the ``//`` of a URL (``https://host/x``, ``s3://bucket/key``) and what follows it
+#: is the URL's. A protocol-relative URL (``//cdn.example/lib.js``) has the shape of a
+#: share and is refused with the shares. A letter before a colon is a drive only when
+#: it stands alone: the ``u`` that ends ``ubuntu:22.04`` and the ``s`` that ends
+#: ``polars:runtime-32`` follow a word character, so no token starts there.
+#:
+#: The drive in an extended-length path follows a backslash, which is never the start
+#: of a token, so the drive rule does not see it. The backslash after the ``?`` does
+#: start one (a ``?`` is no word character), and the rule for a backslash and a word
+#: character refuses the path there.
+_LOCAL_PATH = re.compile(
+    r"""
+    (?<![\w/.\\~])               # the start of a token
+    (?:
+        /[\w.~+@%-]              # /home/alice
+      | (?<!:)[/\\]{2,}[\w.?$]   # //server/share, //home/alice, /\server; not https://
+      | ~(?:[/\\]|[A-Za-z_])     # ~/.cache or ~alice
+      | [A-Za-z]:[\\/]           # C:\Users or c:/work
+      | [A-Za-z]:[\w.~$%@+-]     # C:Users, relative to the drive's own directory
+      | \\\\[\w.$-]              # \\server\share and \\.\C:\Users
+      | \\\w                     # \Users\alice, and the \C: of \\?\C:\Users
+      | (?i:file:/)              # file:///home/alice, in any case
+    )
+    """,
+    re.VERBOSE,
+)
+
+
+def _refuse_a_local_path(name: str, text: str) -> str:
+    """*text*, which a support notice holds as *name*, or a refusal when it holds a
+    path on the machine that wrote the notice.
+
+    Results are shared, and a path under the user's home names the user, the
+    interpreter and the layout of the machine. A notice carries tokens, ids and public
+    sentences. The text is refused, not rewritten, so a writer's mistake fails the
+    test that builds the notice instead of reaching a results file in a changed form.
+    The refusal quotes nothing it was given.
+    """
+    if _LOCAL_PATH.search(text):
+        raise ValueError(
+            f"{name} holds a path on the machine that wrote the notice, and a "
+            "support notice carries none, because results are shared"
+        )
+    return text
+
+
+class UpgradePathNotice(StrippedRecordModel):
+    """One way out of a configuration ASH does not fully support, as a notice has it.
+
+    The id, the kind and the one sentence are the support register's upgrade path. The
+    command the CLI builds for some paths is not recorded: it names the interpreter by
+    its path under the user's home, which a shared report must not carry, so this
+    record has no field for one and a key that tries to carry one is dropped.
+    """
+
+    # Only these fields are kept. A results file ASH reads back can hold a key a later
+    # ASH added, and no ASH writer sets any other: such a key is dropped, not refused,
+    # so a record a later version wrote still loads. Read from a results file, whose
+    # values an error does not quote.
+    model_config = ConfigDict(
+        str_strip_whitespace=True, extra="ignore", hide_input_in_errors=True
+    )
+
+    id: Annotated[
+        str,
+        Field(min_length=1, description="The id of the upgrade path."),
+    ]
+    group: Annotated[
+        UpgradePathGroupText,
+        Field(
+            description=(
+                "this-machine for a path that changes the machine the scan runs on (a "
+                "reinstall, a container, WSL), elsewhere for a path that moves the "
+                "scan to another machine, another operating system or a CI runner."
+            )
+        ),
+    ]
+    kind: Annotated[
+        UpgradePathKindText,
+        Field(
+            description=(
+                "What the path changes: same-os, container or wsl on this machine, "
+                "other-os, other-host or ci-runner elsewhere."
+            )
+        ),
+    ]
+    summary: Annotated[
+        str,
+        Field(
+            min_length=1,
+            description=(
+                "One sentence that says what to do. It holds no command: a command "
+                "can name the interpreter by its path under the user's home, which a "
+                "shared report must not carry."
+            ),
+        ),
+    ]
+    docs: Annotated[
+        str,
+        Field(
+            min_length=1,
+            description=(
+                "The documentation page and section that explain the path, relative "
+                "to the documentation content root."
+            ),
+        ),
+    ]
+
+    @field_validator("id", "summary", "docs", mode="after")
+    @classmethod
+    def _hold_no_local_path(cls, value: str, info: ValidationInfo) -> str:
+        return _refuse_a_local_path(str(info.field_name), value)
+
+    @model_validator(mode="after")
+    def _group_follows_kind(self) -> "UpgradePathNotice":
+        if (self.kind in _THIS_MACHINE_PATH_KINDS) != (self.group == "this-machine"):
+            raise ValueError(
+                "an upgrade path's group follows its kind: this-machine for same-os, "
+                "container and wsl, elsewhere for the others"
+            )
+        return self
+
+
+class SupportNotice(StrippedRecordModel):
+    """A configuration this run met that ASH supports only through a polyfill, with a
+    loss, or not at all, with the upgrade paths on offer.
+
+    Built from a row of the support register (base/support_register.py) and the facts
+    the run matched. It carries tokens, ids and public sentences, never a host name, a
+    user name or a path on the machine that wrote it, and never the command the CLI
+    builds for an upgrade path: results are shared.
+    """
+
+    # Only these fields are kept, as for UpgradePathNotice.
+    model_config = ConfigDict(
+        str_strip_whitespace=True, extra="ignore", hide_input_in_errors=True
+    )
+
+    id: Annotated[
+        str,
+        Field(
+            min_length=1,
+            description=(
+                "The id of the support row this notice reports, for example "
+                "host.cpu.below-polars-runtime. The id of a scanner's row names the "
+                "scanner."
+            ),
+        ),
+    ]
+    scope: Annotated[
+        str,
+        Field(
+            min_length=1,
+            description=(
+                "ash for a configuration of the whole run, or the config name of the "
+                "scanner the row is about."
+            ),
+        ),
+    ]
+    dimension: Annotated[
+        str,
+        Field(
+            min_length=1,
+            description="What the row is about, for example cpu, sandbox or os.",
+        ),
+    ]
+    level: Annotated[
+        SupportLevelText,
+        Field(
+            description=(
+                "polyfilled when ASH works through a named stand-in, degraded when it "
+                "works with a named loss, unsupported when it does not support the "
+                "configuration."
+            )
+        ),
+    ]
+    behavior: Annotated[
+        SupportBehaviorText,
+        Field(
+            description=(
+                "What ASH did where the row matched: continues, skips-scanner, "
+                "scanner-missing, scanner-error or refuses."
+            )
+        ),
+    ]
+    message: Annotated[
+        str,
+        Field(
+            min_length=1,
+            description=(
+                "One sentence: why the configuration is unsupported, what is lost, or "
+                "what the stand-in does differently."
+            ),
+        ),
+    ]
+    polyfill: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description=(
+                "The id of the stand-in a polyfilled notice names. Null for the other "
+                "levels."
+            ),
+        ),
+    ] = None
+    found: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description=(
+                "What ASH read that matched the row, for example the processor flags "
+                "that are missing. Null when the row has nothing to add, and, in a "
+                "report that combines runs, when the runs that met the row did not "
+                "record the same text."
+            ),
+        ),
+    ] = None
+    facts: Annotated[
+        Dict[SupportFactNameText, str],
+        Field(
+            default_factory=dict,
+            description=(
+                "The tokens the row matched, by fact name, for example arch amd64 and "
+                "cpu_level compat-only. The names are the support register's facts, "
+                "and no other name is accepted. In a report that combines runs, only "
+                "the tokens every run that met the row recorded."
+            ),
+        ),
+    ]
+    raised: Annotated[
+        SupportRaisedText,
+        Field(
+            description=(
+                "start when ASH noticed it before the scan began, decision when it "
+                "noticed it where it made the decision."
+            )
+        ),
+    ]
+    docs: Annotated[
+        str,
+        Field(
+            min_length=1,
+            description=(
+                "The documentation page and section that explain the row, relative "
+                "to the documentation content root."
+            ),
+        ),
+    ]
+    paths: Annotated[
+        List[UpgradePathNotice],
+        Field(
+            default_factory=list,
+            description=(
+                "The ways to a supported configuration that can be offered here, the "
+                "ones on this machine first and then the ones elsewhere. Empty when "
+                "the row declares none, and for a polyfill. In a report that combines "
+                "runs, only the paths every run that met the row was offered."
+            ),
+        ),
+    ]
+
+    @field_validator(
+        "id", "scope", "dimension", "message", "polyfill", "found", "docs", mode="after"
+    )
+    @classmethod
+    def _hold_no_local_path(cls, value: str | None, info: ValidationInfo) -> str | None:
+        if value is None:
+            return value
+        return _refuse_a_local_path(str(info.field_name), value)
+
+    @field_validator("facts", mode="before")
+    @classmethod
+    def _facts_are_named_as_the_register_names_them(cls, value: Any) -> Any:
+        # Before the keys are checked against the closed list, because the error for a
+        # key outside it carries the key in its location, and a refusal quotes nothing
+        # it was given.
+        if isinstance(value, Mapping) and not _SUPPORT_FACT_NAMES.issuperset(value):
+            raise ValueError(
+                "a fact has a name the support register does not declare, and a "
+                "support notice carries no other, because results are shared"
+            )
+        return value
+
+    @field_validator("facts", mode="after")
+    @classmethod
+    def _facts_hold_no_local_path(
+        cls, value: Dict[SupportFactNameText, str]
+    ) -> Dict[SupportFactNameText, str]:
+        for token in value.values():
+            _refuse_a_local_path("a fact", token)
+        return value
+
+
+def _joined(items: Sequence[str]) -> str:
+    """``items`` as a phrase: one alone, two joined by "and", more as a list."""
+    if len(items) <= 2:
+        return " and ".join(items)
+    return f"{', '.join(items[:-1])}, and {items[-1]}"
+
+
+def _agreed_support_notice(
+    records: List[SupportNotice], runs: Sequence[str]
+) -> SupportNotice:
+    """The one record of a notice id that holds only what every record of it holds.
+
+    The first record is the base, copied whole. What a run read of a row, and what the
+    register offered on its host, are what differ between runs, and the record keeps
+    them only where the runs agree: ``facts`` is the pairs every record has with the
+    same token, in the first record's order; ``found`` is its text when every record
+    has the same text, None when they differ (a record with no text differs from one
+    with some); and ``paths`` is the paths every record offers, compared by path id, in
+    the first record's order and as the first record words them.
+
+    Every other field is the first record's, because none of them is something a run
+    read or was offered. The id is what the records are grouped by. The scope,
+    dimension, level, behavior, polyfill, moment, sentence and docs anchor are what the
+    register declares of the row, which every run of one ASH says alike; where a run of
+    another ASH version declares it otherwise, the first record's declaration stands.
+
+    What the record leaves out is said, not dropped in silence: one warning for the id
+    names the runs that recorded it (``runs``) and what it leaves out, ``found``,
+    ``facts.<name>`` and ``paths.<id>``, with the facts and the paths any run recorded
+    that the record does not hold. It names what differed and never what a run read, so
+    a log does not repeat a notice.
+    """
+    first, *others = records
+    update: Dict[str, Any] = {}
+    shared = {
+        name: token
+        for name, token in first.facts.items()
+        if all(other.facts.get(name) == token for other in others)
+    }
+    if shared != first.facts:
+        update["facts"] = shared
+    left_out: List[str] = []
+    if any(other.found != first.found for other in others):
+        update["found"] = None
+        left_out.append("found")
+    read = {name for record in records for name in record.facts}
+    left_out.extend(f"facts.{name}" for name in sorted(read.difference(shared)))
+    offered = [{path.id for path in record.paths} for record in records]
+    common = set.intersection(*offered)
+    kept = [path for path in first.paths if path.id in common]
+    if len(kept) != len(first.paths):
+        # model_copy does not copy what it is given to update, so the kept paths are
+        # copies here: the record shares no object with the run it came from.
+        update["paths"] = [path.model_copy(deep=True) for path in kept]
+    left_out.extend(
+        f"paths.{path_id}" for path_id in sorted(set.union(*offered) - common)
+    )
+    if left_out:
+        ASH_LOGGER.warning(
+            f"Support notice '{first.id}' was recorded by {_joined(runs)}, and they "
+            "did not read it alike. The combined record leaves out "
+            f"{_joined(left_out)}, so it holds only what every one of them recorded.",
+            extra=NO_MARKUP,
+        )
+    return first.model_copy(update=update, deep=True)
+
+
+def combined_support_notices(
+    runs: Iterable[Optional[Iterable[Any]]],
+    *,
+    labels: Optional[Sequence[str]] = None,
+) -> Optional[List[SupportNotice]]:
+    """Several runs' ``metadata.support_notices`` as one list, each notice id once.
+
+    For the two outputs that combine runs: the workspace results file, which has one
+    run for each project, and ``ash merge``, which has one for each shard. A notice
+    says what its own run met, and the runs meet different rows: the shards of one
+    scan can run on different hosts, and the projects of a workspace reach different
+    decisions, so the first run's list alone would leave the others' out.
+
+    A row two runs meet is recorded once, and the record holds only what every one of
+    those runs recorded. Two hosts that meet one row do not read the same of it (the
+    processor flags that are missing, the level the processor is at), and the register
+    does not offer them the same ways out: the compatibility runtime goes to a uv tool
+    and not to a Homebrew install, nor to a processor below that runtime. A record that
+    kept the first run's would publish one host's read and one host's offer as the
+    scan's, with nothing in it to say that another run recorded otherwise, and would
+    publish another list of paths when the runs came in another order. So ``facts`` is
+    the pairs every run recorded with the same token, ``found`` is the text every run
+    recorded and is None when they did not record the same, ``paths`` is the paths
+    every run offered, compared by path id and kept in the first run's order and
+    wording, and every other field is the first run's. None of those is something a
+    run read or was offered: the register declares them of the row, so the runs of one
+    ASH say the same of it, and where a run of another ASH version declares the row
+    otherwise the first run's declaration stands.
+
+    What a record leaves out is said: one warning for each notice the runs did not read
+    alike, naming the notice, the runs that recorded it and what it leaves out
+    (``found``, ``facts.<name>``, ``paths.<id>``), and not what any run read.
+    ``labels`` names the runs in the order they are given, for that warning; a run it
+    does not name is named by its place in the list (``run 3`` for the third, a run
+    that recorded nothing counted), so a caller that knows its shards or its projects
+    says which.
+
+    The records come in the order the runs are given and each run's own order, so a
+    caller that passes them in workspace-file or shard-index order gets a result that
+    does not depend on which run finished first. Each notice is a copy, so the list
+    shares no object with a run it came from. A record that is a mapping, as one read
+    from a results file can be, is taken as a notice.
+
+    None when no run recorded one, which is how a run on a fully supported
+    configuration writes the field.
+    """
+    names = list(labels or ())
+    recorded: Dict[str, List[Tuple[str, SupportNotice]]] = {}
+    for position, notices in enumerate(runs, start=1):
+        run = names[position - 1] if position <= len(names) else f"run {position}"
+        for notice in notices or ():
+            record = (
+                notice
+                if isinstance(notice, SupportNotice)
+                else SupportNotice.model_validate(notice)
+            )
+            recorded.setdefault(record.id, []).append((run, record))
+    united = [
+        _agreed_support_notice(
+            [record for _, record in group],
+            list(dict.fromkeys(run for run, _ in group)),
+        )
+        for group in recorded.values()
+    ]
+    return united or None
+
+
 class ReportMetadata(StrippedRecordModel):
     """Metadata for security reports."""
 
@@ -1085,6 +1581,28 @@ class ReportMetadata(StrippedRecordModel):
                 "suppression was matched in any phase and the unused-suppressions "
                 "report is not evaluated. Absent otherwise: a normal run records "
                 "nothing here."
+            ),
+        ),
+    ] = None
+    # Declared, rather than left to ride on this model's extra="allow", for the reasons
+    # the `shard` field above states. Left out of what is written while empty, as
+    # `suppressions_ignored` is (and for an empty list too, as `secret_value_shapes`
+    # is), so the results of a run on a fully supported configuration are written as
+    # they were before the field existed. The two outputs that combine runs record
+    # every run's notices by id, since the runs can be on different hosts: the
+    # workspace results file (workspace/aggregation.py) and `ash merge`
+    # (combined_support_notices). A notice that more than one run met is recorded once,
+    # holding only what every one of them recorded: the facts they read alike, the found
+    # text when it is the same, and the upgrade paths every run was offered.
+    support_notices: Annotated[
+        List[SupportNotice] | None,
+        Field(
+            default=None,
+            exclude_if=lambda value: not value,
+            description=(
+                "Configurations this run met that ASH supports only through a "
+                "polyfill, with a loss, or not at all, each with its upgrade paths. "
+                "Absent when the run's configuration is fully supported."
             ),
         ),
     ] = None
