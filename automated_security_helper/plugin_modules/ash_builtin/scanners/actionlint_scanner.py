@@ -339,8 +339,8 @@ CREDENTIALS_TAGS: Tuple[str, ...] = (
     "CWE-798: Use of Hard-coded Credentials",
 )
 
-#: actionlint's own config names. ASH does not read them from the scanned tree
-#: (decision 3); it names them in the note it logs when one is present.
+#: actionlint's own config names. ASH does not read them from the scanned tree;
+#: it names them in the note it logs when one is present.
 _DEFAULT_CONFIG_CANDIDATES = (".github/actionlint.yaml", ".github/actionlint.yml")
 
 _WORKFLOW_SUFFIXES = (".yml", ".yaml")
@@ -2092,7 +2092,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         # Resolved once more here, with the config scan() was given: the
         # dependency check ran against the config the scanner was built with. An
         # enabled integration that does not resolve now is MISSING, as it is
-        # there (decision 2), never run with the integration quietly off.
+        # there, never run with the integration quietly off.
         integrations = self._integration_executables()
         missing = self._missing_integrations(integrations)
         if missing:
@@ -2186,8 +2186,8 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
 
             # Where actionlint runs: the target, whose relative paths the
             # findings carry, unless a repository config actionlint would read
-            # while it looks for a workflow's project root must be kept from it
-            # (decision 3): then a copy of the workflows outside the tree, laid
+            # while it looks for a workflow's project root must be kept from it:
+            # then a copy of the workflows outside the tree, laid
             # out the same, so the paths are unchanged. Two cases move the run.
             # Before it starts: a config whose shape ASH will not let actionlint
             # (or itself) read through, a link, a FIFO, a file outside the tree

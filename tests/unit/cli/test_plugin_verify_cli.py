@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``ash plugin verify``: the promotion bar as a command (design 4.5, unit A6).
+"""``ash plugin verify``: the promotion bar as a command.
 
 The usage errors and one smoke test over the real corpus live here; the smoke test
 checks only the SHAPE of the output, so recording a corpus or promoting a scanner cannot

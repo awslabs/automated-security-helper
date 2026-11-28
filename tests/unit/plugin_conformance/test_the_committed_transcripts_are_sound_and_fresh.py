@@ -1,11 +1,11 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The freshness gate over the committed fixture corpus (design 4.4).
+"""The freshness gate over the committed fixture corpus.
 
 Every fixture directory under ``tests/test_data/scanners`` that holds recorded tool
-output carries a ``transcripts.json``. This is the register consistency test the design
-asks for: it refuses a transcript whose bytes moved, whose stamp differs from the pin the
+output carries a ``transcripts.json``. This is the register consistency test the corpus
+needs: it refuses a transcript whose bytes moved, whose stamp differs from the pin the
 plugin's manifest declares now, or which names a scanner that has no manifest, and it
 refuses a manifest scanner that no transcript file accounts for. A pin bump therefore
 forces either a re-record or a red test naming the stale transcript.

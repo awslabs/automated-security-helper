@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The drift gate for ``PluginKind`` and the RFC 6902 patch-op constants (E3).
+"""The drift gate for ``PluginKind`` and the RFC 6902 patch-op constants.
 
 Two modes, per vocabulary (the unit that cures a vocabulary says which):
 

@@ -501,7 +501,7 @@ def test_an_untrusted_input_message_in_an_unknown_shape_is_logged_once(caplog):
         ({"errors": [{"kind": "id", "message": "m", "line": 1}]}, 1, "missing"),
         # The template writes an integer line for every error. Anything else is
         # the output format having changed; read as "no position" it would drop
-        # every region silently, so it is ERROR (decision 5).
+        # every region silently, so it is ERROR.
         (
             {"errors": [{"kind": "id", "message": "m", "filepath": "a", "line": True}]},
             1,

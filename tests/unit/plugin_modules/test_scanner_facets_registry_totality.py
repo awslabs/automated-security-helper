@@ -120,7 +120,7 @@ def test_every_registered_scanner_declares_its_operational_facets(
 def test_no_registered_scanner_rests_on_the_unknown_offline_strategy(
     scanner_cls: type,
 ) -> None:
-    """E7: UNKNOWN is the base default, so a new scanner inherits it silently.
+    """UNKNOWN is the base default, so a new scanner inherits it silently.
 
     The enum value is a work item, not a resting state: read what the scanner
     does offline and declare BUNDLED, CACHE_FLAGS or SKIP_OFFLINE.

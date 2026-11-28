@@ -78,7 +78,7 @@ class TestTrivyToolType:
 
     It is SCA, the type the builtin trivy scanner declares. It was SAST, which
     named source analysis it does not run and fed the reporter-side
-    exclude_scanner_types the wrong type (E3 of the operational register).
+    exclude_scanner_types the wrong type.
     """
 
     def test_trivy_repo_scanner_is_sca_not_sast(self, _mock_context):

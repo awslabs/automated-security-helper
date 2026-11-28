@@ -2727,7 +2727,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     # ------------------------------------------------------------------
     # Container-image dispatch: a separate method, not a widened scan().
     #
-    # The design's C5 row: a scanner that claims TargetKind.CONTAINER_IMAGE on
+    # The iff-rule: a scanner that claims TargetKind.CONTAINER_IMAGE on
     # its operational-facets row overrides _execute_image_scan (the iff-test in
     # tests/unit/plugin_modules pins the equivalence), and scan_image drives it
     # through the same bounded subprocess, exit-code and results readings the
@@ -2771,13 +2771,12 @@ class ScannerPluginBase(PluginBase, Generic[T]):
 
         Two reasons exist today, checked in order: the locator shape
         (:meth:`_unsupported_image_shape_reason`), and a reference in offline
-        mode (the design's C6 skip row). A reference is skipped offline even
-        with an engine present, because scanning through one is not fetch-free:
-        a daemon asked for an image it does not hold pulls it from the
-        registry, and the tool's own registry client always fetches, so
-        offline's no-network promise cannot be kept for any ref. A direct
-        payload (a saved archive, an OCI layout) needs no fetch, which is why
-        only the ref shape has the second reason.
+        mode. A reference is skipped offline even with an engine present,
+        because scanning through one is not fetch-free: a daemon asked for an
+        image it does not hold pulls it from the registry, and the tool's own
+        registry client always fetches, so offline's no-network promise cannot
+        be kept for any ref. A direct payload (a saved archive, an OCI layout)
+        needs no fetch, which is why only the ref shape has the second reason.
         """
         shape_reason = self._unsupported_image_shape_reason(image)
         if shape_reason is not None:

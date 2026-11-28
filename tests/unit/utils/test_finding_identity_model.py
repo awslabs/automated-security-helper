@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""What the ``FindingIdentity`` conversion to pydantic keeps (decision R4).
+"""What the ``FindingIdentity`` conversion to pydantic keeps.
 
 The frozen dataclass became a frozen pydantic model so the frame layer reads
 one mechanism (``model_fields`` and the drift gate) across every model it
