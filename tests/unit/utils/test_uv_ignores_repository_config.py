@@ -1947,7 +1947,7 @@ def test_every_command_ash_dependencies_install_runs_drops_a_uv_path_in_the_tree
     operator = str(tmp_path / "operator" / "constraints.txt")
     monkeypatch.setenv("UV_CONSTRAINT", operator)
     monkeypatch.setenv("UV_INDEX_URL", "https://mirror.invalid/simple")
-    assert dependencies.run_command(list(command), shell=shell) == 0
+    assert dependencies.run_command(list(command), shell=shell) == 0  # nosec B604
     [env] = started
     child = _effective(env)
     names = set(child)
@@ -2515,6 +2515,86 @@ def test_ash_dependencies_install_judges_its_tool_listing_against_its_directory(
         assert "UV_CONFIG_FILE" not in names, run["command"]
         # Control: the operator's file outside the directory is passed on.
         assert env.get("UV_CONSTRAINT") == operator, run["command"]
+
+
+# A run started at the filesystem root: checkov, Syft and Ferret normally start
+# their tool there, outside the tree they scan (path_trust.cwd_outside_scanned_tree).
+# Every absolute path lies inside that root, so a start directory that is a
+# filesystem root adds no root to judge a uv path against. The operator's own file
+# outside the tree reaches uv, and a path inside the tree's own directories is still
+# left out.
+
+
+@pytest.mark.unit
+def test_a_scanners_own_run_started_at_the_filesystem_root_keeps_the_operators_uv_path(
+    tree, tmp_path, spawns, monkeypatch, uv_warnings
+):
+    # uv is not the scanner's own tool, so _run_subprocess starts the command itself
+    # and judges the uv paths against the directory it starts in.
+    start = Path(tmp_path.anchor)
+    operator = tmp_path / "operator" / "constraints.txt"
+    operator.parent.mkdir()
+    operator.write_text("")
+    scanner = _bandit(tree, tmp_path)
+    seen = {}
+    said = {}
+    for label, value in (
+        ("operator", str(operator)),
+        ("inside", str(tree / "constraints.txt")),
+    ):
+        monkeypatch.setenv("UV_CONSTRAINT", value)
+        runs = _direct_runs_of_one_run(scanner, spawns, tmp_path, start)
+        assert [run["cwd"] for run in runs] == [start], [
+            run["command"] for run in spawns.runs
+        ]
+        seen[label] = {_effective(run["env"]).get("UV_CONSTRAINT") for run in runs}
+        # Every line said so far that names the variable.
+        said[label] = [
+            text for _, text in uv_warnings if text.startswith("UV_CONSTRAINT ")
+        ]
+    assert seen["operator"] == {str(operator)}, seen
+    assert said["operator"] == [], said
+    # Control: started in the same directory, a path inside the source tree is still
+    # left out, and named in the warning.
+    assert seen["inside"] == {None}, seen
+    assert said["inside"] == [f"UV_CONSTRAINT {_INSIDE_REASON}"], said
+
+
+@pytest.mark.unit
+def test_a_runners_run_started_at_the_filesystem_root_keeps_the_operators_uv_path(
+    tree, tmp_path, spawns, monkeypatch
+):
+    # The runner judges the uv paths against the directory its run starts in (cwd),
+    # its results directory and the directories its caller names (tree_roots).
+    start = Path(tmp_path.anchor)
+    operator = tmp_path / "operator" / "constraints.txt"
+    operator.parent.mkdir()
+    operator.write_text("")
+    runner = UVToolRunner(uv_executable="/opt/uv")
+    seen = {}
+    for label, value in (
+        ("operator", str(operator)),
+        ("inside", str(tree / "constraints.txt")),
+    ):
+        monkeypatch.setenv("UV_CONSTRAINT", value)
+        before = len(spawns.runs)
+        runner.run_tool(
+            "bandit",
+            cwd=start,
+            results_dir=tmp_path / "results",
+            stdout_preference="return",
+            stderr_preference="return",
+            tree_roots=(tree,),
+        )
+        runs = [run for run in spawns.runs[before:] if _a_tool_run(run["command"])]
+        assert [run["cwd"] for run in runs] == [start], [
+            run["command"] for run in spawns.runs
+        ]
+        seen[label] = {_effective(run["env"]).get("UV_CONSTRAINT") for run in runs}
+    assert seen["operator"] == {str(operator)}, seen
+    # Control: on the same run, a path inside the tree the caller names is still left
+    # out.
+    assert seen["inside"] == {None}, seen
 
 
 # Spellings of a path that name the tree without lying under a root as written.
