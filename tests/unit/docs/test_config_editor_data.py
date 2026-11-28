@@ -1414,7 +1414,12 @@ def _scan_settings_document():
             {"path": FILE_FILTER},
         ],
     }
-    return {"scanners": {"detect-secrets": {"options": {"scan_settings": settings}}}}
+    # Built from the dotted path the tests look the setting up by, so the path is
+    # written once: `settings` is wrapped once per part of it, innermost part first.
+    document = settings
+    for part in reversed(SCAN_SETTINGS.split(".")):
+        document = {part: document}
+    return document
 
 
 def test_the_scan_settings_of_detect_secrets_carry_the_rule_a_load_applies(
