@@ -1309,6 +1309,57 @@ def test_a_planted_file_is_read_back_as_kept_replaced_or_ignored(hook, built, fi
     assert result["fail_on_findings"] == "kept"
 
 
+def test_every_setting_ash_checks_against_a_vocabulary_of_its_own_is_probed(
+    hook, built
+):
+    unprobed = built.report["probe"]["unprobed"]
+    refused = {
+        path: unprobed[path] for path in hook.special_leaves() if path in unprobed
+    }
+    assert refused == {}, refused
+
+
+def test_each_setting_the_probe_leaves_to_the_table_has_a_table_rule(
+    hook, built, fields
+):
+    rules = {rule["id"]: rule for rule in built.block["trust"]}
+    for path in hook.PROBE_EXCLUDED:
+        if path in ("extends", "patch"):
+            continue
+        assert "trust" in fields[path], (
+            f"{path} is left out of the probe and of the table"
+        )
+        assert rules[fields[path]["trust"]]["via"] == "table", path
+
+
+def test_a_list_of_network_scanners_in_a_repository_file_is_kept_only_as_a_limit(
+    hook, built
+):
+    config, _ = hook.load_repository_file(
+        built.workdir, {"sandbox": {"network_scanners": ["bandit"]}}
+    )
+    assert config.sandbox.network_scanners is None
+    assert config.sandbox.network_limit == ["bandit"]
+    rule = next(
+        r for r in built.block["trust"] if r["id"] == "sandbox-network-scanners"
+    )
+    assert (rule["rule"], rule["via"], rule["appliesAt"]) == (
+        "limited",
+        "table",
+        "load",
+    )
+
+
+def test_a_refused_load_is_reported_without_the_build_directory(hook, tmp_path):
+    refused = ValueError(
+        f"refused '{tmp_path}/repository/.ash.yaml': Invalid value at 'x'"
+    )
+    text = hook.failure_text(refused, tmp_path)
+    assert text.startswith("ValueError: refused '<repository>/.ash.yaml'")
+    assert str(tmp_path) not in text
+    assert len(hook.failure_text(ValueError("x" * 1000), tmp_path)) <= 300
+
+
 def test_the_probe_runs_on_the_pinned_host_and_restores_the_environment(
     hook, fields, tmp_path, monkeypatch
 ):

@@ -1622,9 +1622,12 @@ LOCATIONS = ("topLevel", "section")
 #: A value for each pattern the schema holds, for the probes that need one that
 #: matches.
 PATTERN_SAMPLES = {r"^[0-9a-fA-F]{64}$": "0" * 64, r"^[a-zA-Z][\w-]+$": "probe-name"}
-#: Settings the trust probe leaves alone: ASH would import a module, open a base
-#: file or apply a patch for them while loading.
-PROBE_EXCLUDED = ("ash_plugin_modules", "extends", "patch")
+#: Settings the trust probe leaves alone. ASH would import a module, open a base file
+#: or apply a patch for ``ash_plugin_modules``, ``extends`` and ``patch`` while loading.
+#: A load reads ``sandbox.network_scanners`` as replaced by the operator's list,
+#: although ASH also keeps the repository's list as a limit that a load does not show.
+#: The table has a row for ``ash_plugin_modules`` and for ``sandbox.network_scanners``.
+PROBE_EXCLUDED = ("ash_plugin_modules", "extends", "patch", "sandbox.network_scanners")
 #: Settings whose value a generic planting cannot make, because ASH checks it against
 #: a vocabulary of its own, with values it accepts to plant instead.
 PROBE_VALUES: dict[str, list[Any]] = {
@@ -1632,6 +1635,8 @@ PROBE_VALUES: dict[str, list[Any]] = {
     "scanners.cfn-lint.options.regions": [["us-east-1"]],
     "scanners.cfn-lint.options.ignore_checks": [["W1001"]],
     "scanners.cfn-lint.options.include_checks": [["W1001"]],
+    "global_settings.mcp.runtime_overrides.denied_paths": [["/probe"]],
+    "reporters.unused-suppressions.options.output_format": ["markdown"],
 }
 MAX_ROUNDS = 6
 
@@ -2035,6 +2040,13 @@ def read_back(
     return result
 
 
+def failure_text(error: Exception, workdir: Path) -> str:
+    """What a refused load said, without the directory of the planted file: that
+    directory belongs to this build, and the reason is what a reader needs."""
+    text = str(error).replace(str(Path(workdir) / "repository"), "<repository>")
+    return f"{type(error).__name__}: {text}"[:300]
+
+
 def probe_round(
     fields: Mapping[str, Mapping[str, Any]],
     workdir: Path,
@@ -2053,7 +2065,7 @@ def probe_round(
             config, out = load_repository_file(workdir, document)
         except Exception as error:
             if len(batch) == 1:
-                unprobed[next(iter(batch))] = f"{type(error).__name__}: {error}"[:200]
+                unprobed[next(iter(batch))] = failure_text(error, workdir)
             return None
         return read_back(config, out, batch, defaults)
 
@@ -2299,6 +2311,31 @@ def trust_table() -> list[Row]:
             "automated_security_helper/config/plugin_module_trust.py",
             "confine_plugin_modules",
             "refusal_reason(",
+        ),
+        Row(
+            "sandbox-mode",
+            ("sandbox.mode",),
+            "limited",
+            ("a sandbox mode, when no setting of the operator turns the sandbox on",),
+            "the operator's mode, when the operator's settings turn the sandbox on",
+            "load",
+            "automated_security_helper/config/sandbox_grants.py",
+            "confine_sandbox_grants",
+            "sandbox.mode = trusted.mode",
+        ),
+        Row(
+            "sandbox-network-scanners",
+            ("sandbox.network_scanners",),
+            "limited",
+            ("a list, which takes the network from each scanner it does not name",),
+            (
+                "the operator's list gives a scanner its network; a repository's "
+                "list only takes it away"
+            ),
+            "load",
+            "automated_security_helper/config/sandbox_grants.py",
+            "confine_sandbox_grants",
+            "sandbox.network_limit = ",
         ),
         Row(
             "off-host-reporters",
