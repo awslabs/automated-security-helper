@@ -126,18 +126,20 @@
   scan's results and its recounts under the `scanners` and `severities` filters, the
   progress of a scan and the summary of a completed one), and the counts of a workspace
   run (a project's `finding_count` and `policy_origin_finding_count`, and the per-scanner
-  `finding_count` of the unified results). The listings show it as information, with its
-  scanner, rule, message, file and `result_kind` and no severity: the HTML report lists it
-  under Information, the Markdown and text reports list it in an Information table when
-  `include_findings_table` is on (it is off by default), `ash inspect findings` counts it
-  as information, and the CSV and flat JSON rows gain a `result_kind` field. The MCP findings
+  `finding_count` of the unified results). The listings show it as information. The HTML
+  report lists it under Information, and the Markdown and text reports list it in an
+  Information table when `include_findings_table` is on (it is off by default), each with
+  its scanner, rule, message, file and `result_kind` and no severity. `ash inspect findings`
+  counts it as information. The CSV and flat JSON rows keep it, with its severity, and gain
+  a `result_kind` field. The MCP findings
   list holds actionable findings only, so it never lists it, and `explain_finding` returns
   its `result_kind` with a `severity_rationale` saying it counts at no threshold. A diff, a
   baseline and a trend never see it as new, gone, moved or changed, history rows record
   whether each result states a finding, and an older record falls back to its kind and
-  severity. A trend boundary between a record written before ASH stored the kind and a
-  newer one carries a warning and is not like for like, because the older record counts
-  such results.
+  severity. A trend boundary between a record written before ASH stored the kind, when it
+  holds rows, and a newer one carries a warning and is not like for like, because the
+  older record counts such results. A newer record holds `result_kind_recorded`, which
+  says that its rows name the kind, so this holds when it has no rows.
   Duplicate clusters leave it out. The ASFF, OCSF, GitLab SAST and GitHub code scanning
   exports leave it out too, and so does the Bedrock summary's `actionable_only`. ASFF
   still sends a suppressed one, archived, and GitHub code scanning still leaves out `open`
