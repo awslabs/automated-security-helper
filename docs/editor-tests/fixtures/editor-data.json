@@ -1,0 +1,1186 @@
+{
+  "constants": {
+    "aliasRefusal": "found the alias *{anchor}; ASH configuration does not accept YAML aliases, so write the value out where it is used",
+    "deprecatedKeys": {
+      "expiration": "expires"
+    },
+    "internalSectionFields": {
+      "converters": [
+        "install_timeout",
+        "name",
+        "tool_version"
+      ],
+      "reporters": [
+        "extension",
+        "name"
+      ],
+      "scanners": [
+        "extension",
+        "install_timeout",
+        "name",
+        "tool_version"
+      ]
+    },
+    "invalidTopLevelFieldWarning": "Top-level field '{field}' is an internal field and should not be in user configs",
+    "invalidTopLevelFields": [
+      "build"
+    ],
+    "missingProjectNameMessage": "Fixture text: set project_name.",
+    "requiredTopLevelFields": [
+      "project_name"
+    ],
+    "schemaComment": "# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json"
+  },
+  "contract": "ash-config-editor-data/1",
+  "env": {
+    "allowlist": [
+      "AWS_DEFAULT_REGION",
+      "AWS_PROFILE",
+      "AWS_REGION"
+    ],
+    "explicitTag": "!ENV ",
+    "prefix": "ASH_",
+    "referencePattern": {
+      "flags": "u",
+      "js": "^\\$\\{([\\p{L}\\p{N}_]+)(:?)([^}\\r\\n]*)\\}",
+      "python": "^\\${(\\w+)(:?)([^}\\r\\n]*)}"
+    },
+    "refusedNames": [
+      "ASH_CONFIG"
+    ],
+    "secretSuffixes": [
+      "_TOKEN"
+    ],
+    "vectors": [
+      [
+        "ASH_PROJECT_NAME",
+        false
+      ],
+      [
+        "AWS_REGION",
+        false
+      ],
+      [
+        "ASH_CONFIG",
+        true
+      ],
+      [
+        "HOME",
+        true
+      ]
+    ]
+  },
+  "envProbe": {
+    "classes": {
+      "boolean": {
+        "section": false,
+        "topLevel": false
+      },
+      "constrainedString": {
+        "section": true,
+        "topLevel": true
+      },
+      "enum": {
+        "section": true,
+        "topLevel": true
+      },
+      "integer": {
+        "section": false,
+        "topLevel": false
+      },
+      "number": {
+        "section": false,
+        "topLevel": false
+      },
+      "string": {
+        "section": true,
+        "topLevel": true
+      }
+    },
+    "route": "file-load"
+  },
+  "fields": {
+    "ash_plugin_modules": {
+      "default": [],
+      "description": "Plugin modules to load.",
+      "envAccepted": false,
+      "envRef": false,
+      "hidden": false,
+      "key": "ash_plugin_modules",
+      "kind": "stringList",
+      "nullable": false,
+      "order": 4,
+      "parent": null,
+      "path": "ash_plugin_modules",
+      "required": false,
+      "schemaPointer": "#/$defs/AshConfig/properties/ash_plugin_modules",
+      "trust": "plugin-modules"
+    },
+    "converters": {
+      "description": null,
+      "envAccepted": false,
+      "envRef": false,
+      "hidden": false,
+      "key": "converters",
+      "kind": "object",
+      "nullable": false,
+      "order": 8,
+      "parent": null,
+      "path": "converters",
+      "required": false,
+      "schemaPointer": "#/$defs/AshConfig/properties/converters"
+    },
+    "converters.archive": {
+      "description": "Configure the options for the archive converter.",
+      "envAccepted": false,
+      "envRef": false,
+      "hidden": false,
+      "key": "archive",
+      "kind": "section",
+      "nullable": false,
+      "order": 0,
+      "parent": "converters",
+      "path": "converters.archive",
+      "required": false,
+      "schemaPointer": "#/$defs/ConverterConfigSegment/properties/archive"
+    },
+    "converters.archive.enabled": {
+      "default": true,
+      "description": null,
+      "envAccepted": false,
+      "envRef": false,
+      "hidden": false,
+      "key": "enabled",
+      "kind": "boolean",
+      "nullable": false,
+      "order": 0,
+      "parent": "converters.archive",
+      "path": "converters.archive.enabled",
+      "required": false,
+      "schemaPointer": "#/$defs/ArchiveConverterConfig/properties/enabled"
+    },
+    "converters.archive.options": {
+      "description": null,
+      "envAccepted": false,
+      "envRef": false,
+      "hidden": false,
+      "key": "options",
+      "kind": "object",
+      "nullable": false,
+      "order": 1,
+      "parent": "converters.archive",
+      "path": "converters.archive.options",
+      "required": false,
+      "schemaPointer": "#/$defs/ArchiveConverterConfig/properties/options"
+    },
+    "converters.archive.options.max_compression_ratio": {
+      "bounds": {
+        "exclusiveMinimum": 0
+      },
+      "description": "Largest expanded-to-packed size ratio to extract.",
+      "envAccepted": false,
+      "envRef": true,
+      "hidden": false,
+      "key": "max_compression_ratio",
+      "kind": "number",
+      "nullable": false,
+      "order": 0,
+      "parent": "converters.archive.options",
+      "path": "converters.archive.options.max_compression_ratio",
+      "required": false,
+      "schemaPointer": "#/$defs/ArchiveConverterConfigOptions/properties/max_compression_ratio",
+      "trust": "archive-limits"
+    },
+    "extends": {
+      "description": "Config files this one builds on.",
+      "envAccepted": false,
+      "envRef": false,
+      "hidden": false,
+      "key": "extends",
+      "kind": "stringOrList",
+      "nullable": true,
+      "order": 3,
+      "parent": null,
+      "path": "extends",
+      "required": false,
+      "schemaPointer": "#/$defs/AshConfig/properties/extends"
+    },
+    "fail_on_findings": {
+      "default": true,
+      "description": "Exit non-zero when findings at or above the threshold remain.",
+      "envAccepted": false,
+      "envRef": true,
+      "hidden": false,
+      "key": "fail_on_findings",
+      "kind": "boolean",
+      "nullable": false,
+      "order": 1,
+      "parent": null,
+      "path": "fail_on_findings",
+      "required": false,
+      "schemaPointer": "#/$defs/AshConfig/properties/fail_on_findings"
+    },
+    "global_settings": {
+      "description": null,
+      "envAccepted": false,
+      "envRef": false,
+      "hidden": false,
+      "key": "global_settings",
+      "kind": "object",
+      "nullable": false,
+      "order": 6,
+      "parent": null,
+      "path": "global_settings",
+      "required": false,
+      "schemaPointer": "#/$defs/AshConfig/properties/global_settings"
+    },
+    "global_settings.severity_threshold": {
+      "anchor": "reference/configuration/#global_settings.severity_threshold",
+      "default": "MEDIUM",
+      "description": "Lowest severity that fails the scan.",
+      "enum": [
+        "ALL",
+        "LOW",
+        "MEDIUM",
+        "HIGH",
+        "CRITICAL"
+      ],
+      "envAccepted": true,
+      "envRef": true,
+      "hidden": false,
+      "hostDefault": {
+        "dependsOn": "environment",
+        "name": "ASH_DEFAULT_SEVERITY_LEVEL"
+      },
+      "key": "severity_threshold",
+      "kind": "enum",
+      "nullable": false,
+      "order": 0,
+      "parent": "global_settings",
+      "path": "global_settings.severity_threshold",
+      "required": false,
+      "schemaPointer": "#/$defs/GlobalSettings/properties/severity_threshold"
+    },
+    "global_settings.suppressions": {
+      "default": [],
+      "description": "Findings to accept.",
+      "envAccepted": false,
+      "envRef": false,
+      "hidden": false,
+      "key": "suppressions",
+      "kind": "objectList",
+      "nullable": false,
+      "order": 1,
+      "parent": "global_settings",
+      "path": "global_settings.suppressions",
+      "required": false,
+      "schemaPointer": "#/$defs/GlobalSettings/properties/suppressions"
+    },
+    "global_settings.suppressions[].expires": {
+      "description": "Date the suppression stops applying.",
+      "envAccepted": false,
+      "envRef": false,
+      "hidden": false,
+      "key": "expires",
+      "kind": "string",
+      "nullable": true,
+      "order": 3,
+      "parent": "global_settings.suppressions",
+      "path": "global_settings.suppressions[].expires",
+      "required": false,
+      "schemaPointer": "#/$defs/AshSuppression/properties/expires"
+    },
+    "global_settings.suppressions[].path": {
+      "bounds": {
+        "minLength": 1
+      },
+      "description": "File the suppression covers.",
+      "envAccepted": false,
+      "envRef": false,
+      "hidden": false,
+      "key": "path",
+      "kind": "string",
+      "nullable": false,
+      "order": 0,
+      "parent": "global_settings.suppressions",
+      "path": "global_settings.suppressions[].path",
+      "required": true,
+      "schemaPointer": "#/$defs/AshSuppression/properties/path"
+    },
+    "global_settings.suppressions[].reason": {
+      "bounds": {
+        "minLength": 1
+      },
+      "description": "Why the finding is safe to accept.",
+      "envAccepted": false,
+      "envRef": false,
+      "hidden": false,
+      "key": "reason",
+      "kind": "string",
+      "nullable": false,
+      "order": 2,
+      "parent": "global_settings.suppressions",
+      "path": "global_settings.suppressions[].reason",
+      "required": true,
+      "schemaPointer": "#/$defs/AshSuppression/properties/reason"
+    },
+    "global_settings.suppressions[].rule_id": {
+      "description": "Rule the suppression covers.",
+      "envAccepted": false,
+      "envRef": false,
+      "hidden": false,
+      "key": "rule_id",
+      "kind": "string",
+      "nullable": true,
+      "order": 1,
+      "parent": "global_settings.suppressions",
+      "path": "global_settings.suppressions[].rule_id",
+      "required": false,
+      "schemaPointer": "#/$defs/AshSuppression/properties/rule_id"
+    },
+    "output_formats": {
+      "description": "Report formats to write.",
+      "enum": [
+        "sarif",
+        "html",
+        "json"
+      ],
+      "envAccepted": false,
+      "envRef": false,
+      "hidden": false,
+      "key": "output_formats",
+      "kind": "enumList",
+      "nullable": true,
+      "order": 2,
+      "parent": null,
+      "path": "output_formats",
+      "required": false,
+      "schemaPointer": "#/$defs/AshConfig/properties/output_formats"
+    },
+    "patch": {
+      "description": "Changes applied to the files this one extends.",
+      "envAccepted": false,
+      "envRef": false,
+      "hidden": false,
+      "key": "patch",
+      "kind": "raw",
+      "nullable": true,
+      "order": 5,
+      "parent": null,
+      "path": "patch",
+      "required": false,
+      "schemaPointer": "#/$defs/AshConfig/properties/patch"
+    },
+    "project_name": {
+      "anchor": "reference/configuration/#project_name",
+      "default": "ash-scan",
+      "description": "The project's name.",
+      "envAccepted": true,
+      "envRef": true,
+      "hidden": false,
+      "hostDefault": {
+        "dependsOn": "environment",
+        "name": "ASH_PROJECT_NAME"
+      },
+      "key": "project_name",
+      "kind": "string",
+      "nullable": false,
+      "order": 0,
+      "parent": null,
+      "path": "project_name",
+      "required": false,
+      "schemaPointer": "#/$defs/AshConfig/properties/project_name"
+    },
+    "scanners": {
+      "description": null,
+      "envAccepted": false,
+      "envRef": false,
+      "hidden": false,
+      "key": "scanners",
+      "kind": "object",
+      "nullable": false,
+      "order": 7,
+      "parent": null,
+      "path": "scanners",
+      "required": false,
+      "schemaPointer": "#/$defs/AshConfig/properties/scanners"
+    },
+    "scanners.bandit": {
+      "anchor": "reference/scanners/#scanners.bandit",
+      "description": "Configure the options for the bandit scanner.",
+      "envAccepted": false,
+      "envRef": false,
+      "hidden": false,
+      "key": "bandit",
+      "kind": "section",
+      "nullable": false,
+      "order": 0,
+      "parent": "scanners",
+      "path": "scanners.bandit",
+      "required": false,
+      "schemaPointer": "#/$defs/ScannerConfigSegment/properties/bandit"
+    },
+    "scanners.bandit.enabled": {
+      "default": true,
+      "description": null,
+      "envAccepted": false,
+      "envRef": false,
+      "hidden": false,
+      "key": "enabled",
+      "kind": "boolean",
+      "nullable": false,
+      "order": 0,
+      "parent": "scanners.bandit",
+      "path": "scanners.bandit.enabled",
+      "required": false,
+      "schemaPointer": "#/$defs/BanditScannerConfig/properties/enabled"
+    },
+    "scanners.bandit.options": {
+      "description": null,
+      "envAccepted": false,
+      "envRef": false,
+      "hidden": false,
+      "key": "options",
+      "kind": "object",
+      "nullable": false,
+      "order": 1,
+      "parent": "scanners.bandit",
+      "path": "scanners.bandit.options",
+      "required": false,
+      "schemaPointer": "#/$defs/BanditScannerConfig/properties/options"
+    },
+    "scanners.bandit.options.confidence_level": {
+      "default": "all",
+      "description": "Lowest confidence to report.",
+      "enum": [
+        "all",
+        "low",
+        "medium",
+        "high"
+      ],
+      "envAccepted": true,
+      "envRef": true,
+      "hidden": false,
+      "key": "confidence_level",
+      "kind": "enum",
+      "nullable": false,
+      "order": 0,
+      "parent": "scanners.bandit.options",
+      "path": "scanners.bandit.options.confidence_level",
+      "required": false,
+      "schemaPointer": "#/$defs/BanditScannerConfigOptions/properties/confidence_level"
+    },
+    "scanners.bandit.options.scan_timeout": {
+      "bounds": {
+        "minimum": 1
+      },
+      "description": "Seconds before the scanner is stopped.",
+      "envAccepted": false,
+      "envRef": true,
+      "hidden": false,
+      "key": "scan_timeout",
+      "kind": "integer",
+      "nullable": true,
+      "order": 1,
+      "parent": "scanners.bandit.options",
+      "path": "scanners.bandit.options.scan_timeout",
+      "required": false,
+      "schemaPointer": "#/$defs/BanditScannerConfigOptions/properties/scan_timeout"
+    },
+    "scanners.opengrep": {
+      "description": "Configure the options for the opengrep scanner.",
+      "envAccepted": false,
+      "envRef": false,
+      "hidden": false,
+      "key": "opengrep",
+      "kind": "section",
+      "nullable": false,
+      "order": 1,
+      "parent": "scanners",
+      "path": "scanners.opengrep",
+      "required": false,
+      "schemaPointer": "#/$defs/ScannerConfigSegment/properties/opengrep"
+    },
+    "scanners.opengrep.enabled": {
+      "default": true,
+      "description": null,
+      "envAccepted": false,
+      "envRef": false,
+      "hidden": false,
+      "hostDefault": {
+        "dependsOn": "platform",
+        "name": "windows"
+      },
+      "key": "enabled",
+      "kind": "boolean",
+      "nullable": false,
+      "order": 0,
+      "parent": "scanners.opengrep",
+      "path": "scanners.opengrep.enabled",
+      "required": false,
+      "schemaPointer": "#/$defs/OpengrepScannerConfig/properties/enabled"
+    },
+    "scanners.opengrep.options": {
+      "description": null,
+      "envAccepted": false,
+      "envRef": false,
+      "hidden": false,
+      "key": "options",
+      "kind": "object",
+      "nullable": false,
+      "order": 1,
+      "parent": "scanners.opengrep",
+      "path": "scanners.opengrep.options",
+      "required": false,
+      "schemaPointer": "#/$defs/OpengrepScannerConfig/properties/options"
+    },
+    "scanners.opengrep.options.sha256": {
+      "description": "Expected sha256 of the binary per platform.",
+      "envAccepted": false,
+      "envRef": false,
+      "hidden": false,
+      "key": "sha256",
+      "kind": "map",
+      "mapKeys": {
+        "enum": [
+          "linux-x86_64",
+          "linux-arm64",
+          "darwin-arm64"
+        ],
+        "envRef": true
+      },
+      "nullable": false,
+      "order": 0,
+      "parent": "scanners.opengrep.options",
+      "path": "scanners.opengrep.options.sha256",
+      "required": false,
+      "schemaPointer": "#/$defs/OpengrepScannerConfigOptions/properties/sha256"
+    },
+    "scanners.opengrep.options.sha256{}": {
+      "description": null,
+      "envAccepted": true,
+      "envRef": true,
+      "hidden": false,
+      "key": "sha256",
+      "kind": "string",
+      "nullable": false,
+      "order": 0,
+      "parent": "scanners.opengrep.options.sha256",
+      "path": "scanners.opengrep.options.sha256{}",
+      "patternRef": "^[0-9a-fA-F]{64}$",
+      "required": false,
+      "schemaPointer": "#/$defs/OpengrepScannerConfigOptions/properties/sha256/additionalProperties"
+    },
+    "scanners.zizmor": {
+      "description": "Configure the options for the zizmor scanner.",
+      "envAccepted": false,
+      "envRef": false,
+      "hidden": false,
+      "key": "zizmor",
+      "kind": "section",
+      "nullable": false,
+      "order": 2,
+      "parent": "scanners",
+      "path": "scanners.zizmor",
+      "required": false,
+      "schemaPointer": "#/$defs/ScannerConfigSegment/properties/zizmor"
+    },
+    "scanners.zizmor.enabled": {
+      "default": true,
+      "description": null,
+      "envAccepted": false,
+      "envRef": false,
+      "hidden": false,
+      "key": "enabled",
+      "kind": "boolean",
+      "nullable": false,
+      "order": 0,
+      "parent": "scanners.zizmor",
+      "path": "scanners.zizmor.enabled",
+      "required": false,
+      "schemaPointer": "#/$defs/ZizmorScannerConfig/properties/enabled"
+    },
+    "scanners.zizmor.options": {
+      "description": null,
+      "envAccepted": false,
+      "envRef": false,
+      "hidden": false,
+      "key": "options",
+      "kind": "object",
+      "nullable": false,
+      "order": 1,
+      "parent": "scanners.zizmor",
+      "path": "scanners.zizmor.options",
+      "required": false,
+      "schemaPointer": "#/$defs/ZizmorScannerConfig/properties/options"
+    },
+    "scanners.zizmor.options.online_audits": {
+      "default": false,
+      "description": "Run the audits that call GitHub.",
+      "envAccepted": false,
+      "envRef": true,
+      "hidden": false,
+      "key": "online_audits",
+      "kind": "boolean",
+      "nullable": false,
+      "order": 0,
+      "parent": "scanners.zizmor.options",
+      "path": "scanners.zizmor.options.online_audits",
+      "required": false,
+      "schemaPointer": "#/$defs/ZizmorScannerConfigOptions/properties/online_audits",
+      "trust": "zizmor-online-audits"
+    }
+  },
+  "groups": [
+    {
+      "id": "project",
+      "paths": [
+        "project_name",
+        "fail_on_findings",
+        "global_settings.severity_threshold"
+      ],
+      "title": "Project and gate"
+    },
+    {
+      "id": "scanners",
+      "paths": [
+        "scanners"
+      ],
+      "title": "Scanners"
+    },
+    {
+      "id": "reporters",
+      "paths": [
+        "output_formats"
+      ],
+      "title": "Reporters"
+    },
+    {
+      "id": "converters",
+      "paths": [
+        "converters"
+      ],
+      "title": "Converters"
+    },
+    {
+      "id": "scope",
+      "paths": [
+        "global_settings.suppressions"
+      ],
+      "title": "Scope and exceptions"
+    },
+    {
+      "id": "plugins",
+      "paths": [
+        "ash_plugin_modules",
+        "extends",
+        "patch"
+      ],
+      "title": "Plugins and composition"
+    }
+  ],
+  "optIn": [
+    {
+      "anchor": "reference/scanners/#scanners.snyk-code",
+      "kind": "scanner",
+      "module": "automated_security_helper.plugin_modules.ash_snyk_plugins",
+      "name": "snyk-code"
+    },
+    {
+      "kind": "reporter",
+      "module": "automated_security_helper.plugin_modules.ash_aws_plugins",
+      "name": "cloudwatch-logs"
+    }
+  ],
+  "patterns": {
+    "^(!ENV )?\\$\\{\\w+(:.*)?\\}$": {
+      "flags": "u",
+      "js": "^(!ENV )?\\$\\{[\\p{L}\\p{N}_]+(:[^\\n]*)?\\}(?=\\n?$)",
+      "python": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$"
+    },
+    "^[0-9a-fA-F]{64}$": {
+      "flags": "u",
+      "js": "^[0-9a-fA-F]{64}(?=\\n?$)",
+      "python": "^[0-9a-fA-F]{64}$"
+    },
+    "^[a-zA-Z][\\w-]+$": {
+      "flags": "u",
+      "js": "^[a-zA-Z][\\p{L}\\p{N}_-]+(?=\\n?$)",
+      "python": "^[a-zA-Z][\\w-]+$"
+    }
+  },
+  "sections": {
+    "converters": [
+      {
+        "category": null,
+        "name": "archive"
+      }
+    ],
+    "reporters": [],
+    "scanners": [
+      {
+        "category": "Code scanner",
+        "name": "bandit"
+      },
+      {
+        "category": "Code scanner",
+        "name": "opengrep"
+      },
+      {
+        "category": "Workflow scanner",
+        "name": "zizmor"
+      }
+    ]
+  },
+  "source": {
+    "ashVersion": "0.0.0-fixture",
+    "docsVersion": "main",
+    "generator": "docs/hooks/config_editor.py",
+    "schemaPath": "automated_security_helper/schemas/AshConfig.json",
+    "schemaSha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "spelling": {
+    "canonical": {
+      "converters": [
+        "archive"
+      ],
+      "reporters": [],
+      "scanners": [
+        "bandit",
+        "opengrep",
+        "zizmor"
+      ]
+    },
+    "vectors": [
+      [
+        "scanners",
+        "bandit",
+        "bandit"
+      ],
+      [
+        "scanners",
+        "no-such-scanner",
+        null
+      ]
+    ]
+  },
+  "trust": [
+    {
+      "appliesAt": "scanner",
+      "id": "zizmor-online-audits",
+      "instead": "zizmor runs offline, without the GitHub token",
+      "keep": [
+        "false"
+      ],
+      "paths": [
+        "scanners.zizmor.options.online_audits"
+      ],
+      "rule": "limited",
+      "source": "automated_security_helper/plugin_modules/ash_builtin/scanners/zizmor_scanner.py:1190-1220",
+      "via": "table"
+    },
+    {
+      "appliesAt": "load",
+      "id": "archive-limits",
+      "instead": "the operator's value",
+      "keep": [
+        "a value at or below the operator's"
+      ],
+      "paths": [
+        "converters.archive.options.max_compression_ratio"
+      ],
+      "rule": "limited",
+      "source": "automated_security_helper/config/archive_limits.py:94-178",
+      "via": "probe"
+    },
+    {
+      "appliesAt": "load",
+      "id": "plugin-modules",
+      "instead": "the entry is dropped",
+      "keep": [
+        "ASH's own package",
+        "a module installed outside the scanned tree and every checkout"
+      ],
+      "paths": [
+        "ash_plugin_modules"
+      ],
+      "rule": "limited",
+      "source": "automated_security_helper/config/plugin_module_trust.py:4-34",
+      "via": "table"
+    }
+  ],
+  "validationSchema": {
+    "$defs": {
+      "ArchiveConverterConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "options": {
+            "$ref": "#/$defs/ArchiveConverterConfigOptions"
+          }
+        },
+        "type": "object"
+      },
+      "ArchiveConverterConfigOptions": {
+        "additionalProperties": false,
+        "properties": {
+          "max_compression_ratio": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "AshConfig": {
+        "properties": {
+          "ash_plugin_modules": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "converters": {
+            "$ref": "#/$defs/ConverterConfigSegment"
+          },
+          "extends": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fail_on_findings": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+                "type": "string"
+              }
+            ]
+          },
+          "global_settings": {
+            "$ref": "#/$defs/GlobalSettings"
+          },
+          "output_formats": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/$defs/ExportFormat"
+                },
+                "type": "array"
+              },
+              {
+                "$ref": "#/$defs/ExportFormat"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "patch": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "project_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+                "type": "string"
+              }
+            ]
+          },
+          "scanners": {
+            "$ref": "#/$defs/ScannerConfigSegment"
+          }
+        },
+        "type": "object"
+      },
+      "AshSuppression": {
+        "additionalProperties": false,
+        "properties": {
+          "expires": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "path": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "reason": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "rule_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "path",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "BanditScannerConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "options": {
+            "$ref": "#/$defs/BanditScannerConfigOptions"
+          }
+        },
+        "type": "object"
+      },
+      "BanditScannerConfigOptions": {
+        "additionalProperties": false,
+        "properties": {
+          "confidence_level": {
+            "anyOf": [
+              {
+                "enum": [
+                  "all",
+                  "low",
+                  "medium",
+                  "high"
+                ],
+                "type": "string"
+              },
+              {
+                "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+                "type": "string"
+              }
+            ]
+          },
+          "scan_timeout": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ConverterConfigSegment": {
+        "properties": {
+          "archive": {
+            "$ref": "#/$defs/ArchiveConverterConfig"
+          }
+        },
+        "type": "object"
+      },
+      "ExportFormat": {
+        "enum": [
+          "sarif",
+          "html",
+          "json"
+        ],
+        "type": "string"
+      },
+      "GlobalSettings": {
+        "additionalProperties": false,
+        "properties": {
+          "severity_threshold": {
+            "anyOf": [
+              {
+                "enum": [
+                  "ALL",
+                  "LOW",
+                  "MEDIUM",
+                  "HIGH",
+                  "CRITICAL"
+                ],
+                "type": "string"
+              },
+              {
+                "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+                "type": "string"
+              }
+            ]
+          },
+          "suppressions": {
+            "items": {
+              "$ref": "#/$defs/AshSuppression"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "OpengrepScannerConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "options": {
+            "$ref": "#/$defs/OpengrepScannerConfigOptions"
+          }
+        },
+        "type": "object"
+      },
+      "OpengrepScannerConfigOptions": {
+        "additionalProperties": false,
+        "properties": {
+          "sha256": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-fA-F]{64}$",
+                  "type": "string"
+                },
+                {
+                  "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+                  "type": "string"
+                }
+              ]
+            },
+            "propertyNames": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "linux-x86_64",
+                    "linux-arm64",
+                    "darwin-arm64"
+                  ]
+                },
+                {
+                  "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+                  "type": "string"
+                }
+              ]
+            },
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "ScannerConfigSegment": {
+        "additionalProperties": {
+          "anyOf": [
+            {},
+            {
+              "$ref": "#/$defs/ScannerPluginConfigBase"
+            }
+          ]
+        },
+        "properties": {
+          "bandit": {
+            "$ref": "#/$defs/BanditScannerConfig"
+          },
+          "opengrep": {
+            "$ref": "#/$defs/OpengrepScannerConfig"
+          },
+          "zizmor": {
+            "$ref": "#/$defs/ZizmorScannerConfig"
+          }
+        },
+        "type": "object"
+      },
+      "ScannerPluginConfigBase": {
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "pattern": "^[a-zA-Z][\\w-]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ZizmorScannerConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "options": {
+            "$ref": "#/$defs/ZizmorScannerConfigOptions"
+          }
+        },
+        "type": "object"
+      },
+      "ZizmorScannerConfigOptions": {
+        "additionalProperties": false,
+        "properties": {
+          "online_audits": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      }
+    },
+    "$ref": "#/$defs/AshConfig"
+  }
+}
