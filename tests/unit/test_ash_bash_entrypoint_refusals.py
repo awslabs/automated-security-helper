@@ -1447,7 +1447,7 @@ def test_quoting_text_and_the_value_it_quotes_are_shown_apart(
     """The ASH_CONFIG warning and two refusals, each given both values.
 
     The warning fires for a command the config handling does not cover
-    (report); for a scan, an ASH_CONFIG that names no file is the config
+    (results report); for a scan, an ASH_CONFIG that names no file is the config
     refusal, with the value shown the same way.
     """
     lines = []
@@ -1457,6 +1457,7 @@ def test_quoting_text_and_the_value_it_quotes_are_shown_apart(
                 "--no-build",
                 "--source-dir",
                 "src",
+                "results",
                 "report",
                 OCI_RUNNER=str(bare_path / "recording-runner"),
                 ASH_CONFIG=value,

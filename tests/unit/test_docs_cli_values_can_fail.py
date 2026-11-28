@@ -118,16 +118,16 @@ CLEAN_VALUES = f"""# Values
 ash scan fs . --mode local --log-level QUIET --strategy sequential --build-target ci
 ash scan fs . --sandbox AUTO --phases convert --phases scan
 ash scan fs . --log-level=DEBUG --mode=precommit
-ash scan fs . --scanners {SCANNER} --exclude-scanners {SCANNER},{SCANNER}
-ash scan fs . --scanners {SCANNER.upper()} --output-formats sarif,junitxml -f html --format text
-ash merge --results a --results b --output-formats sarif
-ash report --format {REPORTER}
-ash report --format {REPORTER.upper()}
+ash scan fs . --only-scanners {SCANNER} --exclude-scanners {SCANNER},{SCANNER}
+ash scan fs . --only-scanners {SCANNER.upper()} --output-formats sarif,junitxml -f html --format text
+ash results merge --results a --results b --output-formats sarif
+ash results report --format {REPORTER}
+ash results report --format {REPORTER.upper()}
 ash dependencies install --tool {SCANNER} --tool {REPORTER} -T {CONVERTER}
-ash scan fs . --mode "$MODE" --scanners "${{SCANNERS}}"
-ash scan fs . --ash-plugin-modules acme_plugins --scanners acme-scanner
-ash report --format acme-format --config-overrides 'ash_plugin_modules+=[acme_plugins]'
-ash scan fs . --ash-plugin-modules automated_security_helper.plugin_modules.x --scanners {SCANNER}
+ash scan fs . --mode "$MODE" --only-scanners "${{SCANNERS}}"
+ash scan fs . --ash-plugin-modules acme_plugins --only-scanners acme-scanner
+ash results report --format acme-format --config-overrides 'ash_plugin_modules+=[acme_plugins]'
+ash scan fs . --ash-plugin-modules automated_security_helper.plugin_modules.x --only-scanners {SCANNER}
 {FENCE}
 
 <!-- doctest: illustrative reason="shows the synopsis with placeholders" -->
@@ -135,7 +135,7 @@ ash scan fs . --ash-plugin-modules automated_security_helper.plugin_modules.x --
 ash scan fs . --log-level <level> --mode <mode>
 {FENCE}
 
-Run `ash scan fs . --mode container` or `ash scan fs . --mode <mode>`, and `ash report --format {REPORTER}`.
+Run `ash scan fs . --mode container` or `ash scan fs . --mode <mode>`, and `ash results report --format {REPORTER}`.
 """
 
 VALUE_DEFECTS = [
@@ -356,7 +356,7 @@ def test_a_run_block_that_expects_the_usage_error_may_show_a_refused_value(
     # ... and on a command whose exit 2 is the findings code, it is still reported.
     scan_text = (
         f"<!-- doctest: run expect-exit=2 -->\n{FENCE}bash\n"
-        f"ash scan fs . --scanners banditt --offline\n{FENCE}\n"
+        f"ash scan fs . --only-scanners banditt --offline\n{FENCE}\n"
     )
     _assert_reports(_check(cli_root, scan_text), "named 'banditt'", 3)
 
@@ -435,7 +435,7 @@ pipeline {{
             --fail-on-findings
         '''
         sh "ash --version"
-        sh(script: 'ash report --format {REPORTER}', returnStatus: true)
+        sh(script: 'ash results report --format {REPORTER}', returnStatus: true)
       }}
     }}
   }}

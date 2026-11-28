@@ -482,7 +482,9 @@ def _shipped_plugin_options(attribute: str) -> Dict[str, Set[str]]:
 
 def _ash_environment(cwd: Path, **env: str) -> Dict[str, str]:
     """The caller's environment with a private home directory under ``cwd``, no
-    network installs, no ``ASH_CONFIG``, and ``env`` on top.
+    network installs, no ``ASH_CONFIG`` or ``ASH_SCANNERS`` (``--add-scanners`` reads
+    no variable, so one the caller exported would add scanners to a run that asked
+    for its own), and ``env`` on top.
 
     uv's cache and tool directories point into the same home, replacing any the
     caller's environment carries (``_private_home`` points those at the fixture
@@ -500,7 +502,13 @@ def _ash_environment(cwd: Path, **env: str) -> Dict[str, str]:
         "PIP_NO_INDEX": "1",
         **_uv_dirs(home),
     }
-    for name in ("ASH_CONFIG", "XDG_BIN_HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME"):
+    for name in (
+        "ASH_CONFIG",
+        "ASH_SCANNERS",
+        "XDG_BIN_HOME",
+        "XDG_CACHE_HOME",
+        "XDG_CONFIG_HOME",
+    ):
         environment.pop(name, None)
     return checkout_env({**environment, **env}, root=_IMPORTED_ROOT)
 
@@ -2241,7 +2249,6 @@ def test_a_workspace_run_gives_the_error_for_a_missing_setting_once(
         [
             *_WORKSPACE_SCAN,
             "--offline",
-            "--workspace",
             str(workspace),
             "--output-dir",
             str(output),
@@ -2684,7 +2691,7 @@ def test_two_plugins_whose_names_read_as_one_are_refused_by_each_command(
         (project / "main.py").write_text("x = 1\n", encoding="utf-8")
         workspace = tmp_path / "ws" / "services.code-workspace"
         workspace.write_text(json.dumps({"folders": [{"path": "api"}]}), "utf-8")
-        args = [*_WORKSPACE_SCAN, "--offline", "--workspace", str(workspace)]
+        args = [*_WORKSPACE_SCAN, "--offline", str(workspace)]
         args += ["--output-dir", str(tmp_path / "ws-output"), *load]
     elif command == "report":
         output = _stored_scan(tmp_path)
@@ -2774,7 +2781,7 @@ def test_resolve_ash_workspace_does_not_check_plugin_names(tmp_path: Path) -> No
     """scale-large-repos.md (Workspace scans over MCP).
 
     A one-project workspace whose project config loads a plugin module with a reporter
-    named ``csv_``, beside the built-in ``csv``: ``ash scan --workspace --dry-run``
+    named ``csv_``, beside the built-in ``csv``: ``ash scan workspace --dry-run``
     exits 3 naming both reporters and their modules, while ``resolve_ash_workspace``
     succeeds, says ``plugin_names_checked`` false, and leaves the module unimported,
     judged inside the child process that ran it. The resolve response's plan must
@@ -2799,7 +2806,7 @@ def test_resolve_ash_workspace_does_not_check_plugin_names(tmp_path: Path) -> No
     work.mkdir()
 
     dry_run = _ash(
-        [*_WORKSPACE_SCAN, "--offline", "--workspace", str(workspace), "--dry-run"],
+        [*_WORKSPACE_SCAN, "--offline", str(workspace), "--dry-run"],
         cwd=work,
         PYTHONPATH=python_path,
     )
@@ -3154,7 +3161,7 @@ def test_a_reporter_subclass_runs_beside_its_base_as_the_page_shows(
         (project / "main.py").write_text("x = 1\n", encoding="utf-8")
         workspace = tmp_path / "ws" / "services.code-workspace"
         workspace.write_text(json.dumps({"folders": [{"path": "api"}]}), "utf-8")
-        args = [*_WORKSPACE_SCAN, "--offline", "--workspace", str(workspace)]
+        args = [*_WORKSPACE_SCAN, "--offline", str(workspace)]
         args += ["--output-dir", str(tmp_path / "ws-output"), *load]
         reports = tmp_path / "ws-output" / "reports"
     elif command == "report":
@@ -4093,7 +4100,7 @@ def test_the_workspace_scan_inside_limits_a_marked_config_as_a_local_one_in_a_ch
         result = _ash(
             [
                 "scan",
-                "--workspace",
+                "workspace",
                 str(workspace),
                 "--config",
                 str(config),
@@ -4591,7 +4598,7 @@ def test_the_scan_inside_reads_the_handed_over_file_as_its_ash_config(
         result = _ash(
             [
                 "scan",
-                "--workspace",
+                "workspace",
                 str(workspace),
                 "--config",
                 str(config),
@@ -5424,7 +5431,7 @@ def test_workspace_mode_checks_rules_that_could_not_be_evaluated(
     in_a_workspace = _ash(
         [
             "scan",
-            "--workspace",
+            "workspace",
             str(workspace),
             "--output-dir",
             str(tmp_path / "workspace-output"),
@@ -6335,10 +6342,15 @@ _CONFIG_SECRET = 'DATABASE_PASSWORD = "correct-horse-battery-staple-1234"\n'
 #: The scan the pages run: detect-secrets only, which ships with ASH and needs no network.
 _CONFIG_SCAN = ["scan", "fs", "--only-scanners", "detect-secrets", "--no-progress"]
 
-#: The same scan of a workspace. The pages keep the subject-less form, ``ash scan
-#: --workspace <file>``, until ``ash scan workspace`` exists, so a workspace run is
-#: driven as the pages write it.
-_WORKSPACE_SCAN = ["scan", "--only-scanners", "detect-secrets", "--no-progress"]
+#: The same scan of a workspace, as the pages write it: ``ash scan workspace <file>``.
+#: A run puts the workspace file after these words.
+_WORKSPACE_SCAN = [
+    "scan",
+    "workspace",
+    "--only-scanners",
+    "detect-secrets",
+    "--no-progress",
+]
 
 #: The results commands and the image build, spelled as the pages spell them.
 _REPORT = ["results", "report"]
@@ -6740,8 +6752,8 @@ def _scan_with_nothing_to_scan(
     config: Optional[Dict[str, Any]] = None,
     *extra: str,
 ) -> Tuple[subprocess.CompletedProcess, Dict[str, str]]:
-    """``ash scan --scanners <scanners>`` of a tree holding ``files``, with ``config``
-    as its own ``.ash.yaml``: the result, and each scanner's status in the
+    """``ash scan fs --only-scanners <scanners>`` of a tree holding ``files``, with
+    ``config`` as its own ``.ash.yaml``: the result, and each scanner's status in the
     results file."""
     tree = _config_scan_tree(tmp_path, files)
     if config is not None:
@@ -6818,14 +6830,14 @@ def test_a_scan_whose_scanners_had_nothing_to_scan_exits_1_and_says_why(
 ) -> None:
     """troubleshoot.md (No selected scanner had a file to scan), and exit-codes.md.
 
-    ``ash scan`` runs offline with ``--scanners`` naming scanners that have nothing to
-    read: detect-secrets in an empty tree, cdk-nag and detect-secrets in an empty tree,
-    and detect-secrets under a project config whose global_settings.ignore_paths
-    matches every path, with one pattern and with five. Each must exit 1 with every
-    selected scanner SKIPPED and the error the page quotes, with the page's scanner
-    names replaced by these: naming the scanners, and for ignore_paths showing its
-    first three patterns with a count of the others. It is not the "Scan ran no
-    scanners:" error.
+    ``ash scan fs`` runs offline with ``--only-scanners`` naming scanners that have
+    nothing to read: detect-secrets in an empty tree, cdk-nag and detect-secrets in an
+    empty tree, and detect-secrets under a project config whose
+    global_settings.ignore_paths matches every path, with one pattern and with five.
+    Each must exit 1 with every selected scanner SKIPPED and the error the page
+    quotes, with the page's scanner names replaced by these: naming the scanners, and
+    for ignore_paths showing its first three patterns with a count of the others. It
+    is not the "Scan ran no scanners:" error.
 
     The page's example names bandit, but offline a bandit the host has not installed
     is MISSING, not SKIPPED, so the cells name scanners that come with ASH:
@@ -6904,10 +6916,10 @@ def test_a_scan_whose_scanners_were_all_turned_off_reports_scan_ran_no_scanners(
 ) -> None:
     """troubleshoot.md (No selected scanner had a file to scan).
 
-    ``--scanners detect-secrets`` with detect-secrets turned off by an override, in a
-    tree with a file it would read, leaves every scanner SKIPPED for another reason
-    than having nothing to scan. The scan must exit 1 with "Scan ran no scanners:"
-    and each scanner's status, and not with the nothing-to-scan error.
+    ``--only-scanners detect-secrets`` with detect-secrets turned off by an override,
+    in a tree with a file it would read, leaves every scanner SKIPPED for another
+    reason than having nothing to scan. The scan must exit 1 with "Scan ran no
+    scanners:" and each scanner's status, and not with the nothing-to-scan error.
     """
     assert_on_page(
         "how-to/troubleshoot.md",
@@ -14507,7 +14519,7 @@ def test_a_link_at_or_in_the_output_directory_stops_the_run_with_the_pages_code(
         workspace = tmp_path / "ws" / "services.code-workspace"
         workspace.write_text(json.dumps({"folders": [{"path": "api"}]}), "utf-8")
         output = tmp_path / "ws-output"
-        args = [*_WORKSPACE_SCAN, "--offline", "--workspace", str(workspace)]
+        args = [*_WORKSPACE_SCAN, "--offline", str(workspace)]
         args += ["--output-dir", str(output)]
         assert run().returncode == 0
         target = _link_into(output / "projects", elsewhere / "projects")
@@ -14994,7 +15006,7 @@ def test_ash_merge_records_every_shards_scanners_names_that_matched_nothing(
                 "--no-progress",
                 "--output-dir",
                 str(output),
-                "--scanners",
+                "--add-scanners",
                 f"detect-secrets,{unknown}",
                 "--shard-index",
                 str(index),
@@ -20679,7 +20691,7 @@ def test_a_workspace_dry_run_refuses_what_the_run_refuses_before_any_project(
 ) -> None:
     """scale-large-repos.md (workspace mode: --dry-run), and exit-codes.md (Workspace mode).
 
-    ``ash scan --workspace ... --dry-run`` loads a plugin module with
+    ``ash scan workspace ... --dry-run`` loads a plugin module with
     ``--ash-plugin-modules``, or a project's config lists it. For a module with a
     reporter named ``csv_``, a reporter with the built-in ``csv``'s very name, a scanner
     or converter whose name reads as a built-in's, a module that does not import, and
@@ -20704,7 +20716,7 @@ def test_a_workspace_dry_run_refuses_what_the_run_refuses_before_any_project(
     (project / "main.py").write_text("x = 1\n", encoding="utf-8")
     workspace = tmp_path / "ws" / "services.code-workspace"
     workspace.write_text(json.dumps({"folders": [{"path": "api"}]}), "utf-8")
-    args = [*_WORKSPACE_SCAN, "--offline", "--workspace", str(workspace), "--dry-run"]
+    args = [*_WORKSPACE_SCAN, "--offline", str(workspace), "--dry-run"]
     args += ["--output-dir", str(tmp_path / "ws-output")]
     module = {"no-import": "page_claims_absent_ash_plugins", "outside": "json"}.get(
         case, _NAMES_MODULE

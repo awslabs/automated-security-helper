@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The checkout, the machine and the CLI call the ``ash build-image`` cells run.
+"""The checkout, the machine and the CLI call the ``ash container build`` cells run.
 
 ``test_build_image.py`` and the routing cells of operator paths import these; this
 module imports no test file. ``_machine_inputs`` and ``_restore_loggers`` are autouse
@@ -133,7 +133,9 @@ def _invoke(char, *args: str) -> Dict[str, Any]:
 
     char.begin()
     with char.phase("build-image"):
-        result = CliRunner().invoke(app, ["build-image", *args], catch_exceptions=True)
+        result = CliRunner().invoke(
+            app, ["container", "build", *args], catch_exceptions=True
+        )
     exception = result.exception
     if exception is not None and not isinstance(exception, SystemExit):
         raise exception

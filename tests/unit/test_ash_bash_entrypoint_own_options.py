@@ -301,7 +301,7 @@ def test_the_equals_spelling_of_the_wrappers_own_value_options(runner, tmp_path)
             f"--source-dir={source}",
             f"--output-dir={out}",
             "--build-target=ci",
-            "--scanners",
+            "--add-scanners",
             "bandit",
         ],
     )
@@ -312,7 +312,7 @@ def test_the_equals_spelling_of_the_wrappers_own_value_options(runner, tmp_path)
     mounts = _mounts(run)
     assert Path(mounts["/src"]["source"]).resolve() == source.resolve(), run
     assert Path(mounts["/out"]["source"]).resolve() == out.resolve(), run
-    assert _inner(run, image) == ["ash", *SANDBOX_OFF, "--scanners", "bandit"], run
+    assert _inner(run, image) == ["ash", *SANDBOX_OFF, "--add-scanners", "bandit"], run
 
 
 @pytest.mark.parametrize(
@@ -558,13 +558,17 @@ def test_an_mcp_run_over_a_pipe_keeps_stdin_open_and_asks_for_no_terminal(
         pytest.param(["inspect"], True, id="inspect"),
         pytest.param(["config"], True, id="config"),
         pytest.param(
-            ["scan", "--cli-json-input", "-"], True, id="scan-with-its-json-on-stdin"
+            ["scan", "fs", "--cli-json-input", "-"],
+            True,
+            id="scan-with-its-json-on-stdin",
         ),
         pytest.param(
-            ["report", "--cli-json-input=-"], True, id="report-with-its-json-attached"
+            ["results", "report", "--cli-json-input=-"],
+            True,
+            id="report-with-its-json-attached",
         ),
         pytest.param(
-            ["scan", "--cli-json-input", "params.json"],
+            ["scan", "fs", "--cli-json-input", "params.json"],
             False,
             id="scan-with-its-json-in-a-file",
         ),
@@ -611,7 +615,9 @@ def test_only_the_subcommands_that_read_stdin_keep_the_containers_stdin_open(
     ("words", "kept_open"),
     [
         pytest.param([], False, id="scan-in-the-background"),
-        pytest.param(["inspect"], True, id="inspect-at-the-terminal"),
+        pytest.param(
+            ["results", "inspect"], True, id="results-inspect-at-the-terminal"
+        ),
     ],
 )
 def test_a_terminal_stdin_does_not_keep_the_containers_stdin_open(
@@ -619,9 +625,9 @@ def test_a_terminal_stdin_does_not_keep_the_containers_stdin_open(
 ):
     """`./ash scan &` from an interactive shell: the terminal is on stdin AND stdout.
     With -i the runner reads the terminal and the background job stops on that read,
-    so a scan gets no -i there. `./ash inspect` at the same terminal reads keys, so
-    it keeps -i. The terminal is a real pseudo-terminal on both ends, which is the
-    shape an earlier condition (-i whenever stdout was a terminal) gave -i to for a
+    so a scan gets no -i there. `./ash results inspect` at the same terminal reads
+    keys, so it keeps -i. The terminal is a real pseudo-terminal on both ends, which is
+    the shape an earlier condition (-i whenever stdout was a terminal) gave -i to for a
     scan; a captured stdout would not tell the shapes apart. The runner's options
     come from the recording runner's log, not from the wrapper's output."""
     source, out = _dirs(tmp_path)

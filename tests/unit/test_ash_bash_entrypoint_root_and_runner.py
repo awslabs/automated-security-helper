@@ -307,6 +307,7 @@ def test_attached_dash_o_after_a_subcommand_is_the_subcommands(
         pytest.param("scan", "spaced", id="scan"),
         pytest.param("scan", "attached", id="scan-attached"),
         pytest.param("build-image", "spaced", id="build-image"),
+        pytest.param("container build", "spaced", id="container-build"),
     ],
 )
 def test_dash_o_after_scan_or_build_image_names_the_runner(
@@ -318,12 +319,13 @@ def test_dash_o_after_scan_or_build_image_names_the_runner(
     runner on PATH, so a host with docker and podman scanned under docker."""
     other = _executable(tmp_path / "bin" / "other-runner", RECORDING_RUNNER)
     dash_o = ["-o", str(other)] if spelling == "spaced" else [f"-o{other}"]
-    # A scan takes its directory as the PATH argument of `scan fs`; build-image is
-    # not a scan, so the wrapper is given the directory to mount ahead of it.
+    # A scan takes its directory as the PATH argument of `scan fs`; build-image and
+    # container build are not scans, so the wrapper is given the directory to mount
+    # ahead of them.
     if subcommand == "scan":
         named = ["scan", "fs", str(source)]
     else:
-        named = ["--source-dir", str(source), subcommand]
+        named = ["--source-dir", str(source), *subcommand.split()]
 
     result, calls = _run(
         runner,

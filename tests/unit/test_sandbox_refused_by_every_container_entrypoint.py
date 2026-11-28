@@ -865,6 +865,7 @@ class TestTheBashEntrypoint:
 
         reported, _ = _run_ash(
             tmp_path / "rep",
+            "results",
             "report",
             build_status=0,
             env_extra={"ASH_CONFIG": str(operator)},
@@ -1796,7 +1797,7 @@ class TestThePowerShellEntrypoint:
         still runs, so the assertion is that no run call was recorded."""
         absent = str(tmp_path / "absent.yaml")
 
-        for words in (["report"], []):
+        for words in (["results", "report"], []):
             root = tmp_path / ("-".join(words) or "scan")
             result = _invoke_ash(
                 pwsh,
@@ -1929,6 +1930,7 @@ class TestThePowerShellEntrypoint:
         result = _invoke_ash(
             pwsh,
             tmp_path / "report",
+            "results",
             "report",
             parameters=f"-Config '{operator.as_posix()}'",
             env_extra={"ASH_CONFIG": str(environment_named)},
@@ -1949,7 +1951,11 @@ class TestThePowerShellEntrypoint:
         operator.write_text('sandbox:\n  mode: "landlock"\n', encoding="utf-8")
 
         result = _invoke_ash(
-            pwsh, tmp_path / "report", "report", env_extra={"ASH_CONFIG": str(operator)}
+            pwsh,
+            tmp_path / "report",
+            "results",
+            "report",
+            env_extra={"ASH_CONFIG": str(operator)},
         )
 
         assert result.how == "returned", result.message

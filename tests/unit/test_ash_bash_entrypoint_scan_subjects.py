@@ -136,7 +136,7 @@ def test_options_may_stand_between_scan_and_the_subject(runner, tmp_path):
     source.mkdir()
 
     run_argv = _run_argv(
-        _ash(runner, tmp_path, "scan", "--scanners", "bandit", "fs", str(source))
+        _ash(runner, tmp_path, "scan", "--add-scanners", "bandit", "fs", str(source))
     )
 
     assert os.path.realpath(_mounted_source(run_argv)) == os.path.realpath(source)
@@ -144,7 +144,7 @@ def test_options_may_stand_between_scan_and_the_subject(runner, tmp_path):
         "ash",
         "scan",
         *SANDBOX_OFF,
-        "--scanners",
+        "--add-scanners",
         "bandit",
         "fs",
         "/src",
@@ -168,7 +168,7 @@ def test_options_after_the_path_are_forwarded(runner, tmp_path):
     source.mkdir()
 
     run_argv = _run_argv(
-        _ash(runner, tmp_path, "scan", "fs", str(source), "--scanners", "bandit")
+        _ash(runner, tmp_path, "scan", "fs", str(source), "--add-scanners", "bandit")
     )
 
     assert _inner_argv(run_argv) == [
@@ -177,7 +177,7 @@ def test_options_after_the_path_are_forwarded(runner, tmp_path):
         "fs",
         "/src",
         *SANDBOX_OFF,
-        "--scanners",
+        "--add-scanners",
         "bandit",
     ]
 
@@ -192,13 +192,13 @@ def test_options_after_the_path_are_forwarded(runner, tmp_path):
             id="the-subject-alone",
         ),
         pytest.param(
-            ["scan", "fs", "--scanners", "bandit"],
-            ["ash", "scan", "fs", "/src", *SANDBOX_OFF, "--scanners", "bandit"],
+            ["scan", "fs", "--add-scanners", "bandit"],
+            ["ash", "scan", "fs", "/src", *SANDBOX_OFF, "--add-scanners", "bandit"],
             id="an-option-after-the-subject",
         ),
         pytest.param(
-            ["scan", "--scanners", "bandit", "fs"],
-            ["ash", "scan", *SANDBOX_OFF, "--scanners", "bandit", "fs", "/src"],
+            ["scan", "--add-scanners", "bandit", "fs"],
+            ["ash", "scan", *SANDBOX_OFF, "--add-scanners", "bandit", "fs", "/src"],
             id="an-option-before-the-subject",
         ),
         pytest.param(
@@ -207,8 +207,8 @@ def test_options_after_the_path_are_forwarded(runner, tmp_path):
             id="a-flag-of-this-script-before-scan",
         ),
         pytest.param(
-            ["scan fs --scanners bandit"],
-            ["ash", "scan", "fs", "/src", *SANDBOX_OFF, "--scanners", "bandit"],
+            ["scan fs --add-scanners bandit"],
+            ["ash", "scan", "fs", "/src", *SANDBOX_OFF, "--add-scanners", "bandit"],
             id="one-quoted-argument",
         ),
     ],
@@ -241,9 +241,9 @@ def test_scan_fs_is_given_the_mount_as_its_path_argument_and_no_variable(
             id="no-command-at-all",
         ),
         pytest.param(
-            ["report", "--format", "text"],
-            ["ash", "report", "--format", "text"],
-            id="report",
+            ["results", "report", "--format", "text"],
+            ["ash", "results", "report", "--format", "text"],
+            id="results-report",
         ),
     ],
 )
@@ -474,7 +474,7 @@ WORKSPACE_POINTER = "ash scan workspace <file> --mode container"
         ),
         pytest.param(["scan", "workspace"], id="the-subject-alone"),
         pytest.param(
-            ["scan", "--scanners", "bandit", "workspace", "team.code-workspace"],
+            ["scan", "--add-scanners", "bandit", "workspace", "team.code-workspace"],
             id="an-option-before-the-subject",
         ),
         pytest.param(
@@ -500,7 +500,7 @@ WORKSPACE_POINTER = "ash scan workspace <file> --mode container"
         # found in them as well.
         pytest.param(["scan workspace team.code-workspace"], id="one-quoted-argument"),
         pytest.param(
-            ["scan --scanners bandit workspace team.code-workspace"],
+            ["scan --add-scanners bandit workspace team.code-workspace"],
             id="one-quoted-argument-with-an-option-before-the-subject",
         ),
     ],
@@ -616,7 +616,7 @@ ARCHIVE_POINTER = "ash scan fs --archive <file>"
         pytest.param(["scan", "fs", "--archive", "src.zip"], id="separate"),
         pytest.param(["scan", "fs", "--archive=src.zip"], id="attached"),
         pytest.param(
-            ["scan", "fs", "--scanners", "bandit", "--archive", "src.zip"],
+            ["scan", "fs", "--add-scanners", "bandit", "--archive", "src.zip"],
             id="after-another-option",
         ),
         pytest.param(["scan", "--archive", "src.zip", "fs"], id="before-the-subject"),
@@ -706,10 +706,10 @@ def test_an_option_value_after_the_path_is_not_a_second_path(runner, tmp_path):
     source.mkdir()
 
     run_argv = _run_argv(
-        _ash(runner, tmp_path, "scan", "fs", str(source), "--scanners", "bandit")
+        _ash(runner, tmp_path, "scan", "fs", str(source), "--add-scanners", "bandit")
     )
 
-    assert _inner_argv(run_argv)[-2:] == ["--scanners", "bandit"]
+    assert _inner_argv(run_argv)[-2:] == ["--add-scanners", "bandit"]
 
 
 def _table(name):
@@ -815,7 +815,7 @@ def test_show_completion_prints_a_function_and_exits_without_a_runner(tmp_path):
 
 @pytest.mark.integration
 def test_completion_offers_no_scan_option_after_another_subcommand(tmp_path):
-    assert _completions(tmp_path, ["ash", "report", "--shard-"], 2) == []
+    assert _completions(tmp_path, ["ash", "results", "report", "--shard-"], 3) == []
 
 
 @pytest.mark.integration
