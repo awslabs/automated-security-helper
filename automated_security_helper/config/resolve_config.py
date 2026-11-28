@@ -30,7 +30,7 @@ from typing import (
     get_origin,
 )
 
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 import yaml
 from automated_security_helper.config.ash_config import (
     AshConfig,
@@ -151,6 +151,7 @@ from automated_security_helper.config.environment_record import (
     mappings_with_written_reference_keys,
 )
 from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.config.wire_enum import wire_value
 from automated_security_helper.config.recorded_config import (
     override_field_paths,
     written_field_paths,
@@ -202,7 +203,7 @@ from automated_security_helper.core.constants import (
     ASH_PYPROJECT_FILE_NAME,
     ASH_RC_FILE_NAMES,
 )
-from automated_security_helper.core.enums import SandboxMode
+from automated_security_helper.core.enums import ExportFormat, SandboxMode
 from automated_security_helper.core.exceptions import (
     ASHConfigFileNotFoundError,
     ASHConfigInputNotPermittedError,
@@ -760,6 +761,21 @@ def _say_once_per_run(kind: str, logged_path: str, text: str) -> None:
     ASH_LOGGER.warning(text, extra=NO_MARKUP)
 
 
+#: The selection lists whose empty value is no selection, by resolved key: the
+#: mode's default set runs, which outside precommit mode is every enabled scanner
+#: (``SelectionLayers.fold``, core/scanner_selection.py). A ``-=`` that would empty
+#: one is refused in a command's own build (``_refuse_an_edit_of_every_item``), as
+#: an exclusion that empties a selection is refused (``selection_after_exclusions``):
+#: the run would execute the default set, the scanners the removal took out
+#: included, where the list named the scanners to run. The empty value is the
+#: default, not a value that names every scanner, so every other edit is applied
+#: as written: ``+=`` onto it writes the names it lists, and ``-=`` from it finds
+#: nothing to remove.
+_EMPTY_MEANS_THE_DEFAULT_SELECTION: FrozenSet[Tuple[str, ...]] = frozenset(
+    {("default_scanners", "only"), ("precommit", "only_scanners")}
+)
+
+
 def _sentinel_of(resolved_keys: Sequence[str]) -> Optional[List[Any]]:
     """The value that means "every item" for the list option an edit landed on, or
     None when the option has none: an empty ``output_formats`` (every enabled
@@ -799,7 +815,21 @@ def _refuse_an_edit_of_every_item(
     (``_sentinel_of``), naming the replace form to write instead, and a ``-=``
     whose *result* would hold that value. Called only in the application that
     builds the run's own configuration; an empty ``output_formats`` reaches this
-    for a removal only (its append keeps the 3.x meaning, with a deprecation)."""
+    for a removal only (its append keeps the 3.x meaning, with a deprecation). A
+    ``-=`` that would empty a list of ``_EMPTY_MEANS_THE_DEFAULT_SELECTION`` is
+    refused too, and no other edit of those lists is."""
+    if (
+        operator == REMOVE
+        and tuple(resolved_keys) in _EMPTY_MEANS_THE_DEFAULT_SELECTION
+        and held
+        and not result
+    ):
+        raise ASHConfigValidationError(
+            f"Invalid config override: '{logged_path}-='. The removal would leave "
+            f"{logged_path} empty, and an empty selection runs the mode's default "
+            "scanners, the ones the removal took out included. Write the whole "
+            f"list with '{logged_path}=[...]'."
+        )
     sentinel = _sentinel_of(resolved_keys)
     if sentinel is None:
         return
@@ -843,6 +873,45 @@ def _removal_matches(entry: Any, item: Any) -> bool:
     return entry == item
 
 
+def _items_as_the_list_holds(
+    resolved_keys: Sequence[str],
+    items: List[Any],
+    logged_path: str,
+    own_configuration: bool,
+) -> List[Any]:
+    """The items of a ``-=``, spelled as the list holds its entries where the list's
+    items are a closed domain, else as written.
+
+    ``output_formats`` holds format names (its serializer dumps each member's
+    name). Each item goes through the field's own type, the conversion an entry of
+    the list gets, and comes back as the name its member is dumped as, so an item
+    is matched as the entry it converts to is. An item the type refuses names no
+    format: a command's own build refuses the removal, as ``=`` and ``+=`` of the
+    same item are refused, naming the key and the valid formats, not the item,
+    which may have been read from the environment (the field's own refusal leaves
+    the item out for the same reason). Any other application keeps the item as
+    written, where it matches no entry.
+    """
+    if list(resolved_keys) != ["output_formats"]:
+        return items
+    adapter = TypeAdapter(AshConfig.model_fields["output_formats"].annotation)
+    spelled: List[Any] = []
+    for item in items:
+        try:
+            (member,) = adapter.validate_python([item])
+        except ValidationError:
+            if own_configuration:
+                valid = ", ".join(wire_value(fmt) for fmt in ExportFormat)
+                raise ASHConfigValidationError(
+                    f"Invalid config override: '{logged_path}-='. An item to "
+                    f"remove names no format. Valid formats are: {valid}."
+                ) from None
+            spelled.append(item)
+        else:
+            spelled.append(wire_value(member))
+    return spelled
+
+
 def _removed_from_a_list(
     config_dict: Dict[str, Any],
     key_path: str,
@@ -855,7 +924,9 @@ def _removed_from_a_list(
     """Apply one ``key-=value`` override: each item of the parsed value (the
     items of a list value, any other value as one item) is taken out of the list
     at *key_path* (the ``-`` already removed). Every entry the item names
-    (``_removal_matches``) goes, and the others stay in order.
+    (``_removal_matches``) goes, and the others stay in order. Where the list's
+    items are a closed domain, each item is first spelled as the list holds its
+    entries (``_items_as_the_list_holds``).
 
     The segments resolve as the set and the append resolve them
     (``resolve_override_segment``), but the walk makes no section it does not
@@ -869,14 +940,17 @@ def _removed_from_a_list(
     With *own_configuration* (the application that builds the run's own
     configuration), what the document holds decides what is refused and said. A
     removal from a list whose value means every item (``_sentinel_of``), or one
-    that would empty a list whose empty value means every item, is refused. So
-    is a removal from a value that is no list, or at a key the document does not
-    hold outside such a section, naming the key and never the value. A removal
-    from a typed setting that holds None, or in a section no shipped plugin
+    that would empty a list whose empty value means every item or the default
+    selection of scanners (``_EMPTY_MEANS_THE_DEFAULT_SELECTION``), is refused. So
+    is a removal from a value that is no list, at an option of such a section that
+    the shipped plugin's row does not name (it has no list option of that name), at
+    a key the document does not hold outside such a section, or of an item that
+    names nothing in a closed domain, naming the key and never the value. A
+    removal from a typed setting that holds None, or in a section no shipped plugin
     reads, warns once per run. Every other application of the same overrides
-    applies them to a base that can hold less than the real document, so there
-    a removal that finds no list changes nothing and nothing is refused or said
-    above debug.
+    applies them to a base that can hold less than the real document, so there a
+    removal that finds no list changes nothing and nothing is refused or said above
+    debug.
 
     *list_changes*, when given, gets one ``ListChange`` for a removal from a
     list the document holds: the list's old length and the old index of each
@@ -906,6 +980,9 @@ def _removed_from_a_list(
     parsed_value = _parse_config_value(value)
     items = list(parsed_value) if isinstance(parsed_value, list) else [parsed_value]
     logged_path = redact_values(key_path, environment_values)
+    items = _items_as_the_list_holds(
+        resolved_keys, items, logged_path, own_configuration
+    )
     held = current.get(final_key) if isinstance(current, dict) else None
     if isinstance(held, list):
         kept_at = tuple(
@@ -969,6 +1046,19 @@ def _removed_from_a_list(
                 extra=NO_MARKUP,
             )
             return resolved_keys, parsed_value, REMOVE
+        if row is not None and own_configuration:
+            # The row names every list option the shipped plugin has (a test holds
+            # UNTYPED_LIST_OPTION_DEFAULTS equal to the plugins' option models, and
+            # another every option they type as a list to a row entry), so the
+            # option is misspelled or holds a single value: no list to remove from.
+            parts = key_path.split(".")
+            section = redact_values(".".join(parts[:2]), environment_values)
+            option = redact_values(".".join(parts[2:]), environment_values)
+            raise ASHConfigValidationError(
+                f"Invalid config override: '{logged_path}-='. '-=' removes items "
+                f"from a list, and {section} has no list option {option}. Check "
+                "the option name."
+            )
         if row is None and own_configuration:
             section = redact_values(
                 ".".join(key_path.split(".")[:2]), environment_values
