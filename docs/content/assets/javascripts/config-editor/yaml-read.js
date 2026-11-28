@@ -1685,6 +1685,23 @@ function buildValue(node, context) {
       });
     }
   }
+  if (node.locked === "merge-key") {
+    const scalarEntries = node.entries.filter((entry) => entry.key.kind === "scalar");
+    const own = new Set(scalarEntries.filter((entry) => entry.key.type !== "merge").map((entry) => entry.key.text));
+    const merged = [...new Set(mappingPairs(node, context.fail).map(([key]) => key.text))].filter(
+      (name) => !own.has(name),
+    );
+    const at = scalarEntries.find((entry) => entry.key.type === "merge").key;
+    context.warnings.push({
+      code: "merge-key",
+      message:
+        merged.length > 0
+          ? `the keys ${merged.join(", ")} come from a merge key (<<)`
+          : "a merge key (<<) adds no keys that are not written here",
+      line: at.line + 1,
+      column: at.column + 1,
+    });
+  }
   for (const [key, value] of mappingPairs(node, context.fail)) {
     if (key.kind !== "scalar") {
       context.fail("constructor", "found unhashable key", markFor(key));

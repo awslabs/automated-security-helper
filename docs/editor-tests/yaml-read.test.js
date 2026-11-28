@@ -154,6 +154,10 @@ test('a merge key puts its pairs first, and locks the mapping that holds it', ()
   const doc = read('d:\n  <<: {x: 9}\n  z: 3\n');
   assert.deepStrictEqual(doc.value, { d: { x: 9, z: 3 } });
   assert.equal(doc.root.entries[0].value.locked, 'merge-key');
+  assert.equal(doc.warnings.length, 1);
+  assert.equal(doc.warnings[0].code, 'merge-key');
+  assert.match(doc.warnings[0].message, /the keys x come from a merge key/);
+  assert.equal(doc.warnings[0].line, 2);
   const list = read('d:\n  <<: [{x: 1}, {x: 2, y: 3}]\n');
   assert.deepStrictEqual(list.value, { d: { x: 1, y: 3 } });
   const pairs = mappingPairs(doc.root.entries[0].value, () => {
