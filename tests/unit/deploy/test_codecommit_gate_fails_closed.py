@@ -298,6 +298,16 @@ _NARROWING_OPTIONS_WITH_VALUES = [
         "drops a scanner the completeness gate would otherwise have covered",
     ),
     (
+        "--only-scanners",
+        "bandit",
+        "states the whole selection, so every scanner it does not name is SKIPPED",
+    ),
+    (
+        "--add-scanners",
+        "bandit",
+        "without default_scanners.only it is the whole selection, as --scanners is",
+    ),
+    (
         "--mode",
         "precommit",
         "the precommit preset replaces the selection with a fixed list of fast scanners",
@@ -507,6 +517,8 @@ def test_every_reserved_spelling_is_one_the_cli_actually_accepts():
     [
         (["--scanners", "bandit"], "scanners", ("bandit",)),
         (["--exclude-scanners", "semgrep"], "exclude_scanners", ("semgrep",)),
+        (["--only-scanners", "bandit"], "only_scanners", ("bandit",)),
+        (["--add-scanners", "bandit"], "add_scanners", ("bandit",)),
         (["--python-only"], "python_based_plugins_only", True),
         (["--changed-files-only"], "changed_files_only", True),
         (["--base-ref", "HEAD~1"], "base_ref", "HEAD~1"),
