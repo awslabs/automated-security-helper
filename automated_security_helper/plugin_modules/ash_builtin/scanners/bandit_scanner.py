@@ -48,6 +48,9 @@ from automated_security_helper.base.scanner_plugin import (
 )
 from automated_security_helper.base.uv_tool_mixin import (
     _record_direct_route_version,
+    _restore_uv_route,
+    guarded_values_read,
+    is_uv_form,
     tool_name,
 )
 from automated_security_helper.core.exceptions import ScannerError
@@ -1188,8 +1191,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         # use_uv_tool already False, a re-validation skipped the selection
         # branch below and fell to the consolidated resolver, which paid its
         # cold `uv tool run ... --version` probe per re-check (checkov's
-        # measured shape; bandit's resolver answer keeps the route but still
-        # pays the probe).
+        # measured shape; bandit's resolver answer pays the probe too).
         if self._honored_verified_pre_installed():
             return True
         if not self._validate_uv_tool_availability():
@@ -1268,8 +1270,10 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
     def _take_resolved_command(self, command: List[str]) -> bool:
         """Set the route from ``get_uv_tool_command``'s answer, and decide the dependency.
 
-        A ``uv`` answer (bare, or by its path) keeps the uv route. A direct binary
-        on PATH is verified as ``_select_tool_execution`` verifies one
+        A ``uv`` answer (bare, or by its path) is the uv route: a caller that came
+        in on a direct route gets it back (``_restore_uv_route``), and one already
+        on it keeps it. A direct binary on PATH is verified as
+        ``_select_tool_execution`` verifies one
         (``utils/pre_installed_tool.py``: the sarif and toml extras,
         ``tool_version``): one that falls short is refused with what is missing
         named, since running it would fail at ``--format sarif`` or report with
@@ -1278,12 +1282,20 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         (uv is absent, or its install of the tool failed). A verified binary runs
         directly: ``use_uv_tool`` is turned off, which the final fallback never
         did before.
+
+        The plugin's values hook is read once and guarded (``guarded_values_read``):
+        with no usable values the check's lines cannot be redacted, so the copy is
+        not run and the reason names only the hook's failure.
         """
-        if Path(command[0]).name.lower().removesuffix(".exe") == "uv":
-            # The resolver names uv bare or by its path, on Windows as uv.exe;
-            # each is the uv route, which stays on. (Compared as the bare word,
-            # an absolute uv path read as a bandit binary and was "verified" as
-            # one; compared by name alone, uv.exe still did.)
+        if is_uv_form(command):
+            # uv bare, by its path, or as uv.exe is the uv route (is_uv_form).
+            # Compared as the bare word, an absolute uv path read as a bandit
+            # binary and was "verified" as one. The final fallback reaches here on a
+            # re-validation off uv, and an override of the availability check can
+            # too; either is put on the uv route, not left on a direct one that
+            # would start whatever bandit PATH holds under a requirement it was not
+            # checked against.
+            _restore_uv_route(self)
             self.dependencies_satisfied = True
             return True
         from automated_security_helper.utils.pre_installed_tool import (
@@ -1309,8 +1321,25 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         # redacts the same lines (shown_uv_output), since the verify detail can
         # respell an environment-read tool_version in uv's own words, which the
         # plain value match does not see. The reason reaches the reports through
-        # dependency_unavailable_reason.
-        values = self._values_to_redact()
+        # dependency_unavailable_reason. The hook is read once and guarded: with no
+        # usable values nothing can redact those lines, so the copy is not run.
+        read = guarded_values_read(self)
+        if read.values is None:
+            failure = read.failure()
+            self._plugin_log(
+                f"The {self.command} on PATH was not verified: the plugin's values "
+                f"hook {failure}, so its check could not be redacted. It does not "
+                "run unverified.",
+                level=logging.WARNING,
+            )
+            self.dependency_unavailable_reason = (
+                f"{self.command} cannot be used: the plugin's values hook {failure}, "
+                "so the copy on PATH could not be verified and its records could not "
+                "be redacted. Fix the plugin's values hook."
+            )
+            self.dependencies_satisfied = False
+            return False
+        values = read.values
         checked = verify_pre_installed_tool(
             executable,
             package,

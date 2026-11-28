@@ -124,6 +124,8 @@ from automated_security_helper.base.uv_tool_mixin import (
     _record_direct_route_version,
     _restore_uv_route,
     guarded_values,
+    guarded_values_read,
+    is_uv_form,
 )
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
@@ -1062,7 +1064,10 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         # binary the resolver found on PATH has to run that binary. With
         # use_uv_tool left True, every scan then went through uv, whose install
         # had just failed, and refused to start.
-        if resolved[:1] == ["uv"]:
+        # The route is read from the answer's first word's file name
+        # (is_uv_form): uv named by its path, or as uv.exe, is the uv route too.
+        uses_uv = is_uv_form(resolved)
+        if uses_uv:
             _restore_uv_route(self)
         elif self.use_uv_tool:
             # Off uv for the resolver's binary, which runs unverified and with no
@@ -1070,62 +1075,203 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             # re-validation already on a direct route keeps the record that route
             # made.
             _record_direct_route_version(self, None)
-        self.use_uv_tool = resolved[:1] == ["uv"]
+        self.use_uv_tool = uses_uv
         self.dependencies_satisfied = True
         return True
 
     def _accept_binary_on_path(self, resolved: List[str]) -> bool:
-        """Whether the cfn-lint the resolver found with no uv may run the scan.
+        """Whether the cfn-lint the resolver found while uv's availability check did
+        not pass may run the scan.
 
-        Without uv there is no install to fall back on, so the binary on PATH
-        is the scan's cfn-lint: it is verified against the scan's requirement
+        The check does not pass when uv is absent, when its probe failed, and for
+        the runner's retry window after a probe timed out or was killed, so a uv
+        may well be installed. With no uv install to fall back on, the binary on
+        PATH is the scan's cfn-lint: it is verified against the scan's requirement
         (``sarif`` extra, the version constraint) as ``_select_tool_execution``
         verifies one. Before this it was declared satisfied unverified, and a
-        cfn-lint without the ``sarif`` extra then failed every invocation with
-        an unknown-format error. One that falls short is MISSING with the
-        reason; one that cannot be verified runs, with a warning, since nothing
-        better is at hand.
+        cfn-lint without the ``sarif`` extra then failed every invocation with an
+        unknown-format error. One that falls short is MISSING with the reason; one
+        that cannot be verified runs, with a warning, since nothing better is at
+        hand.
+
+        Every line this check writes, and the reason a MISSING row carries, go
+        through the uv layer (``shown_uv_output``) with the plugin's values, read
+        once and guarded, as guarddog's check of a copy on PATH reads them. The
+        verdict's detail quotes the scan's requirement in the spelling the options
+        validator stored, and an environment-read ``tool_version`` was written in
+        another spelling, which the plain value match the scan phase applies to the
+        reason does not see. The reason names the verdict's summary and a remedy,
+        never the copy's path or the detail; the ERROR line carries both. With no
+        usable values the copy is not run, and the reason names only the hook's
+        failure.
         """
         from automated_security_helper.utils.pre_installed_tool import (
+            build_requirement,
             verify_pre_installed_tool,
         )
+        from automated_security_helper.utils.uv_tool_runner import (
+            find_uv_or_none,
+            shown_uv_output,
+        )
 
-        if resolved[:1] == ["uv"]:
-            # Reachable only if the resolver found a uv the availability check did
-            # not; run through it as the final fallback does.
+        if is_uv_form(resolved):
+            # The uv route the answer names. validate_plugin_dependencies reaches
+            # here only on uv (_validate_uv_tool_availability answers True at once
+            # for a scanner off uv), where this changes nothing. Any other entry (an
+            # override of that check, a new caller, a test that patches it) is put on
+            # the uv route, not left on a direct one that would start whatever
+            # cfn-lint PATH holds, unverified.
             _restore_uv_route(self)
-            self.use_uv_tool = True
             self.dependencies_satisfied = True
             return True
         executable = resolved[0]
+        # Read once a copy is to be checked, and only then: a uv answer keeps the
+        # uv route above, whose own run path reads the hook.
+        read = guarded_values_read(self)
+        if read.values is None:
+            failure = read.failure()
+            self._plugin_log(
+                "The cfn-lint on PATH was not verified: the plugin's values hook "
+                f"{failure}, so its check could not be redacted. It does not run "
+                "unverified.",
+                level=logging.WARNING,
+            )
+            self.dependency_unavailable_reason = (
+                f"cfn-lint cannot be used: the plugin's values hook {failure}, so the "
+                "copy on PATH could not be verified and its records could not be "
+                "redacted. Fix the plugin's values hook."
+            )
+            self.dependencies_satisfied = False
+            return False
+        values = read.values
+        extras = self._get_tool_package_extras()
+        constraint = self._get_tool_version_constraint()
+        uv = find_uv_or_none()
         checked = verify_pre_installed_tool(
             executable,
             _COMMAND,
-            self._get_tool_package_extras(),
-            self._get_tool_version_constraint(),
-            uv_executable=None,
-            values=self._values_to_redact(),
+            extras,
+            constraint,
+            uv_executable=uv,
+            values=values,
         )
-        if checked.status == "unsatisfied":
-            reason = (
-                f"uv is not installed and the cfn-lint on PATH ({executable}) "
-                f"cannot be used: {checked.detail}"
+
+        def _shown(text: str) -> str:
+            return shown_uv_output(
+                text,
+                values,
+                plugin_inputs=self._uv_run_inputs_for_records(),
+                tool_name=_COMMAND,
+                limit=None,
             )
-            self.dependency_unavailable_reason = reason
-            self._plugin_log(reason, level=logging.ERROR)
+
+        if checked.status == "unsatisfied":
+            remedy = self._unusable_copy_remedy(
+                build_requirement(_COMMAND, extras, constraint),
+                checked,
+                uv_found=uv is not None,
+            )
+            # The log gets the copy's path and the verdict's detail. The reason gets
+            # the summary, the path-free line the verifier gives for that use; the
+            # detail stands in only for a verdict without one, as in guarddog's
+            # check.
+            self._plugin_log(
+                _shown(
+                    "uv's availability check did not pass, and the cfn-lint on PATH "
+                    f"({executable}) cannot be used: {checked.detail}. {remedy}"
+                ),
+                level=logging.ERROR,
+            )
+            summary = getattr(checked, "summary", "") or checked.detail
+            self.dependency_unavailable_reason = _shown(
+                f"cfn-lint cannot be used: {summary}. {remedy}"
+            )
             self.dependencies_satisfied = False
             return False
         if checked.status != "satisfied":
             self._plugin_log(
-                f"uv is not installed and the cfn-lint on PATH ({executable}) "
-                f"could not be verified against the scan's requirement "
-                f"({checked.detail}); running it anyway.",
+                _shown(
+                    "uv's availability check did not pass, and the cfn-lint on PATH "
+                    f"({executable}) could not be verified against the scan's "
+                    f"requirement ({checked.detail}); running it anyway."
+                ),
                 level=logging.WARNING,
             )
         _record_direct_route_version(self, getattr(checked, "version", None))
         self.use_uv_tool = False
         self.dependencies_satisfied = True
         return True
+
+    def _unusable_copy_remedy(
+        self, requirement: str, checked: Any, *, uv_found: bool
+    ) -> str:
+        """How to provide a cfn-lint the scan can run, for the copy on PATH that falls
+        short while uv's availability check does not pass.
+
+        With a uv found, the check failed rather than uv being absent, and running
+        the scan again once the check passes lets uv run the scan's own requirement.
+        A ``tool_version`` this copy meets is offered only when the version
+        constraint is all the copy fails (``only_the_constraint_falls_short``): the
+        verifier reports a ``--version`` probe that exits non-zero before it asks
+        uv, uv found or not, and no constraint fixes that copy. Without a uv the
+        verifier has no dry run, so a copy falls short only through such a probe,
+        and installing uv lets ASH install and run cfn-lint itself. In offline mode
+        (``_is_offline_mode``) ASH installs nothing, so the remedy offers neither a
+        run through uv nor installing uv: it names a copy to install before going
+        offline, with the install command when a uv is found, and the
+        ``tool_version`` on the same terms. Guarddog's remedy reads the same way.
+        """
+        from automated_security_helper.utils.pre_installed_tool import (
+            only_the_constraint_falls_short,
+        )
+
+        if uv_found:
+            if self._is_offline_mode():
+                constraint = (
+                    ", or set scanners.cfn-lint.options.tool_version to a constraint "
+                    "this copy meets"
+                    if only_the_constraint_falls_short(checked)
+                    else ""
+                )
+                return (
+                    "It is the only copy ASH can run while uv's availability check "
+                    "does not pass, so cfn-lint is missing, and ASH does not install "
+                    "tools in offline mode. Install a copy that satisfies "
+                    f"{requirement!r} before going offline "
+                    f"(`{self._install_command(requirement)}`){constraint}."
+                )
+            constraint = (
+                "set scanners.cfn-lint.options.tool_version to a constraint this "
+                "copy meets, "
+                if only_the_constraint_falls_short(checked)
+                else ""
+            )
+            return (
+                "It is the only copy ASH can run while uv's availability check does "
+                "not pass, so cfn-lint is missing. Install a copy that satisfies "
+                f"{requirement!r} (`{self._install_command(requirement)}`), "
+                f"{constraint}or run the scan again once uv's availability check "
+                "passes, so that uv runs cfn-lint."
+            )
+        if self._is_offline_mode():
+            return (
+                "It is the only copy ASH can run without uv, so cfn-lint is missing, "
+                "and ASH does not install tools in offline mode. Install a copy that "
+                f"satisfies {requirement!r} before going offline."
+            )
+        return (
+            "It is the only copy ASH can run without uv, so cfn-lint is missing. "
+            f"Install a copy that satisfies {requirement!r}, or install uv, so that "
+            "ASH installs and runs cfn-lint itself."
+        )
+
+    def _install_command(self, requirement: str) -> str:
+        """The ``uv tool install`` command for ``requirement``, under the interpreter
+        request of the facet row (``_get_tool_python_request``, derived in
+        uv_tool_mixin), as guarddog's remedy names it."""
+        python_request = self._get_tool_python_request()
+        python_option = f" --python '{python_request}'" if python_request else ""
+        return f"uv tool install{python_option} '{requirement}'"
 
     def nothing_to_scan_reason(self) -> Optional[str]:
         """Why cfn-lint has nothing to scan in this run, or None.

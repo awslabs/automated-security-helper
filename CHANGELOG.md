@@ -111,6 +111,38 @@
   and Bitbucket configuration frameworks, every time it starts, whichever frameworks
   run. Each is now left out of checkov's environment in an offline scan and when its
   framework does not run, and a framework that runs online gets its token as before.
+- **While uv's availability check does not pass, GuardDog checks the `guarddog` it
+  would run instead before running it.** The check does not pass when uv is absent or
+  its probe fails, and for 60 seconds after a probe of uv timed out or was killed. A
+  `guarddog` found then runs if it meets the scan's requirement (`guarddog==3.2.0`, or
+  the scanner's `options.tool_version`), or, with a warning, if it cannot be checked,
+  and the SARIF report names that copy's version. A copy that falls short does not
+  run: when uv itself can run GuardDog, the scan keeps uv for it, and otherwise the
+  scanner is reported `MISSING` with a reason that says how to provide GuardDog. With
+  `options.max_hits` set, GuardDog's command line runs in the Python of the copy that
+  was accepted, and through uv it does not run until uv's check passes. Before, while
+  the check did not pass, the scan ran whatever `guarddog` it found without checking
+  it, and it turned uv off even when uv itself could run GuardDog, so it could try to
+  start `guarddog` by name when none was on `PATH`.
+- **checkov and cfn-lint no longer put the check's detail in the `MISSING` reason for a
+  copy on `PATH` that falls short.** While uv's availability check does not pass, both
+  check the copy they would run instead, as GuardDog does. The reason for one that
+  falls short now names the shortfall and how to provide the tool, and no longer the
+  copy's path or the check's detail, which could show an `options.tool_version` read
+  from the environment in the spelling ASH stores it in, a spelling the redaction of
+  that value in the results did not hide. The reason and the log lines no longer say
+  uv is not installed when it is and only its check failed. The reason offers a
+  `tool_version` that the copy meets only when the version constraint is all the copy
+  fails: when the copy falls short of the constraint, the check of a pre-installed
+  tool now also asks uv whether the requirement without the constraint resolves in
+  the copy's environment, and names that shortfall too when it does not. In an
+  offline scan, where ASH installs nothing, the reasons of checkov, cfn-lint and
+  GuardDog say to install a copy before going offline, instead of offering a run
+  through uv or the install of uv. When a plugin's overridable redaction-values hook
+  raises or gives an unusable answer, checkov's and cfn-lint's checks of a copy on
+  `PATH` while uv's availability check does not pass, and bandit's resolved-command
+  check, leave the copy unrun, with a reason that names only the failure. Before, a
+  raising hook's error escaped the check.
 
 ### Maintenance
 

@@ -50,6 +50,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
+from automated_security_helper.base.uv_tool_mixin import UVToolMixin
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason
@@ -61,6 +62,7 @@ from automated_security_helper.utils.sandbox.scope import (
     active_scope,
     sandbox_scope,
 )
+from automated_security_helper.utils.uv_tool_runner import UVToolRunner
 from automated_security_helper.plugin_modules.ash_guarddog_plugins import (
     guarddog_scanner as guarddog_module,
 )
@@ -1140,7 +1142,7 @@ def test_missing_offline_names_the_remedy(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         "automated_security_helper.plugin_modules.ash_guarddog_plugins.guarddog_scanner.get_uv_tool_command",
-        lambda name: None,
+        lambda name, **kwargs: None,
     )
     assert scanner.validate_plugin_dependencies() is False
     reason = scanner.dependency_unavailable_reason
@@ -2293,3 +2295,378 @@ def test_the_hit_limit_bootstrap_refuses_a_guarddog_without_per_rule_limits(
     assert completed.returncode == 3
     assert completed.stdout == ""
     assert completed.stderr.startswith("ERROR: options.max_hits cannot be applied")
+
+
+# --------------------------------------------------------------------------- #
+# A uv answer from the resolver while uv's availability check says no
+# --------------------------------------------------------------------------- #
+#
+# A probe of uv that timed out opens a retry window in which the runner's check keeps
+# answering "unavailable" without probing again. The resolver never reads that window,
+# so it can answer the uv form inside it, and every run of the scan goes through the
+# check, which refuses a uv run and starts nothing in its place. These tests run the
+# real dependency check, the real scan and the mixin's own gates over the window's
+# answer. Only the resolver, the verifier, the PATH lookup, uv's version read and the
+# subprocess are stood in for, and the sandbox-refused case of the max_hits test also
+# stands in for the runner's recorded refusal (``UVToolRunner.unavailable_reason``).
+# One test is the exception:
+# test_a_direct_route_keeps_its_copys_version_and_asks_uv_nothing uses ``fake``,
+# which replaces the dependency check, and has no uv answer, since it reads only the
+# version a scan on a direct route names.
+
+#: The failure the runner carries for a probe that timed out: the words of the answer
+#: the window gives.
+_PROBE_TIMED_OUT = "the probe timed out after 10 seconds"
+
+#: What the resolver answers when uv runs GuardDog.
+_UV_ANSWER = [
+    "uv",
+    "tool",
+    "run",
+    "--from",
+    f"guarddog{GUARDDOG_DEFAULT_VERSION_CONSTRAINT}",
+    "guarddog",
+]
+
+
+class _Window:
+    """Whether the runner's availability check still answers from the window.
+
+    ``inside`` is True while it does (no, with the probe's failure) and False once
+    the window has passed and uv answers. ``versions_asked`` holds the tool of every
+    version probe that reached uv.
+    """
+
+    def __init__(self) -> None:
+        self.inside = True
+        self.versions_asked: List[str] = []
+
+    def availability(self) -> tuple[bool, str | None]:
+        return (False, _PROBE_TIMED_OUT) if self.inside else (True, None)
+
+
+@pytest.fixture
+def window(monkeypatch: pytest.MonkeyPatch) -> _Window:
+    """The runner's availability check answers from the window of a timed-out probe.
+
+    ``UVToolRunner.uv_availability`` is the one read behind the mixin's dependency
+    check, its version probe and its gates, and behind ``is_uv_available``, so the
+    answer reaches all of them. The unit tests' tool guard puts uv-absent's answer
+    there before this runs. The mixin's own version probe is put back over this
+    module's autouse stand-in, so the window decides whether it runs, and uv's
+    version read is a recorder that answers "3.2.0 (uv)".
+    """
+    state = _Window()
+    monkeypatch.setattr(
+        UVToolRunner, "uv_availability", lambda runner: state.availability()
+    )
+
+    def uv_version(runner, tool_name, package_name=None, *args, **kwargs):
+        state.versions_asked.append(tool_name)
+        return "3.2.0 (uv)"
+
+    monkeypatch.setattr(UVToolRunner, "get_tool_version", uv_version)
+    monkeypatch.setattr(
+        GuardDogScanner, "_get_uv_tool_version", UVToolMixin._get_uv_tool_version
+    )
+    return state
+
+
+class _RoutedGuardDog(FakeGuardDog):
+    """The fake GuardDog, which also records the route each call takes.
+
+    ``routes`` holds ``use_uv_tool`` as it stood at each call. A call whose first word
+    is ``guarddog`` on the uv route is a uv run; on a direct route it starts the copy
+    on PATH by name.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.routes: List[bool] = []
+
+    def __call__(self, scanner, **kwargs):
+        self.routes.append(scanner.use_uv_tool)
+        return super().__call__(scanner, **kwargs)
+
+
+@pytest.fixture
+def routed(monkeypatch: pytest.MonkeyPatch) -> _RoutedGuardDog:
+    """The fake GuardDog over ``_run_subprocess``, with the real dependency check.
+
+    Unlike ``fake`` this leaves the check in place, so the route a scan takes is the
+    one the check decided."""
+    fake_guarddog = _RoutedGuardDog()
+    monkeypatch.setattr(
+        GuardDogScanner,
+        "_run_subprocess",
+        lambda self, **kw: fake_guarddog(self, **kw),
+    )
+    return fake_guarddog
+
+
+class _Verifier:
+    """Stands in for ``verify_pre_installed_tool``: gives one verdict, records what it
+    was asked."""
+
+    def __init__(
+        self,
+        status: str,
+        version: str | None = None,
+        detail: str = "",
+        summary: str = "",
+    ) -> None:
+        self.verdict = SimpleNamespace(
+            status=status,
+            executable=None,
+            detail=detail,
+            summary=summary,
+            from_nix=False,
+            version=version,
+        )
+        self.asked: List[tuple] = []
+
+    def __call__(
+        self, executable, package, extras=None, version_constraint=None, **kwargs
+    ):
+        self.asked.append((executable, package))
+        return self.verdict
+
+
+def _never_verified(*args: Any, **kwargs: Any) -> Any:
+    pytest.fail("nothing is on PATH, so nothing is verified")
+
+
+def _the_resolver_answers_uv(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    verifier=_never_verified,
+    *,
+    copy_on_path: bool = False,
+) -> Path | None:
+    """The resolver answers the uv form. PATH holds a ``guarddog`` with a ``python``
+    beside it when ``copy_on_path`` says so, and ``verifier`` is the verdict on it.
+
+    Returns the directory of the copy, or None when nothing is on PATH."""
+    bindir: Path | None = None
+    copy: str | None = None
+    if copy_on_path:
+        bindir = tmp_path / "tool-env" / "bin"
+        bindir.mkdir(parents=True)
+        for name in ("guarddog", "python"):
+            (bindir / name).write_text("#!/bin/sh\n")
+            (bindir / name).chmod(0o755)
+        copy = str(bindir / "guarddog")
+    monkeypatch.setattr(
+        guarddog_module, "get_uv_tool_command", lambda *args, **kwargs: _UV_ANSWER
+    )
+    monkeypatch.setattr(guarddog_module, "verify_pre_installed_tool", verifier)
+    monkeypatch.setattr(
+        guarddog_module,
+        "find_executable",
+        lambda name: copy if name == "guarddog" else None,
+    )
+    return bindir
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("window")
+def test_max_hits_inside_the_window_never_runs_a_copy_that_falls_short(
+    tmp_path, routed, monkeypatch
+):
+    """``options.max_hits`` runs GuardDog's CLI in its own Python. On the uv route
+    that is a uv run, and inside the window every uv run of the scan is refused and
+    nothing is started in its place, so the target fails and says why. Running the
+    Python of the copy on PATH in uv's place ran a copy no check had accepted, under
+    a route and a version record that named uv.
+
+    Without the fix the copy's Python ran."""
+    _the_resolver_answers_uv(
+        monkeypatch,
+        tmp_path,
+        _Verifier(
+            "unsatisfied",
+            version="2.9.0",
+            detail="guarddog 2.9.0 does not satisfy ==3.2.0",
+            summary="version 2.9.0 is below the required ==3.2.0",
+        ),
+        copy_on_path=True,
+    )
+    repo = _repo(tmp_path)
+    scanner = _scanner(repo, tmp_path, ecosystems=["go"], max_hits=0)
+
+    with pytest.raises(ScannerError) as raised:
+        scanner.scan(target=repo, target_type="source")
+
+    assert routed.raw_calls == []
+    assert scanner.use_uv_tool is True
+    assert "options.max_hits" in str(raised.value)
+    assert _PROBE_TIMED_OUT in str(raised.value)
+    assert scanner.targets_attempted == 1 and scanner.targets_failed == 1
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("window")
+def test_max_hits_inside_the_window_runs_the_satisfying_copy_and_its_sarif_names_it(
+    tmp_path, routed, monkeypatch
+):
+    """A copy on PATH that satisfies the scan's requirement runs directly inside the
+    window, with its own Python for ``options.max_hits``, and the run the scanner
+    builds names that copy's version, in the report and in the file on disk."""
+    bindir = _the_resolver_answers_uv(
+        monkeypatch,
+        tmp_path,
+        _Verifier("satisfied", version="3.2.0 (on PATH)", detail="ok"),
+        copy_on_path=True,
+    )
+    assert bindir is not None
+    repo = _repo(tmp_path)
+    scanner = _scanner(repo, tmp_path, ecosystems=["go"], max_hits=0)
+
+    report = scanner.scan(target=repo, target_type="source")
+
+    (call,) = routed.raw_calls
+    assert call[:2] == [str(bindir / "python"), "-c"]
+    assert scanner.use_uv_tool is False
+    assert report.runs[0].tool.driver.version == "3.2.0 (on PATH)"
+    on_disk = json.loads(
+        (scanner.results_dir / "source" / "guarddog.sarif").read_text()
+    )
+    assert on_disk["runs"][0]["tool"]["driver"]["version"] == "3.2.0 (on PATH)"
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("window")
+def test_max_hits_inside_the_window_with_no_copy_on_path_runs_nothing(
+    tmp_path, routed, monkeypatch
+):
+    """Control: with nothing on PATH there is nothing to run in uv's place. The target
+    fails, with or without the fix; only the words differ."""
+    _the_resolver_answers_uv(monkeypatch, tmp_path)
+    repo = _repo(tmp_path)
+    scanner = _scanner(repo, tmp_path, ecosystems=["go"], max_hits=0)
+
+    with pytest.raises(ScannerError) as raised:
+        scanner.scan(target=repo, target_type="source")
+
+    assert "options.max_hits" in str(raised.value)
+    assert routed.raw_calls == []
+    assert scanner.use_uv_tool is True
+
+
+#: The runner's own sentence for a uv run the scanner sandbox refused, in the shape
+#: ``UVToolRunner.unavailable_reason`` gives it: a refusal names the sandbox.
+_A_SANDBOX_REFUSAL = "The scanner sandbox refused to run uv (a stand-in refusal)"
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("window")
+@pytest.mark.parametrize(
+    "refusal", [None, _A_SANDBOX_REFUSAL], ids=["probe-failed", "sandbox-refused"]
+)
+def test_max_hits_inside_the_window_names_the_check_that_did_not_pass(
+    tmp_path, routed, monkeypatch, refusal
+):
+    """``options.max_hits`` on the uv route inside the window: the target fails, and
+    the words say why uv cannot run it. A probe that timed out says nothing about
+    whether uv is installed, so the words name the availability check that did not
+    pass, with the probe's failure, and do not say uv is not available. A refusal the
+    runner recorded keeps its own sentence, which names the sandbox.
+
+    Without the fix: the words said uv was not available (the probe-failed case; the
+    sandbox-refused case passes at both commits)."""
+    if refusal is not None:
+        monkeypatch.setattr(UVToolRunner, "unavailable_reason", lambda runner: refusal)
+    _the_resolver_answers_uv(monkeypatch, tmp_path)
+    repo = _repo(tmp_path)
+    scanner = _scanner(repo, tmp_path, ecosystems=["go"], max_hits=0)
+
+    with pytest.raises(ScannerError) as raised:
+        scanner.scan(target=repo, target_type="source")
+
+    message = str(raised.value)
+    assert routed.raw_calls == []
+    if refusal is None:
+        assert f"uv's availability check did not pass ({_PROBE_TIMED_OUT})" in message
+        assert "uv cannot run it now: uv is not available" not in message
+    else:
+        assert refusal in message
+        assert "uv's availability check did not pass" not in message
+
+
+@pytest.mark.unit
+def test_a_scan_through_uv_after_the_window_names_uvs_version_in_its_sarif(
+    tmp_path, routed, window, monkeypatch
+):
+    """The dependency check ran inside the window, so the version probe the uv route
+    owed was refused and stays owed. GuardDog builds its own SARIF run and writes its
+    version there, and its scan never ran a probe the check had left owed, so a run
+    through uv named no version. The scan now runs an owed probe before it builds the
+    run, as the SARIF step of the other scanners does.
+
+    Without the fix the version stayed empty."""
+    _the_resolver_answers_uv(monkeypatch, tmp_path)
+    repo = _repo(tmp_path)
+    scanner = _scanner(repo, tmp_path, ecosystems=["go"])
+
+    assert scanner.validate_plugin_dependencies_once() is True
+    assert scanner.use_uv_tool is True
+    assert scanner.tool_version is None
+
+    window.inside = False
+    report = scanner.scan(target=repo, target_type="source")
+
+    assert routed.routes == [True]
+    assert routed.raw_calls[0][0] == "guarddog"
+    assert report.runs[0].tool.driver.version == "3.2.0 (uv)"
+    on_disk = json.loads(
+        (scanner.results_dir / "source" / "guarddog.sarif").read_text()
+    )
+    assert on_disk["runs"][0]["tool"]["driver"]["version"] == "3.2.0 (uv)"
+    assert window.versions_asked == ["guarddog"]
+
+
+@pytest.mark.unit
+def test_a_scan_the_window_still_refuses_names_no_version(
+    tmp_path, routed, window, monkeypatch
+):
+    """Control: while the window still holds when the scan builds its run, uv cannot
+    answer the version, so the run names none and the probe stays owed, rather than a
+    version no probe read. (The run itself is the fake's: the real run path refuses a
+    uv run inside the window. This test reads only the version.)"""
+    _the_resolver_answers_uv(monkeypatch, tmp_path)
+    repo = _repo(tmp_path)
+    scanner = _scanner(repo, tmp_path, ecosystems=["go"])
+    assert scanner.validate_plugin_dependencies_once() is True
+
+    report = scanner.scan(target=repo, target_type="source")
+
+    assert report.runs[0].tool.driver.version is None
+    assert scanner._deferred_tool_version_probe == ("guarddog", scanner._uv_from_spec())
+    assert window.versions_asked == []
+
+
+@pytest.mark.unit
+def test_a_direct_route_keeps_its_copys_version_and_asks_uv_nothing(
+    tmp_path, fake, monkeypatch
+):
+    """Control: a scan on a direct route names the version recorded for its copy. The
+    uv probe belongs to the uv route, which a direct route drops, so uv is not asked:
+    the probe the scanner owes is dropped unasked, and the copy's version stays.
+
+    The probe is owed here on purpose. With none owed, the scan's resolve returns at
+    its first line whatever the route, and the drop this test names is not reached."""
+
+    def _never(self, tool_name, package_name=None):
+        pytest.fail("uv's version was asked on a direct route")
+
+    monkeypatch.setattr(GuardDogScanner, "_get_uv_tool_version", _never)
+    repo = _repo(tmp_path)
+    scanner = _scanner(repo, tmp_path, ecosystems=["go"])
+    scanner.use_uv_tool = False
+    scanner.tool_version = "3.2.0 (on PATH)"
+    scanner._deferred_tool_version_probe = ("guarddog", scanner._uv_from_spec())
+
+    report = scanner.scan(target=repo, target_type="source")
+
+    assert report.runs[0].tool.driver.version == "3.2.0 (on PATH)"
+    assert scanner._deferred_tool_version_probe is None

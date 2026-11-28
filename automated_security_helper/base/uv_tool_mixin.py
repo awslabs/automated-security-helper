@@ -21,7 +21,7 @@ import time
 from collections.abc import Mapping
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -298,6 +298,48 @@ def _tool_name(plugin: Any) -> str:
     return tool_name(plugin)
 
 
+#: The file names a uv executable goes by: ``uv``, and on Windows the names a
+#: PATH lookup tries for it (``subprocess_utils``: ``uv.exe``, ``uv.bat``,
+#: ``uv.cmd``), the uv installed with ASH among them (``uv`` plus the platform's
+#: executable suffix, ``uv_tool_runner._bundled_uv_candidates``). Read
+#: case-folded, as Windows reads file names.
+_UV_FILE_NAMES = frozenset({"uv", "uv.exe", "uv.bat", "uv.cmd"})
+
+
+def is_uv_form(command: Any) -> bool:
+    """Whether a ``get_uv_tool_command`` answer runs the tool through uv.
+
+    The resolver answers ``["uv", "tool", "run", ...]`` when uv runs the tool and
+    the path of the binary it found otherwise (``utils/uv_tool_runner.py``). The
+    route is read from the first word's file name, so uv named by its path
+    (``/opt/uv/bin/uv``), as a Windows executable (``uv.exe``, in any letter
+    case) or as a Windows shim (``uv.cmd``, ``uv.bat``) is the uv route as a bare
+    ``uv`` is; comparing the first word with ``"uv"`` read those as a binary on
+    PATH. The name is split on either path separator on every host
+    (``PureWindowsPath``), so a Windows path reads the same wherever this runs.
+    ``uvx``, and a name that only starts or ends with ``uv``, is not uv: the
+    resolver never answers with ``uvx``, and a first word of that kind can only
+    be a binary found by name.
+
+    The one reading of this for the scanners that take their route from the
+    resolver (bandit, checkov, cfn-lint, guarddog, semgrep, zizmor). A string is
+    one word; None, an empty answer, or a first word that is not text or a path
+    is not the uv form.
+    """
+    if command is None:
+        return False
+    if isinstance(command, (str, os.PathLike)):
+        words = [command]
+    else:
+        words = list(command)
+    if not words or not isinstance(words[0], (str, os.PathLike)):
+        return False
+    name = os.fspath(words[0])
+    if not isinstance(name, str):
+        return False
+    return PureWindowsPath(name).name.lower() in _UV_FILE_NAMES
+
+
 def _record_direct_route_version(plugin: Any, version: Optional[str]) -> None:
     """Record the version of the copy on PATH that the scan now runs directly.
 
@@ -307,8 +349,8 @@ def _record_direct_route_version(plugin: Any, version: Optional[str]) -> None:
     it wrote earlier is replaced -- with None when the copy answered nothing (an
     earlier probe resolved 3.4.5 while the copy on PATH was 3.3.15) -- and a probe
     still owed is dropped unasked. ``_select_tool_execution`` and the PATH
-    fallbacks of the bandit, checkov, cfn-lint and semgrep scanners record through
-    here, so on those routes the record follows the route.
+    fallbacks of the bandit, checkov, cfn-lint, guarddog and semgrep scanners
+    record through here, so on those routes the record follows the route.
     """
     plugin.tool_version = version or None
     plugin._deferred_tool_version_probe = None
@@ -1943,18 +1985,18 @@ class UVToolMixin:
         WHO CONSULTS THIS (the roster test in
         tests/unit/plugin_modules/ash_builtin/scanners/ pins the set): the
         scanners whose validation, entered with ``use_uv_tool`` False, falls
-        into a ``get_uv_tool_command`` fallback -- checkov and cfn-lint, whose
-        fallback also re-points the route from the resolver's answer, and
-        bandit, whose ``_take_resolved_command`` keeps the route but still
-        pays the resolver's cold probe. Semgrep needs no consult: entered with
-        ``use_uv_tool`` False and uv available, its ``_validate_tool_dependencies``
-        returns satisfied with no probe (semgrep_scanner.py, the final
-        ``dependencies_satisfied = True`` arm). Zizmor re-decides from scratch
-        by design (zizmor_scanner.py sets ``use_uv_tool = True`` at the top of
-        its tool check, around its rejected-executable logic), and the jupyter
-        converter records its route in its own ``_nbconvert_route`` instead of
-        this flag; both re-verifications answer from the memoized or persisted
-        verdict.
+        into a ``get_uv_tool_command`` fallback -- checkov, cfn-lint and
+        guarddog, whose fallback also re-points the route from the resolver's
+        answer, and bandit, whose ``_take_resolved_command`` takes a uv answer
+        as the uv route and pays the resolver's cold probe. Semgrep needs no consult:
+        entered with ``use_uv_tool`` False and uv available, its
+        ``_validate_tool_dependencies`` returns satisfied with no probe
+        (semgrep_scanner.py, the final ``dependencies_satisfied = True`` arm).
+        Zizmor re-decides from scratch by design (zizmor_scanner.py sets
+        ``use_uv_tool = True`` at the top of its tool check, around its
+        rejected-executable logic), and the jupyter converter records its route
+        in its own ``_nbconvert_route`` instead of this flag; both
+        re-verifications answer from the memoized or persisted verdict.
         """
         executable = getattr(self, "_verified_pre_installed_executable", None)
         if executable is None:
