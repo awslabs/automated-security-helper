@@ -92,12 +92,17 @@ def _workflow_and_job() -> tuple[ga.Workflow, dict[str, Any]]:
     return workflow, workflow.jobs[JOB_ID]
 
 
+def _run_contains(run: str, fragment: str) -> bool:
+    """Whether ``fragment`` occurs anywhere in ``run``, a step's run text."""
+    return fragment in run
+
+
 def _steps_whose_run_contains(fragment: str) -> list[str]:
     _, job = _workflow_and_job()
     return [
         str(step.get("name"))
         for step in job.get("steps") or []
-        if fragment in str(step.get("run") or "")
+        if _run_contains(str(step.get("run") or ""), fragment)
     ]
 
 
@@ -453,4 +458,123 @@ class TestOnlyTheAshStepsSeeTheConfig:
         with_config = [c for c in calls if c["env"].get("ASH_CONFIG") not in (None, "")]
         assert not with_config, (
             f"step {step_name!r} runs with ASH_CONFIG set:\n" + run.describe()
+        )
+
+
+# Run texts planted for the locator: each holds its fragment only on a comment line,
+# or on a line bash runs. Planted, so these rows do not move when the workflow does.
+_FRAGMENT_ONLY_IN_A_COMMENT = [
+    pytest.param(
+        "uv run",
+        "set -euo pipefail\n"
+        'if [ -n "${ASH_CONFIG:-}" ]; then\n'
+        "  # `uv run` would read the checkout's uv settings, so this uses uvx.\n"
+        '  uvx --from "${ASH_UVX_SOURCE}" ash --help\n'
+        "fi\n",
+        id="uv run on an indented comment line",
+    ),
+    pytest.param(
+        "python",
+        "set -euo pipefail\n"
+        "# No python is started here: jq reads the results file.\n"
+        'jq -r .metadata "${RESULTS_PATH}"\n',
+        id="python on a comment line",
+    ),
+    pytest.param(
+        "ash dependencies install",
+        "set -euo pipefail\n"
+        "add_to_path() {\n"
+        "    # `ash dependencies install` ran in an earlier step.\n"
+        '    echo "${ASH_TOOL_BIN}" >> "$GITHUB_PATH"\n'
+        "}\n"
+        "add_to_path\n",
+        id="ash dependencies install on a comment line",
+    ),
+]
+_FRAGMENT_ON_A_COMMAND_LINE = [
+    pytest.param(
+        "uv run",
+        "set -euo pipefail\n"
+        'uv run --no-config --no-project --with "${ASH_UVX_SOURCE}" -- \\\n'
+        "  python -I -m automated_security_helper.utils.content_databases"
+        " cache-key grype-db\n",
+        id="uv run on a command line",
+    ),
+    pytest.param(
+        "uv run",
+        'uv run --no-config --no-project -- python -I -c "print(1)"  # note\n',
+        id="uv run on a command line with a trailing comment",
+    ),
+    pytest.param(
+        "uv run",
+        'echo "#" && uv run --no-config --no-project -- python -I -c "print(1)"\n',
+        id="uv run after a quoted hash on its line",
+    ),
+    pytest.param(
+        "python",
+        "python -I - <<'PY'\n"
+        "# python reads this body from its standard input.\n"
+        "import json\n"
+        "print(json.dumps({}))\n"
+        "PY\n",
+        id="python opening a heredoc whose body has a comment line",
+    ),
+]
+
+
+@pytest.mark.unit
+class TestTheLocatorReadsCommandsNotComments:
+    """A step is found by the commands its run text holds, not by its comments.
+
+    The parametrized checks above take their steps from the locator, and each holds
+    the commands it finds there to the rule this file is about. A comment that names
+    one of the fragments, such as the Run ASH step's note on why every ``uv run`` in
+    the job passes --no-config, made that step a row that failed for a command it does
+    not run. Bash runs nothing on a line whose first non-blank character is ``#``.
+    These rows read text only and start no bash.
+    """
+
+    @pytest.mark.parametrize(("fragment", "run"), _FRAGMENT_ONLY_IN_A_COMMENT)
+    def test_a_fragment_only_on_a_comment_line_does_not_find_the_step(
+        self, fragment, run
+    ):
+        """A fragment that only a comment holds does not make the step one to check.
+
+        Found, the step would get a row that fails for a command it never runs, as
+        the Run ASH step did for ``uv run``.
+        """
+        assert not _run_contains(run, fragment), (
+            f"the locator takes a step whose only {fragment!r} is in a comment:\n{run}"
+        )
+
+    @pytest.mark.parametrize(("fragment", "run"), _FRAGMENT_ON_A_COMMAND_LINE)
+    def test_a_fragment_on_a_command_line_finds_the_step(self, fragment, run):
+        """Control: a fragment on a line bash runs finds the step.
+
+        It does with a trailing comment or a quoted ``#`` on that line, and with a
+        comment line in the heredoc the line opens. A step the locator missed would
+        be checked by no row at all.
+        """
+        assert _run_contains(run, fragment), (
+            f"the locator misses a step that runs {fragment!r}:\n{run}"
+        )
+
+    def test_every_step_found_holds_its_fragment_on_a_command_line(self):
+        """Each step found in the workflow holds its fragment on a command line.
+
+        So every row of the parametrized checks above is about a command the step
+        runs. A failure names the step and the fragment.
+        """
+        stray = []
+        for fragment in ("ash dependencies install", "uv run", "python"):
+            for name in _steps_whose_run_contains(fragment):
+                lines = str(_step(name).get("run") or "").split("\n")
+                commands = [
+                    line for line in lines if not line.lstrip(" \t").startswith("#")
+                ]
+                if not any(fragment in line for line in commands):
+                    stray.append(f"step {name!r} for {fragment!r}")
+        assert not stray, (
+            "the locator finds steps that hold the fragment only in a comment, so "
+            "their rows check a command the step does not run:\n  " + "\n  ".join(stray)
         )
