@@ -2103,6 +2103,7 @@ def test_max_hits_runs_guarddogs_own_cli_in_its_own_python_through_uv(
         "run",
         "--python",
         ">=3.10,<3.14",
+        "--no-env-file",
         "--from",
         f"guarddog{GUARDDOG_DEFAULT_VERSION_CONSTRAINT}",
         "python",

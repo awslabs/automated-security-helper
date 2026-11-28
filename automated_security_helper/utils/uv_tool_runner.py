@@ -12,6 +12,7 @@ import subprocess  # nosec B404 — uv_tool_runner is the subprocess orchestrato
 import sys
 import threading
 import time
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path, PurePath
 from typing import (
@@ -97,6 +98,575 @@ _PROGRESS_UPDATE_INTERVAL_SECONDS = 10
 # ``uv cache`` runs from the filesystem root instead (``_run_uv_cache``), so it
 # names the cache those tools use. ``uv --version`` reads no configuration at all.
 UV_NO_CONFIG = "--no-config"
+
+# Passed to every ``uv tool run`` ASH builds, before the tool's name. ``uv tool run``
+# accepts ``--no-env-file`` (``ToolRunArgs.no_env_file`` in uv-cli at 0.13.4 and
+# 0.13.9, next to ``env_file``, which reads ``UV_ENV_FILE``), so a ``UV_ENV_FILE``
+# the operator's environment names relative to the working directory (a direnv or CI
+# setting) loads no ``.env`` from the scanned tree into the tool's environment.
+UV_NO_ENV_FILE = "--no-env-file"
+
+# Every uv variable that takes a path, and how uv reads its value. uv resolves a
+# relative path against the directory it starts in, which for a scanner is the scanned
+# tree, and it does not expand a leading ``~``. So the tree can send uv to a file or a
+# directory by name through any of these, and ``without_tree_uv_files`` drops one whose
+# value names such a path. uv reads ``UV_CONFIG_FILE`` even ahead of ``--no-config``.
+#
+# The names are the ``[env: ...]`` ones that ``uv help tool run`` and ``uv help tool
+# install`` show for the options that take a file or a directory (uv 0.13.5), and the
+# location variables that no option names, among the ``UV_*`` names in the uv binary:
+# the mirrors uv downloads from, the list of Python downloads it uses instead of its
+# own, the directories of its Python archive cache and of its stored credentials, and
+# the Python search path. That path replaces ``PATH`` when uv looks for an interpreter,
+# and uv runs each candidate it finds there to ask what it is, so a search path that
+# names a directory of the tree makes uv run a program from the tree.
+#
+# How uv splits each value was measured with ``uv tool run --show-settings`` for the
+# option variables, the mirrors and the list of downloads, and with ``uv python find``
+# and stub interpreters for the search path: it is split at the path separator, a
+# relative entry is read against the directory uv starts in, and an empty entry names
+# nothing (uv does not read it as the working directory, as a shell does for ``PATH``).
+# ``UV_ASTRAL_MIRROR_URL``, ``UV_PYTHON_CACHE_DIR`` and ``UV_CREDENTIALS_DIR`` are read
+# only when uv downloads or authenticates, which an offline read cannot show, so their
+# splits are not measured: each is taken as one entry. Each name maps to how its value
+# is split (one entry, or a list split at whitespace, at commas or at the path
+# separator), to whether an entry may start with an index name, as in
+# ``corp=https://host/simple``, and to whether its value may be a URL.
+#
+# The variables that take only a path are ``UV_CONFIG_FILE``, ``UV_ENV_FILE``,
+# ``UV_PROJECT``, ``UV_WORKING_DIR``, ``UV_PYTHON_CACHE_DIR``, ``UV_CREDENTIALS_DIR``
+# and ``UV_PYTHON_SEARCH_PATH``. They read a value spelled as a URL as a path, which
+# is a relative path, read against the directory uv starts in. Measured with uv
+# 0.13.5: ``UV_CONFIG_FILE=https://host/uv.toml`` fails with "failed to open file",
+# and ``uv tool run --show-settings`` keeps ``UV_ENV_FILE=file:///x.env`` as that
+# path. Every other name may be a URL.
+#
+# Four directory variables are left out: ``UV_CACHE_DIR``, ``UV_TOOL_DIR``,
+# ``UV_TOOL_BIN_DIR`` and ``UV_PYTHON_INSTALL_DIR``. ASH resolves them itself, in the
+# sandbox's mounts and in ``_uv_tools_dir``, so dropping one from the child alone would
+# split ASH from uv. ``UV_PYTHON_BIN_DIR``, where ``uv python install`` writes the
+# executables it links, is another of the directories uv keeps its own state in, and is
+# left out with the four. ``UV_PYTHON`` is not in the table either: it names an
+# interpreter or a version request, not a location, and ``_uv_python_reason`` reads it
+# as uv does. A value that is absolute or holds a path separator is a path, judged
+# like the paths above (a relative one is the tree's, and ``~`` is not expanded). A
+# name with no separator is a path too when a file or directory of that name is in the
+# directory uv starts in, which is ASH's own working directory, the directory the
+# caller says the child starts in (``start``, a filesystem root included) or one of
+# the directories judged, so such a name is the tree's. It is dropped even where uv
+# would read it as a request first (a directory named ``3.12``), the safe side. Any
+# other name is a version request (``3.12``, ``cpython@3.12``, ``python3.12``) or a
+# program uv looks up on PATH, and is passed on. ``without_tree_uv_files`` judges it
+# on every route that starts uv; ``plugin_base`` also checks a scanner's own
+# ``UV_PYTHON``, drops one that names an interpreter inside the tree itself, and names
+# it in the same warning (``warn_of_a_uv_python_left_out``).
+# ``UV_PROJECT_ENVIRONMENT`` names a project's environment, and the uv tool commands run
+# no project. The endpoints of remote services (``UV_S3_ENDPOINT_URL``,
+# ``UV_GCS_ENDPOINT_URL``, ``UV_AZURE_ENDPOINT_URL``, ``UV_MALWARE_CHECK_URL`` and
+# ``UV_GITHUB_FAST_PATH_URL``) are never a local location, and no uv tool command reads
+# the installer's variables or those of ``uv publish``.
+_ONE_ENTRY = "one entry"
+_AT_WHITESPACE = "at whitespace"
+_AT_COMMAS = "at commas"
+_AT_PATH_SEPARATOR = "at the path separator"
+
+
+class _UvPathVariable(NamedTuple):
+    """How uv reads the value of one variable of ``_UV_PATH_VARIABLES``.
+
+    ``splitting`` is how the value is split into entries (one of the four constants
+    above), ``carries_name`` whether an entry may start with an index name, and
+    ``takes_url`` whether the value may be a URL. A variable that takes only a path
+    reads a value spelled as a URL as a relative path.
+    """
+
+    splitting: str
+    carries_name: bool
+    takes_url: bool
+
+
+_UV_PATH_VARIABLES: Dict[str, _UvPathVariable] = {
+    "UV_CONFIG_FILE": _UvPathVariable(_ONE_ENTRY, False, False),
+    "UV_PROJECT": _UvPathVariable(_ONE_ENTRY, False, False),
+    "UV_WORKING_DIR": _UvPathVariable(_ONE_ENTRY, False, False),
+    "UV_ENV_FILE": _UvPathVariable(_AT_WHITESPACE, False, False),
+    "UV_CONSTRAINT": _UvPathVariable(_AT_WHITESPACE, False, True),
+    "UV_BUILD_CONSTRAINT": _UvPathVariable(_AT_WHITESPACE, False, True),
+    "UV_OVERRIDE": _UvPathVariable(_AT_WHITESPACE, False, True),
+    "UV_EXCLUDE": _UvPathVariable(_AT_WHITESPACE, False, True),
+    "UV_INDEX": _UvPathVariable(_AT_WHITESPACE, True, True),
+    "UV_EXTRA_INDEX_URL": _UvPathVariable(_AT_WHITESPACE, False, True),
+    "UV_DEFAULT_INDEX": _UvPathVariable(_ONE_ENTRY, True, True),
+    "UV_INDEX_URL": _UvPathVariable(_ONE_ENTRY, False, True),
+    "UV_FIND_LINKS": _UvPathVariable(_AT_COMMAS, False, True),
+    "UV_PYTHON_INSTALL_MIRROR": _UvPathVariable(_ONE_ENTRY, False, True),
+    "UV_PYPY_INSTALL_MIRROR": _UvPathVariable(_ONE_ENTRY, False, True),
+    "UV_GRAALPY_INSTALL_MIRROR": _UvPathVariable(_ONE_ENTRY, False, True),
+    "UV_PYODIDE_INSTALL_MIRROR": _UvPathVariable(_ONE_ENTRY, False, True),
+    "UV_ASTRAL_MIRROR_URL": _UvPathVariable(_ONE_ENTRY, False, True),
+    "UV_PYTHON_DOWNLOADS_JSON_URL": _UvPathVariable(_ONE_ENTRY, False, True),
+    "UV_PYTHON_CACHE_DIR": _UvPathVariable(_ONE_ENTRY, False, False),
+    "UV_CREDENTIALS_DIR": _UvPathVariable(_ONE_ENTRY, False, False),
+    "UV_PYTHON_SEARCH_PATH": _UvPathVariable(_AT_PATH_SEPARATOR, False, False),
+}
+
+# An entry that starts with a URL scheme of two characters or more followed by ``://``
+# is a URL; a drive letter such as ``C:`` is one character, so it is no scheme. An
+# entry of an index variable may start with an index name followed by ``=``.
+_URL_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]+://")
+_INDEX_NAME = re.compile(r"^[A-Za-z0-9._-]+=")
+# The host of a ``file`` URL that is a drive: one letter and its colon (``C:``), or the
+# old spelling with a bar (``C|``). Python's URL parser reads that as a host, where uv's
+# reads ``file://C:/x`` as ``file:///C:/x``.
+_DRIVE_HOST = re.compile(r"^[A-Za-z][:|]$")
+
+
+def with_no_env_file(command: List[str]) -> List[str]:
+    """``command`` with ``--no-env-file`` after ``tool run``, when it is a uv tool run.
+
+    Any other command, and one that already carries the flag, comes back as it was.
+    """
+    words = list(command)
+    if (
+        len(words) < 3
+        or os.path.basename(str(words[0])).lower() not in ("uv", "uv.exe")
+        or words[1:3] != ["tool", "run"]
+        or UV_NO_ENV_FILE in words
+    ):
+        return command
+    return [*words[:3], UV_NO_ENV_FILE, *words[3:]]
+
+
+def _file_url_path(url: str) -> Optional[str]:
+    """The local path a URL names: a ``file`` URL's, and none for any other URL.
+
+    A ``file`` URL with a host other than empty or ``localhost`` names a path on that
+    host, which comes back as ``//host/path``. A host that is a drive (one letter and
+    ``:`` or ``|``) is no host: ``file://C:/x`` and ``file://C|/x`` name what
+    ``file:///C:/x`` does, as uv's URL parser reads them. A URL that cannot be read
+    comes back as written, which reads as a relative path, so it is judged the tree's.
+    """
+    # Imported here, not at module scope: urllib.request pulls in the HTTP client,
+    # and a run with no URL in a uv path variable never needs it.
+    import urllib.parse
+    from urllib.request import url2pathname
+
+    try:
+        parts = urllib.parse.urlsplit(url)
+        if parts.scheme != "file":
+            return None
+        if _DRIVE_HOST.match(parts.netloc):
+            # With the drive's colon written as a colon: on POSIX, url2pathname keeps
+            # a ``|`` as it was written, and the two spellings name one drive.
+            return url2pathname(f"/{parts.netloc[0]}:{parts.path}")
+        path = url2pathname(parts.path)
+    except (ValueError, OSError):
+        return url
+    if parts.netloc.lower() not in ("", "localhost"):
+        return f"//{parts.netloc}{path}"
+    return path
+
+
+def _uv_value_paths(name: str, value: str) -> List[str]:
+    """The local paths ``value`` names, read as uv reads the value of ``name``.
+
+    The value is split as ``_UV_PATH_VARIABLES`` says: it is one entry, or a list split
+    at whitespace, at commas or at the path separator (``os.pathsep``). An entry is not
+    stripped, as uv does not strip it: a leading space is part of the path. An empty
+    entry names nothing. An entry of an index variable loses a leading ``name=``. In a
+    variable that takes a URL, an entry that starts with a URL scheme is a URL
+    (``_file_url_path``); every other entry is a path, as written. In a variable that
+    takes only a path, every entry is a path as written, a URL spelling included: uv
+    reads it as a relative path, so ``_names_a_tree_path`` judges it the tree's.
+    """
+    variable = _UV_PATH_VARIABLES[name]
+    if variable.splitting == _AT_WHITESPACE:
+        entries = value.split()
+    elif variable.splitting == _AT_COMMAS:
+        entries = value.split(",")
+    elif variable.splitting == _AT_PATH_SEPARATOR:
+        entries = value.split(os.pathsep)
+    else:
+        entries = [value]
+    paths: List[str] = []
+    for entry in entries:
+        location = entry
+        if variable.carries_name:
+            index_name = _INDEX_NAME.match(entry)
+            if index_name is not None:
+                location = entry[index_name.end() :]
+        if variable.takes_url and _URL_SCHEME.match(location):
+            location = _file_url_path(location) or ""
+        if location:
+            paths.append(location)
+    return paths
+
+
+# Why ``without_tree_uv_files`` leaves a variable out, as the end of the warning that
+# names it. The first is a path uv reads in the directory it starts in, which for a
+# scanner is the scanned tree: a relative path, one that starts with ``~`` (uv does not
+# expand it), the URL spelling of a variable that takes only a path, a Windows path
+# with no drive, a bare ``UV_PYTHON`` that names an entry of that directory. The second
+# is a path inside the tree, or inside a directory ASH treats as the tree.
+_RELATIVE_PATH = (
+    "its value holds a relative path, which uv reads in the directory it starts in."
+)
+_PATH_OF_THE_TREE = (
+    "its value names a path inside the scanned tree or a directory ASH treats as one."
+)
+
+# The (variable, reason) pairs ``without_tree_uv_files`` and
+# ``warn_of_a_uv_python_left_out`` have already warned of in this process: a run judges
+# the same environment many times, and each is said once, whichever of the two says it.
+# ``_reset_uv_tool_runner_caches`` clears them. The lock is held for the check and the
+# add alone, so a caller may hold any other lock when it judges an environment.
+_uv_variables_warned: Set[Tuple[str, str]] = set()
+_uv_variables_warned_lock = threading.Lock()
+
+# POSIX spellings through which a process opens something of its own. What such a path
+# names depends on the process that opens it: a uv started in the tree reads
+# ``/proc/self/cwd`` as the tree, where ASH, working elsewhere, resolves it to its own
+# directory. So the spelling is the tree's, whatever it resolves to here.
+_PROCESS_RELATIVE_PATHS = ("/proc/self", "/proc/thread-self", "/dev/fd")
+
+
+def _folds_case() -> bool:
+    """Whether the volume ASH runs on reads names that differ in case or form as one.
+
+    macOS's do: a path that differs from another only in letter case, or in Unicode
+    normalization form, names the same file, so the two are compared as one spelling.
+    Windows' ``normcase`` folds letter case itself. Another volume that folds case (a
+    casefolded directory of a Linux volume, exFAT, SMB) is not told apart here.
+    """
+    return sys.platform == "darwin"
+
+
+def _without_extended_length_prefix(path: str) -> str:
+    r"""``path`` with a Windows extended-length prefix taken off, as Windows reads it.
+
+    ``\\?\C:\x`` is ``C:\x``, and ``\\?\UNC\host\share\x`` is ``\\host\share\x``. A
+    path with no such prefix, or one whose prefix is followed by neither a drive nor a
+    share (``\\?\Volume{...}``), comes back as it was.
+    """
+    if not path.startswith("\\\\?\\"):
+        return path
+    rest = path[4:]
+    if rest[:4].upper() == "UNC\\":
+        return "\\\\" + rest[4:]
+    if re.match(r"[A-Za-z]:", rest):
+        return rest
+    return path
+
+
+def _reads_the_opening_process(path: str, pathmod: Any) -> bool:
+    """Whether the POSIX path ``path`` is, or lies below, one of the spellings through
+    which a process opens something of its own (``_PROCESS_RELATIVE_PATHS``).
+
+    Any such spelling that holds a ``..`` component is the opening process's path, as
+    ``/proc/self/cwd/../../x`` is: the system resolves the ``..`` from the directory
+    the link names, which is the opening process's own, where taking it out first would
+    read ``/proc/x``. So the path is judged as written: a ``.`` is taken out and a run
+    of slashes is one slash (Python's ``normpath`` keeps exactly two at the start,
+    which Linux reads as one), so ``//proc/./self/cwd/x`` is ``/proc/self/cwd/x``, but
+    every ``..`` stays. It is judged again with its ``..`` taken out, so a path that
+    reaches one of the spellings by a ``..`` (``/tmp/../proc/self/cwd/x``) is the
+    opening process's too.
+    """
+    parts = [part for part in path.split("/") if part not in ("", ".")]
+    as_written = "/" + "/".join(parts)
+    without_dotdots = "/" + pathmod.normpath(path).lstrip("/")
+    return any(
+        spelled == prefix or spelled.startswith(prefix + "/")
+        for spelled in (as_written, without_dotdots)
+        for prefix in _PROCESS_RELATIVE_PATHS
+    )
+
+
+def _tree_path_reason(
+    value: str,
+    roots: Iterable[Union[str, "os.PathLike[str]"]],
+    *,
+    pathmod: Any = os.path,
+) -> Optional[str]:
+    r"""Why the one path ``value`` is the scanned tree's, or None when it is not.
+
+    ``_RELATIVE_PATH`` when it is not absolute as written, a leading ``~`` included (uv
+    does not expand it, so it reads the path against the directory it starts in). On
+    Windows a path with no drive (``\x`` or ``/x``) is relative too: the child resolves
+    it on the drive of its own working directory. An extended-length ``\\?\`` or
+    ``\\?\UNC\`` prefix is no part of the path, on the value or on a root.
+
+    ``_PATH_OF_THE_TREE`` when it is one of ``roots`` or lies inside one, by its
+    spelling or by its real path, which also settles a ``..`` that passes through a
+    link; when it is a POSIX spelling through which a process opens something of its
+    own (``/proc/self``, ``/proc/thread-self`` and ``/dev/fd``, and what lies below
+    them); or when it cannot be resolved. Each root is compared spelled and resolved.
+    Where ``_folds_case`` is true, both sides of each comparison are folded in letter
+    case and put in Unicode normalization form C first.
+
+    ``pathmod`` is the path module that reads every spelling, ``os.path`` unless a
+    test reads the other platform's.
+    """
+    if not value:
+        return None
+    windows = pathmod is ntpath
+    if windows:
+        value = _without_extended_length_prefix(value)
+    if not pathmod.isabs(value):
+        return _RELATIVE_PATH
+    if windows and not pathmod.splitdrive(value)[0]:
+        # Absolute before Python 3.13, but rooted on whichever drive is current.
+        return _RELATIVE_PATH
+    if not windows and _reads_the_opening_process(value, pathmod):
+        return _PATH_OF_THE_TREE
+    try:
+        spelled = (pathmod.abspath(value), pathmod.realpath(value))
+    except (ValueError, OSError):
+        return _PATH_OF_THE_TREE
+    folds = _folds_case()
+
+    def comparable(path: str) -> str:
+        path = pathmod.normcase(path)
+        return unicodedata.normalize("NFC", path).casefold() if folds else path
+
+    bases: Set[str] = set()
+    for root in roots:
+        text = os.fspath(root)
+        if windows:
+            text = _without_extended_length_prefix(text)
+        bases.update(
+            comparable(form).rstrip(pathmod.sep)
+            for form in (pathmod.abspath(text), pathmod.realpath(text))
+        )
+    inside = any(
+        shown == base or shown.startswith(base + pathmod.sep)
+        for shown in map(comparable, spelled)
+        for base in bases
+    )
+    return _PATH_OF_THE_TREE if inside else None
+
+
+def _names_a_tree_path(
+    value: str,
+    roots: Iterable[Union[str, "os.PathLike[str]"]],
+    *,
+    pathmod: Any = os.path,
+) -> bool:
+    """Whether the one path ``value`` is the scanned tree's (``_tree_path_reason``)."""
+    return _tree_path_reason(value, roots, pathmod=pathmod) is not None
+
+
+def _is_a_filesystem_root(path: Union[str, "os.PathLike[str]"]) -> bool:
+    r"""Whether ``path`` is a filesystem root: a path equal to its own anchor.
+
+    ``/`` on POSIX, and on Windows a drive root such as ``C:\`` or a UNC share root
+    such as ``\\host\share\``. The path is read as spelled (made absolute) and by its
+    real path, and either being a root is enough, so a link to ``/`` is one too.
+    """
+    text = os.fspath(path)
+    for form in (os.path.abspath(text), os.path.realpath(text)):
+        pure = PurePath(form)
+        if pure.anchor == str(pure):
+            return True
+    return False
+
+
+def _uv_python_reason(
+    value: str,
+    roots: Iterable[Union[str, "os.PathLike[str]"]],
+    *,
+    start: Optional[Union[str, "os.PathLike[str]"]] = None,
+) -> Optional[str]:
+    """Why ``UV_PYTHON`` set to ``value`` names a path of the tree, or None when not.
+
+    uv reads the value as a path when it is absolute or holds a path separator, and
+    that path is judged as the other variables' are (``_tree_path_reason``): a relative
+    one is the tree's, and ``~`` is not expanded. A name with no separator is a path
+    too when a file or directory of that name is in the directory uv starts in. That
+    directory is ``start`` when the caller knows it, and otherwise ASH's own working
+    directory, which a child given no directory starts in; both are looked in, and so
+    is each of ``roots``. ``start`` is looked in whatever it is, a filesystem root
+    included: ``without_tree_uv_files`` judges no absolute path against such a root,
+    but uv still reads a bare name as the entry of that name where it starts. Such a
+    name is the tree's and reads as a relative path. A name that is also an entry there
+    is dropped even where uv would read it as a request first (a directory named
+    ``3.12``): the safe side. Any other name is a version request (``3.12``,
+    ``cpython@3.12``, ``python3.12``) or a program uv looks up on PATH, and an empty
+    value names nothing: they are kept.
+    """
+    if not value:
+        return None
+    path_shaped = (
+        os.path.isabs(value)
+        or bool(os.path.splitdrive(value)[0])
+        or any(separator in value for separator in (os.sep, os.altsep) if separator)
+    )
+    if path_shaped:
+        return _tree_path_reason(value, roots)
+    directories = [os.fspath(root) for root in roots]
+    if start is not None:
+        directories.append(os.fspath(start))
+    with contextlib.suppress(OSError):
+        directories.append(os.getcwd())
+    for directory in directories:
+        if os.path.exists(os.path.join(directory, value)):
+            return _RELATIVE_PATH
+    return None
+
+
+# The directories ``judging_uv_paths_in`` has set, which ``without_tree_uv_files`` also
+# judges against. A context variable, as ``subprocess_utils.scanning_tree`` keeps the
+# scanned trees of a lookup, but read by ``without_tree_uv_files`` alone: the lookups
+# of tools are not affected.
+_JUDGED_UV_ROOTS: contextvars.ContextVar[Tuple[str, ...]] = contextvars.ContextVar(
+    "ash_uv_paths_judged_in", default=()
+)
+
+
+@contextlib.contextmanager
+def judging_uv_paths_in(root: Union[str, "os.PathLike[str]"]) -> Iterator[None]:
+    """Judge every uv path variable in this context against ``root`` as well.
+
+    Inside it, :func:`without_tree_uv_files` treats ``root`` as one of the directories
+    it leaves a variable out for, besides those its caller names and those of the
+    active scan. A command that starts uv from many places (``ash dependencies
+    install``, which treats its working directory as the source tree) enters it once,
+    so every uv command it starts, and every question it asks uv (the post-install
+    sweep's ``uv tool list`` among them), is judged against that directory, and not
+    only the commands whose caller passes it. Nested uses add their roots to one
+    another's. A context variable: a thread sees it only when it is started with a copy
+    of this context (``contextvars.copy_context().run``).
+    """
+    token = _JUDGED_UV_ROOTS.set(
+        (*_JUDGED_UV_ROOTS.get(), os.path.abspath(os.fspath(root)))
+    )
+    try:
+        yield
+    finally:
+        _JUDGED_UV_ROOTS.reset(token)
+
+
+def _warn_of_a_variable_left_out(name: str, reason: str) -> None:
+    """Warn that ``name`` is not passed to uv, once a process for each ``reason``.
+
+    The warning names the variable and the reason and never the value, which may be a
+    path the tree chose or a credential in a URL.
+    """
+    with _uv_variables_warned_lock:
+        if (name, reason) in _uv_variables_warned:
+            return
+        _uv_variables_warned.add((name, reason))
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    ASH_LOGGER.warning(f"{name} is not passed to uv: {reason}")
+
+
+def without_tree_uv_files(
+    environment: Optional[Dict[str, str]],
+    roots: Iterable[Union[str, "os.PathLike[str]"]] = (),
+    *,
+    start: Optional[Union[str, "os.PathLike[str]"]] = None,
+) -> Optional[Dict[str, str]]:
+    """``environment`` without a uv variable whose value names a path of the tree.
+
+    The variables are those of ``_UV_PATH_VARIABLES``, and ``UV_PYTHON``. Each value
+    of the first is read as uv reads it (``_uv_value_paths``): split into entries, with
+    an index name and any URL that names no local path set aside, and each remaining
+    path judged on its own. The variable is dropped when any of its paths is the
+    tree's: relative (uv resolves it against its working directory, the scanned tree,
+    and does not expand a leading ``~``), or equal to or inside one of ``roots``, of
+    the active scan's trees (``subprocess_utils.scanned_trees``), of the directories
+    ``judging_uv_paths_in`` names or of ``start``, by its spelling or by where its
+    links lead (``_tree_path_reason`` has the other spellings it reads). ``roots`` are
+    directories that are the scanned tree's or derived from it, such as a caller's
+    results, source and output directories. A variable whose paths are all absolute
+    and outside every one of them is the operator's and stays whole, and so does one
+    that holds only URLs that name no local path. A variable that takes only a path is
+    the exception to the URL rules above: uv reads a URL spelling of its value as a
+    relative path, so it is dropped.
+
+    ``start`` is the directory the child starts in, when the caller knows it. It is
+    judged as ``roots`` are, except where it is a filesystem root
+    (``_is_a_filesystem_root``): there it adds nothing to the directories an absolute
+    path is judged against. ``path_trust.cwd_outside_scanned_tree`` normally gives
+    checkov, Syft and Ferret the filesystem root of the scanned tree to start in, to
+    keep them outside it. A root of ``/`` would make every absolute path the tree's,
+    so the operator's own absolute uv files would be left out of those runs and named
+    in a warning as the tree's.
+
+    ``UV_PYTHON`` is read as ``_uv_python_reason`` says. A path (absolute, or holding a
+    path separator) is judged as the paths above are. A name with no separator is the
+    tree's when a file or directory of that name is in ASH's working directory, in
+    ``start`` or in one of the directories above, and is dropped even where uv would
+    read it as a request first (a directory named ``3.12``), the safe side. ``start``
+    is looked in whatever it is, a filesystem root included, because uv still reads a
+    bare ``UV_PYTHON`` as the entry of that name in the directory it starts in. Any
+    other name, a version request or a program uv looks up on PATH, stays.
+
+    A variable that is dropped is named in one warning for each reason in the process
+    (``_reset_uv_tool_runner_caches`` forgets them), which never holds its value.
+    ``environment`` is what the child gets (this process's when None); the same object
+    comes back when nothing is dropped, so a run that passed no environment still
+    passes none.
+    """
+    from automated_security_helper.utils.subprocess_utils import scanned_trees
+
+    current = snapshot_environ() if environment is None else environment
+    trees = [*roots, *scanned_trees(), *_JUDGED_UV_ROOTS.get()]
+    if start is not None and not _is_a_filesystem_root(start):
+        trees.append(start)
+    dropped: Dict[str, str] = {}
+    for name in _UV_PATH_VARIABLES:
+        value = current.get(name)
+        if not isinstance(value, str):
+            continue
+        for path in _uv_value_paths(name, value):
+            reason = _tree_path_reason(path, trees)
+            if reason is not None:
+                dropped[name] = reason
+                break
+    python = current.get("UV_PYTHON")
+    if isinstance(python, str):
+        python_reason = _uv_python_reason(python, trees, start=start)
+        if python_reason is not None:
+            dropped["UV_PYTHON"] = python_reason
+    if not dropped:
+        return environment
+    for name, reason in dropped.items():
+        _warn_of_a_variable_left_out(name, reason)
+    return {key: item for key, item in current.items() if key not in dropped}
+
+
+def warn_of_a_uv_python_left_out(
+    environment: Optional[Dict[str, str]],
+    roots: Iterable[Union[str, "os.PathLike[str]"]],
+) -> None:
+    """Warn that the ``UV_PYTHON`` of ``environment`` is not passed to uv.
+
+    For a caller that drops the variable itself, before ``without_tree_uv_files``
+    judges the environment: ``PluginBase._run_subprocess`` does, for an interpreter
+    inside the scanned tree, so that ASH's own is named in its place. The filter
+    never sees a variable that is already gone, so it cannot say that one is left
+    out. A warning the caller keeps of its own is said again by each plugin, and
+    again when the same value is judged on another route. Said here, it is the
+    filter's own warning (``_warn_of_a_variable_left_out``): once in a process for
+    each variable and reason, whichever route leaves the variable out first, and
+    never with its value.
+
+    The reason is the one the filter gives for the value against ``roots``
+    (``_tree_path_reason``), so a value both leave out is named in one line. The
+    caller's own test reads the interpreter's directory resolved and its name as
+    written (a ``.venv`` python is a link to the interpreter it was made from), and
+    the filter reads the value as written and resolved whole, so the two can differ:
+    an interpreter that is a link out of the tree, reached through a link above the
+    tree, is inside by the test and outside by the filter. When the filter gives no
+    reason, the reason is that the value names a path inside the tree.
+    ``environment`` is what the child gets (this process's when None).
+    """
+    current = snapshot_environ() if environment is None else environment
+    value = current.get("UV_PYTHON")
+    reason = _tree_path_reason(value, roots) if isinstance(value, str) else None
+    _warn_of_a_variable_left_out("UV_PYTHON", reason or _PATH_OF_THE_TREE)
 
 
 class UVToolRunnerError(Exception):
@@ -1601,7 +2171,9 @@ class UVToolRunner:
                     text=True,
                     timeout=30,
                     check=True,
-                    env=environ_for_parsed_output(),
+                    # A uv path setting the scanned tree supplies is dropped, as
+                    # for the run and the install.
+                    env=environ_for_parsed_output(without_tree_uv_files(None)),
                     encoding="utf-8",
                     errors="replace",
                 )
@@ -1862,6 +2434,9 @@ class UVToolRunner:
                     probe_env = snapshot_environ()
                     probe_env["UV_OFFLINE"] = "1"
                     command.append("--offline")
+
+                command.append(UV_NO_ENV_FILE)
+                probe_env = without_tree_uv_files(probe_env)
 
                 # Build command with --from parameter if extras specified
                 if package_name:
@@ -2285,7 +2860,13 @@ class UVToolRunner:
                     # wrapping, NO_COLOR=1), as the module's other parsed uv
                     # calls do. The install's behavior does not depend on
                     # display.
-                    env=environ_for_parsed_output(),
+                    #
+                    # A uv path setting the scanned tree supplies is dropped, as for
+                    # the run. The working directory stays ASH's own: an empty one
+                    # would re-base a relative UV_TOOL_DIR or UV_TOOL_BIN_DIR, and
+                    # the tool would be installed into a directory that is deleted
+                    # afterwards.
+                    env=environ_for_parsed_output(without_tree_uv_files(None)),
                     encoding="utf-8",
                     errors="replace",
                 )
@@ -2499,6 +3080,7 @@ class UVToolRunner:
         python_request: Optional[str] = None,
         offline: Optional[bool] = None,
         with_dependencies: Optional[List[str]] = None,
+        tree_roots: Iterable[Union[str, "os.PathLike[str]"]] = (),
     ) -> subprocess.CompletedProcess:
         """Run a UV tool with specified arguments and output handling support.
 
@@ -2550,6 +3132,11 @@ class UVToolRunner:
                 installed, or installed under another spec) lacked them, and a
                 tool whose plugin needs one (``jupyter`` beside nbconvert) ran
                 without it. Each is checked as the install checks its own.
+            tree_roots: Directories that are the scanned tree's or derived from it
+                (a converter passes its source and output directories), judged as
+                ``results_dir`` is, and as ``cwd`` is unless that is a filesystem
+                root: a uv path variable that lies inside one is not passed on to the
+                child. The trees of the active scan are always judged too.
 
         Returns:
             CompletedProcess result with enhanced output handling
@@ -2583,6 +3170,26 @@ class UVToolRunner:
 
         if python_request:
             command.extend(["--python", python_request])
+
+        # No env file: the one UV_ENV_FILE names is read relative to cwd, the
+        # scanned tree. A uv path variable the tree supplies is dropped too: one
+        # with a relative path, or with a path inside the results directory, a
+        # directory the caller names in tree_roots, a tree of the active scan, or
+        # cwd, the directory the run starts in, unless that is a filesystem root
+        # (without_tree_uv_files adds those). cwd goes in as ``start``, not among
+        # the roots: checkov, Syft and Ferret start their tool at the filesystem
+        # root of the scanned tree, to keep it outside the tree, and a root of ``/``
+        # would make every absolute path the tree's, so the operator's own files
+        # outside it would be left out. A filesystem root adds nothing to the
+        # directories an absolute path is judged against, and a bare UV_PYTHON is
+        # still looked up in cwd, since uv reads it as the entry of that name where
+        # it starts.
+        command.append(UV_NO_ENV_FILE)
+        env = without_tree_uv_files(
+            env,
+            tuple(path for path in (results_dir, *tree_roots) if path is not None),
+            start=cwd,
+        )
 
         # Build command with --from parameter if extras or version constraint specified
         base_name = package_name or tool_name
@@ -3477,8 +4084,14 @@ def invalidate_tool_version_cache(name: str) -> None:
 
 
 def _reset_uv_tool_runner_caches() -> None:
-    """Reset module-level caches (mainly for testing)."""
+    """Reset module-level caches (mainly for testing).
+
+    That includes the memory of the uv variables ``without_tree_uv_files`` and
+    ``warn_of_a_uv_python_left_out`` have warned of, so each is warned of again.
+    """
     global _lookup_generation
+    with _uv_variables_warned_lock:
+        _uv_variables_warned.clear()
     with _uv_tool_runner_cache_lock:
         _lookup_generation += 1
         _uv_command_cache.clear()
@@ -3965,6 +4578,8 @@ def get_uv_tool_command(
                 probe_command.append("--offline")
                 probe_env = snapshot_environ()
                 probe_env["UV_OFFLINE"] = "1"
+            probe_command.append(UV_NO_ENV_FILE)
+            probe_env = without_tree_uv_files(probe_env)
             if from_spec:
                 probe_command.extend(["--from", from_spec])
             probe_command.extend([tool_name, "--version"])

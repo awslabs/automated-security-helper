@@ -48,6 +48,16 @@
 
 ### Behavior changes
 
+- **`uv tool run` no longer applies the operator's `UV_ENV_FILE`, and a uv path
+  variable that points into the working directory is left out.** Every `uv tool run`
+  ASH builds now passes `--no-env-file`, so an operator's own `UV_ENV_FILE` no longer
+  applies to a scanner's run. A uv path variable whose value is relative or lies inside
+  the directory ASH treats as the tree is not passed to uv, and ASH warns once for each
+  variable and reason; the variables are the ones the Fixes section lists, and
+  `UV_PYTHON`. `ash dependencies install` treats its working directory as the tree, so
+  when it runs from a directory that holds the operator's own uv files (a home
+  directory, say), it does not use them. To use such a file, name it by an absolute
+  path and run the command from a directory that does not contain it.
 - **`ash merge` records the merged run in the scan history.** With
   `global_settings.history.enabled` in the merged configuration (the shards'
   recorded config, with `--config-overrides` applied), the merge appends one run
@@ -168,6 +178,66 @@
 
 ### Fixes
 
+- **ASH's uv tool commands, and every command a plugin declares for
+  `ash dependencies install`, are not given a listed uv path variable of the
+  environment whose value is relative or, by the rules below, a path inside the
+  scanned tree.** Every `uv tool run` ASH builds passes `--no-env-file`, so it
+  reads no env file, the operator's own included. Every `uv tool run`,
+  `uv tool install`, `uv tool list` and version probe ASH starts, and every command a
+  plugin declares for `ash dependencies install` (a shell line or a script can start
+  uv in turn), gets none of these uv variables when a path in its value is relative,
+  starts with `~` (uv does not expand it), or lies inside the tree being scanned, by
+  its spelling or by where its links lead: the requirements files (`UV_CONSTRAINT`,
+  `UV_BUILD_CONSTRAINT`, `UV_OVERRIDE`, `UV_EXCLUDE`), the config and env files
+  (`UV_CONFIG_FILE`, `UV_ENV_FILE`), the index and find-links locations (`UV_INDEX`,
+  `UV_DEFAULT_INDEX`, `UV_INDEX_URL`, `UV_EXTRA_INDEX_URL`, `UV_FIND_LINKS`),
+  the managed-Python download locations (`UV_PYTHON_INSTALL_MIRROR`,
+  `UV_PYPY_INSTALL_MIRROR`, `UV_GRAALPY_INSTALL_MIRROR`, `UV_PYODIDE_INSTALL_MIRROR`,
+  `UV_ASTRAL_MIRROR_URL`, `UV_PYTHON_DOWNLOADS_JSON_URL`), the Python archive cache
+  and credentials directories (`UV_PYTHON_CACHE_DIR`, `UV_CREDENTIALS_DIR`), the
+  interpreter search path (`UV_PYTHON_SEARCH_PATH`), and the project and working
+  directories (`UV_PROJECT`, `UV_WORKING_DIR`). A scanner's own runs, and the notebook
+  converter's, also leave out such a value when it lies inside the output directory or
+  the directory the run starts in, which counts only when it is not the filesystem
+  root, where checkov, Syft and Ferret start their tool to keep it outside the tree.
+  A value of a variable that takes only a path (`UV_CONFIG_FILE`, `UV_ENV_FILE`,
+  `UV_PROJECT`, `UV_WORKING_DIR`, `UV_PYTHON_CACHE_DIR`, `UV_CREDENTIALS_DIR` and
+  `UV_PYTHON_SEARCH_PATH`) is read as a path even when it is spelled as a URL, as uv
+  reads it, so it counts as a relative path. URLs other than `file:` URLs of the
+  variables that take a URL, and absolute paths outside those directories, are passed
+  on unchanged. `UV_PYTHON` is judged the same way on all of these routes. A value that
+  is absolute or holds a path separator is a path, and is left out by the rules above
+  (a relative `.venv/bin/python`, say). A name with no separator is left out when a
+  file or directory of that name is in ASH's working directory, in the directory the
+  run starts in (the filesystem root included) or in a directory the rules above
+  judge against, because uv reads it as that path (`.venv`, say). That
+  holds for a directory named like a version request (`3.12`) too, where uv would read
+  the request first. A version request (`3.12`, `cpython@3.12`, `python3.12`), a
+  program name that uv looks up on PATH, and an empty value are passed on.
+  Each variable left out is named in a warning, once in a process for each
+  reason (the value holds a relative path, which uv reads in the directory it starts
+  in, or names a path inside the scanned tree or a directory ASH treats as one), and
+  the warning does not show the value. Some spellings that name the tree without lying
+  under it as written count as the tree's. On POSIX systems, a path through
+  `/proc/self`, `/proc/thread-self` or `/dev/fd` is the tree's, with a run of leading
+  slashes read as one (`//proc/self/cwd/uv.toml`) and even with a `..` component
+  in it (`/proc/self/cwd/../../src/uv.toml`), because what such a path names
+  depends on the process that opens it. On macOS, a path that differs from the tree's
+  only in letter case or in Unicode normalization form is the tree's, as the volume
+  reads it. On Windows, a `\\?\` or `\\?\UNC\` prefix is removed from a path
+  and from the tree before they are compared, and a path with no drive (`\x` or `/x`)
+  counts as relative, since uv resolves it on the drive of its own working directory.
+  A `file://C:/x` or `file://C|/x` URL, whose host is a drive letter, is read as
+  `file:///C:/x`, as uv reads it. `ash dependencies install` judges every uv command
+  it starts against its working directory, which it treats as the source tree: the
+  commands it builds and the ones that start through ASH's uv runner, such as a tool's
+  version probe and the post-install sweep's `uv tool list`. Not covered: the Windows
+  admin-share spellings of a path (`\\host\C$\...`), case-insensitive volumes other
+  than macOS's (a casefolded directory on Linux, exFAT, SMB, a macOS bind mount), and
+  the directories uv keeps its own state in (`UV_CACHE_DIR`, `UV_TOOL_DIR`,
+  `UV_TOOL_BIN_DIR`, `UV_PYTHON_INSTALL_DIR`, `UV_PYTHON_BIN_DIR`), which are passed on
+  as given. The GuardDog hit-limit bootstrap also drops the working directory from its
+  import path before importing GuardDog.
 - **`ash report` honors every `--config-overrides` spelling of the deduplication
   settings.** An override that sets `global_settings.deduplication.annotate` or
   `fold` through an object value at the section or at `global_settings`, with a

@@ -167,7 +167,9 @@ from automated_security_helper.utils.sandbox.scope import (
     active_scope,
     sandbox_scope,
 )
+from automated_security_helper.utils.python_child import DROP_WORKING_DIRECTORY
 from automated_security_helper.utils.uv_tool_runner import (
+    UV_NO_ENV_FILE,
     UVToolRunnerError,
     checked_requirement,
     find_executable,
@@ -276,8 +278,12 @@ _SEVERITY_LEVELS = {
 #: every rule ``<limit>``; ``raise`` only raises a rule's own limit to it. A limit of
 #: 0 removes every limit (GuardDog's ``None``). Python 3.10 syntax, the oldest
 #: interpreter GuardDog is installed into (the ``runtime_compat`` row of
-#: ``GuardDogScanner.operational_facets``).
-_HIT_LIMIT_BOOTSTRAP = """\
+#: ``GuardDogScanner.operational_facets``). It opens with
+#: ``python_child.DROP_WORKING_DIRECTORY``, so the working directory ``-c`` puts first
+#: on ``sys.path`` is gone before GuardDog is imported.
+_HIT_LIMIT_BOOTSTRAP = (
+    DROP_WORKING_DIRECTORY
+    + """\
 import sys
 
 limit, mode, args = int(sys.argv[1]), sys.argv[2], sys.argv[3:]
@@ -300,6 +306,7 @@ from guarddog.cli import cli
 sys.argv = ["guarddog", *args]
 sys.exit(cli())
 """
+)
 
 
 def _risk_severity(value: Any) -> str:
@@ -1508,6 +1515,7 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
                 python_request = self._get_tool_python_request()
                 if python_request:
                     command += ["--python", python_request]
+                command.append(UV_NO_ENV_FILE)
                 try:
                     requirement = checked_requirement(
                         build_requirement(
