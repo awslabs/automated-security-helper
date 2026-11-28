@@ -52,7 +52,8 @@ export class Float {
 
 /**
  * A mapping with a key that is not a plain string, as its pairs `[key, value]` in
- * the order written. A key is whatever ASH's loader builds for it: a string, an
+ * the order ASH's loader keeps them (that of each key's last writing). A key is
+ * whatever ASH's loader builds for it: a string, an
  * integer (a number or a BigInt), a Float, a boolean, null, a Timestamp or a
  * Reference. The key 1 and the key "1" are two keys, and `yes` and `true` are one.
  * A mapping whose keys are all strings is a plain object, never one of these.
@@ -146,23 +147,20 @@ export function keyIdentity(key) {
 }
 
 /**
- * The mapping for these pairs, as ASH's loader builds it: a key written again keeps
- * its first place and gets the last value, and the mapping is a plain object when
- * every key is a string and a TypedMap when one is not.
+ * The mapping for these pairs, as ASH's loader builds it: a key written again is its
+ * last writing whole, that writing's key (1.0 where 1 was written before) and value, at
+ * the place it was written last, so the pairs come in the order of each key's last
+ * writing. The mapping is a plain object when every key is a string and a TypedMap
+ * when one is not.
  */
 export function makeMap(pairs) {
-  const places = new Map();
-  const merged = [];
+  const kept = new Map();
   for (const [key, value] of pairs) {
     const identity = keyIdentity(key);
-    const at = places.get(identity);
-    if (at === undefined) {
-      places.set(identity, merged.length);
-      merged.push([key, value]);
-    } else {
-      merged[at] = [merged[at][0], value];
-    }
+    kept.delete(identity);
+    kept.set(identity, [key, value]);
   }
+  const merged = [...kept.values()];
   if (merged.every(([key]) => typeof key === "string")) {
     const object = {};
     for (const [key, value] of merged) {
