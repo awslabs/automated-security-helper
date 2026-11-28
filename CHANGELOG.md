@@ -216,6 +216,206 @@
   manifest. The docs check compares a table column headed "Loads by default" with the
   manifest's `default_enabled`, and one headed "On once loaded" with the scanner's
   `enabled` default.
+- The scan workflow no longer fails a pull request that adds a repository's first TOML
+  config. When `config-ref-missing` is `defaults` and the config path has no file at the
+  `config-ref`, the config step wrote `{}` whatever the file's name, which is an empty
+  mapping in YAML and JSON but not a TOML document, so the next step and ASH itself
+  failed to parse it. The step now writes an empty config in the format ASH reads the
+  name as, with the suffix read in any letter case: an empty file for a TOML name, the
+  `[tool.ash]` table alone for a `pyproject.toml`, and `{}` for every other name. The
+  warning text is unchanged.
+  `tests/unit/test_scan_workflow_reads_toml_without_tomllib.py` covers it.
+- Added `automated_security_helper/base/image_register.py`, which declares what the
+  `Dockerfile` does: its stages, its operating-system family, the engine tools it
+  installs before any scanner, the pinned tools it provisions through
+  `ash dependencies install`, and the programs a hand-written step provides. Each of the
+  23 shipped scanners now declares how its tool reaches the container image (a pinned
+  release asset, `ash dependencies install`, the Gemfile bundle, an operating-system
+  package, the ASH wheel, another scanner's tool, or not at all, with a reason). The
+  registers also describe the PyPI distributions a scanner pins (the runtime that
+  installs one, its markers and extra, and why it is held out of an extra), package
+  names that depend on the host's exact `os-release` `ID`, the linkage of a pinned
+  release asset (static, glibc or musl) where it has been read, and the variable that
+  moves each content database's cache (`GRYPE_DB_CACHE_DIR`, `SEMGREP_RULES_CACHE_DIR`,
+  `OPENGREP_RULES_CACHE_DIR` and `TRIVY_CACHE_DIR`). The register check refuses a
+  distribution pinned twice, a pin that names an unknown extra or sits in no extra
+  without being held out of one, and a host match whose ids or versions are not a tuple
+  of strings. No scanner's behavior changes. The ferret-scan suppression ranges over
+  `utils/tool_downloads.py`, the migration record's kept rows for that file and the
+  `npm_audit_scanner.py` entry of `.ash.lock` follow the files as they are now.
+- The docs blocks that nothing runs can only shrink. `docs/illustrative-seed/` holds a
+  line for each `illustrative` marker, one file per page, and
+  `scripts/docs_unexecuted_commands_seed.tsv` holds a line for each block in a language
+  nothing runs that shows an `ash` command or another program's command line (after a
+  `$`, `%`, `PS>` or Windows `C:\>` prompt, or after `sudo`, `env` and similar
+  wrappers). `scripts/docs_checks.py` reports a marker or block that the seed does not
+  list and a seed line that nothing matches, so a change that converts a block deletes
+  its line in the same commit; `runner=none` and a bare `save-as=` count as markers
+  too. `.github/scripts/check-illustrative-ratchet.py`, which runs in the
+  snapshot-trailers job after the trailer check, compares the seeds at the head with the
+  seeds at the fork point: a change may delete a line and may not add one, and a range
+  that deletes a seed the fork point holds fails. On a page that its generator writes,
+  only the usage lines the generator prints are left out of the check, and every other
+  block counts. `scripts/docs_checks.py write-seeds` writes the seeds once, and the
+  contributor page says how to convert a block.
+  `tests/unit/docs/test_illustrative_ratchet.py`,
+  `tests/unit/docs/test_unexecuted_command_ratchet.py` and
+  `tests/unit/test_docs_corpus_census.py` cover it.
+- Added `automated_security_helper/base/support_register.py`, which declares, as frozen
+  data checked when it is built, each configuration that ASH supports, runs through a
+  named stand-in, runs with a named loss, or does not support, and the ways out of each:
+  the processor and the polars runtime, binary translation, the operating system,
+  Python, the run mode, the scanner sandbox, express mode, the wrapper shell, the
+  container image, a scanner tool's sandbox, ignore paths, and the platforms a pinned
+  scanner tool has no build for. One evaluator turns the description of a host into the
+  rows that match it. The register imports only the standard library, and nothing in ASH
+  reads it at run time yet, so no message or behavior changes. The new page
+  `docs/content/how-to/supported-configurations.md` explains each configuration and each
+  way out in the register's own sentences. `tests/unit/base/test_support_register.py`,
+  `tests/unit/base/test_support_configurations.py` and
+  `tests/unit/docs/test_supported_configurations_page_claims.py` cover it.
+- Added `automated_security_helper/utils/host_facts.py`, the one reader of the facts of
+  the machine ASH runs on, which the support register matches against: the operating
+  system and its release, the architecture, binary translation (Rosetta, x64 emulation
+  on arm64), how the x86-64 feature set compares with the two sets polars builds its
+  runtimes for, which polars runtime will load, the C library, WSL, whether the
+  interpreter is in ASH's range and which build it is, how ASH was installed, and
+  whether express mode is available. It starts no process and uses no network. Each fact
+  is one token of a closed set, and a read that fails or cannot tell gives `unknown`,
+  which matches no support row that marks a host as unsupported; a reading records which
+  facts failed and the exception type, never its text. The C library is read from the
+  program loader that the interpreter's executable names, so a musl host runs no child
+  process. Nothing in ASH calls the reader yet. `tests/unit/utils/test_host_facts.py`,
+  `tests/unit/utils/test_host_facts_processor.py`,
+  `tests/unit/utils/test_host_facts_single_reader.py` and
+  `tests/snapshot/test_snapshot_host_facts_pin.py` cover it.
+- `scripts/_cast.py` now finds a forbidden token that a line wrap or an escape sequence
+  splits in a recording. Rich folds a long path onto the next row of a table cell and a
+  terminal moves the cursor with erase and cursor codes, so a home directory or a user
+  name could reach a recording in two pieces. The scrub scan reads a third view of the
+  output, with every escape sequence, control character and box-drawing character
+  removed, and a hit from it names the view `flat`. Format characters of Unicode
+  category Cf (a zero-width space or joiner, a soft hyphen, a byte-order mark, a
+  direction mark) are removed from that view as well, so one inside a path no longer
+  hides it. The storyboard loader refuses an `ls` command with a flag or long option
+  that prints the owner and group of each file, because the scan cannot recognize a
+  user or group name in that column, and it checks `chars_per_second` once, against
+  `MIN_CHARS_PER_SECOND` and `MAX_CHARS_PER_SECOND`, and names both bounds, so a rate
+  too slow to compute with is a storyboard error and not an overflow.
+  `tests/unit/docs/test_cast_core.py` covers each change.
+- The docs check that compares the scanner reference's "Loads by default" column with
+  each scanner's manifest now looks the manifest up under the name of the plugin that
+  the row's key names. It passed the row's text to a lookup that matches a manifest's
+  own name only, so a row that names a scanner by its field name (`cdk_nag` for
+  `cdk-nag`) was reported as naming no manifest, and so was a key that no plugin backs.
+  The column now runs only for a key with a plugin, as the "On once loaded" column does.
+  `tests/unit/test_docs_tables_and_output_checks.py` covers it.
+- `scripts/_generated_blocks.py` now retries the swap that replaces a page on Windows.
+  `os.replace` fails there with a `PermissionError` while another process has the page
+  open without sharing delete access (an editor, an indexer, a virus scanner, or a
+  check that is only reading it), so the swap is tried up to five times with a pause
+  that doubles, and the last refusal is raised as a `PermissionError` that names the
+  page. Anywhere else, and for any other error, the first failure is raised at once. A
+  body of `bytes`, `bytearray` or `memoryview` is refused with a message that says to
+  decode it, where it was reported as a first line that is not a string. The module's
+  documentation now says that the swap puts a new file in the old one's place, so a hard
+  link to the page is split and its owner, group, extended attributes and ACLs are not
+  carried over, and says what orphan detection finds and what it does not.
+  `tests/unit/test_generated_blocks.py` pins each change.
+- `scripts/_ci_matrix.py` now reads a reusable workflow's required runner input from
+  every call of that workflow. A `runs-on` that reads a required input with no default
+  is accepted when the workflow has a call and every call passes the input in its
+  `with:`. A call that leaves it out is refused, naming the workflow, the input and the
+  first such call, and so is a workflow that no call reaches. `call_sites` lists the
+  `./` calls each workflow of a repository receives. A reusable workflow read on its own
+  takes the required input as the caller's, and an `exclude` entry with no key, which
+  matched every leg and so dropped them all, is refused with `UnsupportedMatrix`. The
+  docs runner reports, the pre-commit hooks manifest test and the unit test shards test
+  now load the reader through `tests/utils/ci_matrix_loader.py`, which removes the
+  reader from `sys.modules` when its load raises, so a reader that failed to load is not
+  handed to the next test module half built. `tests/unit/test_ci_matrix_reader.py`
+  covers each change.
+- `tests/unit/test_dockerfile_daemonless_builders.py` now finds a Windows container
+  base by more than the platform flag and a `windows` path. An image under
+  `mcr.microsoft.com/dotnet/framework`, and an `mcr.microsoft.com` image whose name or
+  tag holds `nanoserver` or `servercore` (`windowsservercore` included), run only on
+  Windows, and the same holds for an image on any registry whose tag holds one of those
+  names: Docker Hub's official `python` and `golang` images name their Windows variants
+  that way. A digest after `@` is dropped first, a colon that a slash follows is read as
+  a registry port, and a repository name that holds `nanoserver` or `servercore` is not
+  read. The module docstring lists what the probe cannot see: a mirror that keeps the
+  repository path under a bare release tag, and a reference by digest alone.
+- Added `scripts/check_platform_wheels.py`, which checks that ASH's requirements
+  resolve from wheels on every platform. For the base install and each extra it runs
+  `uv pip compile --no-build` for eight platforms (Linux on x86_64 and aarch64 with
+  glibc and with musl, macOS on both architectures, and Windows on both) and for every
+  Python minor version that `requires-python` allows, and it keeps each cell's status
+  (`ok`, `backtracked` or `fail`) in `scripts/platform_wheels.json`. It fails when a
+  measured cell no longer matches its record, when an alpha member (or, with
+  `--require-complete`, any measured row) has no record, and when adding the alpha
+  requirements moves a version in the base install's resolution. A platform that settled
+  on an older version than another is labeled `backtracked`. A run that cannot reach the
+  index, that uv rejects, or whose plugin register cannot be loaded exits 2 and records
+  nothing. `--controls` plants a package with no musl wheels and a pin below the base
+  install's version, and fails when either goes unnoticed, and `--cooldown-report` lists
+  the pins that the plugin register holds back for a cooldown whose window has ended.
+  The record, 192 cells in six rows, was measured against PyPI with uv 0.13.0 and shows
+  where a requirement has no wheel: `nono-py` on musl, `tree-sitter` on musl aarch64, and
+  `cryptography` on Intel macOS and Windows on arm64. The new workflow
+  `.github/workflows/ash-platform-wheels.yml` runs the check with `--require-complete`
+  and `--controls` on pull requests that touch the requirements, the lock, the plugin
+  register or the check itself, and every Wednesday, and lists expired cooldown
+  exclusions on the schedule. `tests/unit/test_check_platform_wheels.py` covers it.
+- Added `scripts/sync_alpha_extra.py`, which renders the PyPI pins in
+  `automated_security_helper/base/plugin_provisioning.py` that are members of the alpha
+  extra into two places: the `alpha` array of `[project.optional-dependencies]` in
+  `pyproject.toml`, and the `alpha-extra` group between the generated markers of
+  `.github/dependabot.yml`. `--check` (the default) prints a drift as a diff with the
+  command to run and exits 1, and `--fix` writes only what differs. The script uses only
+  the standard library and refuses with exit 2, leaving both files untouched, what it
+  cannot write safely: a missing or repeated table, an `alpha` key not written as
+  `alpha = [`, invalid TOML, markers that are missing, repeated, out of order or
+  unindented, a member in another extra, and a requirement that is not one
+  double-quoted string. While no pin is a member it writes no `alpha` key and leaves the
+  Dependabot block empty, which is the state of the repository now. The pre-commit hook
+  `sync-alpha-extra` runs `--fix`, the new workflow
+  `.github/workflows/ash-alpha-extra-drift.yml` runs `--check` on pushes, pull requests
+  and merge queue entries that touch those files, and the Dependabot auto-merge job
+  waits for it. `tests/unit/test_alpha_extra_sync_gate.py` and
+  `tests/unit/plugin_modules/test_alpha_extra_totality.py` cover it.
+- Added `scripts/render_cast.py`, which reads an asciicast, the run record and the
+  storyboard of a terminal recording and writes an animated SVG and a poster image that
+  need no player or script. Its terminal emulator handles the escape sequences that Rich
+  and a shell print (deferred wrap, scrolling, cursor moves, erases, SGR in 16, 256 and
+  true color, wide cells, OSC titles and links) and refuses any other sequence, naming
+  its bytes. Output closer than 50 ms merges into one frame, a typed command is one frame
+  with a stepped reveal, and a deterministic decimation caps the animation at 360 frames.
+  The SVG stores each distinct row once and carries only an inline stylesheet, so it fits
+  the content security policy under which GitHub serves repository images, and the
+  poster is the end screen of the storyboard's poster scene. Cell widths come from one
+  pinned Unicode table (`UNICODE_TABLE`, Rich's newest), so the same recording draws the
+  same images on a host that sets `UNICODE_VERSION` and on one that does not, and the
+  Rich release in `uv.lock` is the only source of the width tables. `--check` compares
+  the files on disk with a fresh render. No recording is rendered or checked in yet.
+  `tests/unit/docs/test_render_cast.py` covers it.
+- Added `scripts/_install_routes.py`, which reads for each scanner manifest the route
+  that ASH installs it by, its pin, the platforms for which ASH provisions a release,
+  and the programs it runs, and `.github/scripts/alpha-doctest-installs.py`, which uses
+  it to plan the install of the alpha scanners for a docs session: `plan` prints one row
+  per alpha scanner, `args` prints the `ash dependencies install` arguments for the rows
+  that install, and `verify` checks that each installed tool is on the path a docs
+  session gets, at its pin. A scanner has a route when its plugin declares install
+  commands, whatever its runtime kind. A Python tool is pinned by its PyPI pin, then the
+  distribution table, then an interim table, then a module-local constant, and every
+  source that answers is listed. `scanners_for` answers which scanners an image, the
+  pre-commit hook, a Nix shell or a host recipe runs, and one function renders that
+  answer for the docs' scanner-count cells and names view. A host asks each plugin
+  whether it runs on the host's operating system, the question the scan phase asks
+  before it skips a scanner, so a scanner whose plugin names a reason (semgrep and
+  guarddog on Windows) reads as missing with that reason. The count cell counts built-in
+  scanners only and no longer ends in ", alpha opt-in". An error exits 2 with a message
+  on stderr and nothing on stdout. `tests/unit/test_install_routes.py` and
+  `tests/unit/test_alpha_doctest_installs.py` cover it.
 
 ### Deprecations
 
