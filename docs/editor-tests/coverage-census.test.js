@@ -159,6 +159,19 @@ const IMPORTING = {
   'an import after a string holding two slashes':
     "const url = 'http://example.test/a';\nimport { mod } from '../src/mod.js';\n",
   'an import after a closed block comment': "/* the module */ import { mod } from '../src/mod.js';\n",
+  'an import after a regular-expression literal that holds a quote':
+    "const quote = /'/;\nimport { mod } from '../src/mod.js';\n",
+  'an import after a regular-expression literal that holds a slash in a class':
+    "const slash = /[/]'/;\nimport { mod } from '../src/mod.js';\n",
+  'a dynamic import after a regular-expression literal on the same line':
+    "const quote = /'/, mod = await import('../src/mod.js');\n",
+  'an import after divisions': 'const half = 4 / 2;\nconst third = half / 3;\nimport { mod } from \'../src/mod.js\';\n',
+  'a dynamic import after a template literal with an expression':
+    "const label = `a ${1 + 1} b`;\nconst mod = await import('../src/mod.js');\n",
+  'a dynamic import inside the expression of a template literal':
+    "const text = `loaded ${await import('../src/mod.js')}`;\n",
+  'an import after a string that has no closing quote on its line':
+    "const open = 'unfinished;\nimport { mod } from '../src/mod.js';\n",
 };
 
 for (const [name, source] of Object.entries(IMPORTING)) {
@@ -180,6 +193,19 @@ const NOT_IMPORTING = {
     "const url = 'http://example.test'; // import { mod } from '../src/mod.js';\n",
   'the module path as plain text': "const where = '../src/mod.js';\n",
   'an import statement written inside a string': 'const text = "import { mod } from \'../src/mod.js\'";\n',
+  'an import statement written inside a string after a space':
+    'const note = " import { mod } from \'../src/mod.js\'";\n',
+  'a dynamic import written inside a string': 'const code = "await import(\'../src/mod.js\')";\n',
+  'an import statement written inside a template literal':
+    "const text = `\nimport { mod } from '../src/mod.js';\n`;\n",
+  'a commented-out import after a regular-expression literal that holds a quote':
+    "const quote = /'/;\n// import { mod } from '../src/mod.js';\n",
+  'a commented-out dynamic import after a match call whose regular expression holds a quote':
+    "assert.match(text, /can't/);\n// const mod = await import('../src/mod.js');\n",
+  'an import in a block comment after a regular-expression literal that holds a quote':
+    "const quote = /'/;\n/* import { mod } from '../src/mod.js'; */\n",
+  'an import in a comment after a string that has no closing quote on its line':
+    "const open = 'unfinished;\n// import { mod } from '../src/mod.js';\n",
 };
 
 for (const [name, source] of Object.entries(NOT_IMPORTING)) {
