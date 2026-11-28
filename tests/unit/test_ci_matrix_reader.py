@@ -12,7 +12,11 @@ from __future__ import annotations
 
 import ast
 import copy
+import functools
+import importlib.util
 import sys
+from collections.abc import Iterable
+from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from typing import Any
 
@@ -411,6 +415,40 @@ class TestExpansion:
         with pytest.raises(ci.UnsupportedMatrix, match="'os'"):
             ci.axis_cells({"include": [{"os": "a"}], "exclude": [{"os": "a"}]})
 
+    @pytest.mark.parametrize(
+        "excludes",
+        [[{}], [{}, {"os": "a"}], [{"os": "a"}, {}]],
+        ids=["alone", "first", "last"],
+    )
+    def test_an_empty_exclude_entry_is_refused_wherever_it_stands(self, excludes):
+        """An entry with no key names no axis. Asking whether every key of an entry
+        matches a leg holds for every leg when there is no key, so reading the entry
+        as a match drops all of them and the job's count reads zero, with no error."""
+        matrix = {"os": ["a", "b"], "python-version": ["1"]}
+        job = _job({**matrix, "exclude": excludes})
+        with pytest.raises(ci.UnsupportedMatrix, match="empty") as caught:
+            ci.cells(job)
+        assert "the axes are os, python-version" in str(caught.value)
+        with pytest.raises(ci.UnsupportedMatrix, match="empty"):
+            ci.axis_cells(job["strategy"]["matrix"])
+
+    @pytest.mark.parametrize("event", ["push", "pull_request"])
+    def test_an_empty_exclude_entry_is_refused_on_every_event(self, event):
+        job = _job({"os": ["a", "b"], "exclude": [{}]})
+        with pytest.raises(ci.UnsupportedMatrix, match="empty"):
+            ci.cells(job, event)
+
+    def test_an_empty_exclude_entry_is_refused_in_a_matrix_with_no_axis(self):
+        with pytest.raises(ci.UnsupportedMatrix, match="the axes are none"):
+            ci.axis_cells({"include": [{"os": "a"}], "exclude": [{}]})
+
+    def test_an_exclude_with_no_entry_is_not_an_empty_entry(self):
+        """The control: no exclude, and an exclude of no entries, drop nothing."""
+        matrix = {"os": ["a", "b"]}
+        legs = [{"os": "a"}, {"os": "b"}]
+        assert ci.cells(_job(matrix)) == legs
+        assert ci.cells(_job({**matrix, "exclude": []})) == legs
+
     def test_matrix_values_name_what_the_matrix_names_whether_or_not_a_leg_runs_it(
         self,
     ):
@@ -624,6 +662,7 @@ def _planted(job_lines: str, header: str = "on: push\n") -> dict[str, Any]:
 
 
 CALLEE_USES = "./.github/workflows/callee.yml"
+CALLER_USES = "./.github/workflows/caller.yml"
 
 #: A reusable workflow whose one job runs on the runner label its caller gives it.
 CALLEE = """\
@@ -644,6 +683,13 @@ jobs:
 """
 
 
+#: The same workflow with the runner declared required and given no default, so its
+#: label is the one each call passes.
+CALLEE_REQUIRING_A_RUNNER = CALLEE.replace(
+    "        default: ubuntu-latest\n", "        required: true\n"
+)
+
+
 def _caller(with_text: str = "") -> dict[str, Any]:
     """A workflow whose job ``call`` calls CALLEE, with the ``with:`` block it is given."""
     return ci.parse_workflow(
@@ -651,12 +697,52 @@ def _caller(with_text: str = "") -> dict[str, Any]:
     )
 
 
-def _called(workflow: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """The reusable workflows of this repository that ``workflow`` calls, by ``uses:``."""
+def _called(
+    workflow: dict[str, Any], root: Path = REPO_ROOT
+) -> dict[str, dict[str, Any]]:
+    """The reusable workflows of the checkout at ``root`` that ``workflow`` calls, by
+    ``uses:``."""
     return {
-        job["uses"]: ci.load_workflow(REPO_ROOT / job["uses"])
+        job["uses"]: ci.load_workflow(root / job["uses"])
         for job in workflow["jobs"].values()
         if str(job.get("uses", "")).startswith("./")
+    }
+
+
+def _uses_of(path: Path, root: Path) -> str:
+    """The text a ``uses:`` calls the workflow file ``path`` of the checkout at ``root``
+    with."""
+    return "./" + path.relative_to(root).as_posix()
+
+
+@functools.cache
+def _repository_sites(root: Path) -> dict[str, Any]:
+    """The calls each workflow file of the checkout at ``root`` receives, from the
+    reader's call_sites over every workflow file there, read once for the checkout."""
+    workflows = {
+        _uses_of(path, root): ci.load_workflow(path)
+        for path in _workflow_files(root / ".github" / "workflows")
+    }
+    return ci.call_sites(workflows)
+
+
+def _check_file(path: Path, root: Path = REPO_ROOT) -> set[str]:
+    """The check of one workflow file as the test of the real workflows runs it: the
+    labels the file names, read with the workflows it calls and the calls it gets."""
+    workflow = ci.load_workflow(path)
+    return ci.check_runner_labels(
+        workflow,
+        called=_called(workflow, root),
+        sites=_repository_sites(root)[_uses_of(path, root)],
+    )
+
+
+def _check_repository(root: Path) -> dict[str, set[str]]:
+    """The labels each workflow file of the checkout at ``root`` names, by file name,
+    from _check_file run on each file in turn."""
+    return {
+        path.name: _check_file(path, root)
+        for path in _workflow_files(root / ".github" / "workflows")
     }
 
 
@@ -936,17 +1022,14 @@ class TestRunnerLabels:
 
     @pytest.mark.parametrize("path", WORKFLOW_FILES, ids=lambda path: path.name)
     def test_every_label_a_workflow_names_is_in_the_table(self, path):
-        workflow = ci.load_workflow(path)
-        labels = ci.check_runner_labels(workflow, called=_called(workflow))
-        assert labels <= set(ci.RUNNER_LABELS)
+        assert _check_file(path) <= set(ci.RUNNER_LABELS)
 
     def test_the_workflows_were_actually_read(self):
         """The denominator for the test above: it read many workflows and many labels."""
         assert len(WORKFLOW_FILES) >= 20, WORKFLOW_FILES
         seen: set[str] = set()
         for path in WORKFLOW_FILES:
-            workflow = ci.load_workflow(path)
-            seen |= ci.check_runner_labels(workflow, called=_called(workflow))
+            seen |= _check_file(path)
         assert {
             "ubuntu-latest",
             "ubuntu-24.04-arm",
@@ -1001,16 +1084,63 @@ class TestACallToAReusableWorkflow:
         assert ci.check_runner_labels(ci.parse_workflow(CALLEE)) == {"ubuntu-latest"}
 
     def test_an_input_with_no_default_is_read_from_the_caller(self):
-        required = CALLEE.replace(
-            "        default: ubuntu-latest\n", "        required: true\n"
-        )
-        assert "required: true" in required
-        called = {CALLEE_USES: ci.parse_workflow(required)}
+        assert "required: true" in CALLEE_REQUIRING_A_RUNNER
+        called = {CALLEE_USES: ci.parse_workflow(CALLEE_REQUIRING_A_RUNNER)}
         ok = _caller("    with:\n      runner: macos-15\n")
         assert ci.check_runner_labels(ok, called=called) == {"macos-15"}
         bad = _caller("    with:\n      runner: plan9\n")
         with pytest.raises(ci.UnknownRunnerLabel, match="plan9"):
             ci.check_runner_labels(bad, called=called)
+
+    def test_a_required_input_is_read_from_the_calls_of_the_workflow(self):
+        """A required input with no default is the label each call passes. The workflow
+        is accepted with its calls, and refused without them as an input with no default
+        is when it is not required. The check of each call reads what it passes."""
+        callee = ci.parse_workflow(CALLEE_REQUIRING_A_RUNNER)
+        job = callee["jobs"]["work"]
+        ok = _caller("    with:\n      runner: macos-15\n")
+        sites = ci.call_sites({CALLEE_USES: callee, CALLER_USES: ok})[CALLEE_USES]
+        assert ci.check_runner_labels(callee, sites=sites) == set()
+        assert ci.runs_on_labels(job, callee, sites) == set()
+        with pytest.raises(ci.UnsupportedExpression, match="no string default"):
+            ci.check_runner_labels(callee)
+        with pytest.raises(ci.UnsupportedExpression, match="no string default"):
+            ci.runs_on_labels(job, callee)
+        # Each call carries its own label: a known one passes, an unknown one is named.
+        called = {CALLEE_USES: callee}
+        assert ci.check_runner_labels(ok, called=called) == {"macos-15"}
+        bad = _caller("    with:\n      runner: plan9\n")
+        with pytest.raises(ci.UnknownRunnerLabel, match="plan9"):
+            ci.check_runner_labels(bad, called=called)
+
+    @pytest.mark.parametrize(
+        "declared",
+        ["        required: false\n", ""],
+        ids=["not_required", "no_required_key"],
+    )
+    def test_an_input_a_caller_may_leave_out_is_still_read_for_its_default(
+        self, declared
+    ):
+        """GitHub's reference gives a string input with no default the value "", so a
+        runs-on that reads one a call leaves out would be empty, and no call passes a
+        label for the check to read. Only an input declared required, with no default,
+        is read from the calls, and calls that all pass the input change nothing for
+        any other."""
+        optional = CALLEE.replace("        default: ubuntu-latest\n", declared)
+        assert "required: true" not in optional
+        callee = ci.parse_workflow(optional)
+        passing = _caller("    with:\n      runner: macos-15\n")
+        sites = ci.call_sites({CALLEE_USES: callee, CALLER_USES: passing})[CALLEE_USES]
+        assert sites.calls, "the call passes the input"
+        for given in (None, sites):
+            with pytest.raises(ci.UnsupportedExpression, match="no string default"):
+                ci.check_runner_labels(callee, sites=given)
+
+    def test_runs_on_names_no_label_for_an_input_only_the_caller_gives(self):
+        """runs_on names the label of one leg, and the callee holds none for it."""
+        callee = ci.parse_workflow(CALLEE_REQUIRING_A_RUNNER)
+        with pytest.raises(ci.UnsupportedExpression, match="no string default"):
+            ci.runs_on(callee["jobs"]["work"], {}, callee)
 
     @pytest.mark.parametrize(
         "with_text, shape",
@@ -1076,12 +1206,477 @@ class TestACallToAReusableWorkflow:
                 ci.check_runner_labels(planted, called=called)
 
 
+PLAIN_WORKFLOW = "on: push\njobs:\n  j:\n    runs-on: ubuntu-latest\n"
+NOTE_ONLY = "    with:\n      note: plain text\n"
+PASSES_A_LABEL = "    with:\n      runner: macos-15\n"
+PASSES_ANOTHER_LABEL = "    with:\n      runner: ubuntu-latest\n"
+PASSES_AN_UNKNOWN_LABEL = "    with:\n      runner: plan9\n"
+
+
+def _calling(*blocks: str, uses: str = CALLEE_USES) -> str:
+    """A workflow whose jobs ``call``, ``call_2`` and so on each call ``uses``. Each job
+    has the ``with:`` block at its place in ``blocks`` ("" for none)."""
+    jobs = ""
+    for number, block in enumerate(blocks, start=1):
+        job_id = "call" if number == 1 else f"call_{number}"
+        jobs += f"  {job_id}:\n    uses: {uses}\n{block}"
+    return f"on: push\njobs:\n{jobs}"
+
+
+def _repository(
+    root: Path, callers: dict[str, str], callee: str = CALLEE_REQUIRING_A_RUNNER
+) -> None:
+    """The workflows of a checkout at ``root``: the callee, and the workflows of
+    ``callers`` (file name to text)."""
+    workflows = {"callee.yml": callee, **callers}
+    _plant(
+        root, {f".github/workflows/{name}": text for name, text in workflows.items()}
+    )
+
+
+NO_WITH = _calling("")
+PASSES_THE_RUNNER = _calling(PASSES_A_LABEL)
+
+
+class TestARequiredRunnerInputIsTheCallers:
+    """A runs-on that reads an input its workflow declares required, with no default,
+    has the label each call of the workflow passes. The workflow is accepted when every
+    call in the repository passes it, and refused when one call leaves the input out
+    and when no call reaches the workflow. Each case builds a repository in a temporary
+    tree and runs the check of each of its workflow files, as the check of this
+    repository's own workflows does."""
+
+    @pytest.mark.parametrize(
+        "callers, first, absent",
+        [
+            pytest.param(
+                {"a.yml": NO_WITH},
+                "a.yml job call",
+                None,
+                id="a_call_with_no_with",
+            ),
+            pytest.param(
+                {"a.yml": _calling("    with: {}\n")},
+                "a.yml job call",
+                None,
+                id="a_call_with_an_empty_with",
+            ),
+            pytest.param(
+                {"a.yml": _calling(NOTE_ONLY)},
+                "a.yml job call",
+                None,
+                id="a_call_whose_with_names_only_another_input",
+            ),
+            pytest.param(
+                {"a.yml": PASSES_THE_RUNNER, "b.yml": NO_WITH},
+                "b.yml job call",
+                "a.yml",
+                id="one_call_passes_and_one_leaves_it_out",
+            ),
+            pytest.param(
+                {"a.yml": _calling(PASSES_A_LABEL, "")},
+                "a.yml job call_2",
+                None,
+                id="the_second_job_of_a_workflow_leaves_it_out",
+            ),
+            pytest.param(
+                {"a.yml": NO_WITH, "b.yml": NO_WITH},
+                "a.yml job call",
+                "b.yml",
+                id="the_first_of_two_calls_that_leave_it_out_is_named",
+            ),
+            pytest.param(
+                {
+                    "a.yml": _calling(
+                        "", uses="./.github/workflows/../workflows/callee.yml"
+                    )
+                },
+                "a.yml job call",
+                None,
+                id="a_call_spelled_with_a_dot_dot",
+            ),
+        ],
+    )
+    def test_a_call_that_leaves_the_input_out_is_refused_by_name(
+        self, tmp_path, callers, first, absent
+    ):
+        _repository(tmp_path, callers)
+        with pytest.raises(ci.UnsupportedExpression) as caught:
+            _check_repository(tmp_path)
+        message = str(caught.value)
+        assert caught.value.shape == "a required runs-on input that a call leaves out"
+        assert CALLEE_USES in message
+        assert "inputs.runner" in message
+        assert f"./.github/workflows/{first}" in message
+        if absent is not None:
+            assert absent not in message
+
+    @pytest.mark.parametrize(
+        "callers",
+        [{}, {"plain.yml": PLAIN_WORKFLOW}],
+        ids=["no_other_workflow", "a_workflow_that_calls_nothing"],
+    )
+    def test_a_workflow_no_call_reaches_is_refused(self, tmp_path, callers):
+        _repository(tmp_path, callers)
+        with pytest.raises(ci.UnsupportedExpression) as caught:
+            _check_repository(tmp_path)
+        shape = "a required runs-on input in a workflow that no call reaches"
+        assert caught.value.shape == shape
+        assert CALLEE_USES in str(caught.value)
+        assert "inputs.runner" in str(caught.value)
+
+    def test_every_call_passing_a_known_label_is_accepted(self, tmp_path):
+        callers = {
+            "a.yml": PASSES_THE_RUNNER,
+            "b.yml": _calling(PASSES_ANOTHER_LABEL, PASSES_A_LABEL),
+        }
+        _repository(tmp_path, callers)
+        assert _check_repository(tmp_path) == {
+            "a.yml": {"macos-15"},
+            "b.yml": {"macos-15", "ubuntu-latest"},
+            "callee.yml": set(),
+        }
+
+    def test_a_call_that_passes_an_unknown_label_is_still_refused(self, tmp_path):
+        callers = {
+            "a.yml": PASSES_THE_RUNNER,
+            "b.yml": _calling(PASSES_AN_UNKNOWN_LABEL),
+        }
+        _repository(tmp_path, callers)
+        with pytest.raises(ci.UnknownRunnerLabel, match=r"call \(with runner\): plan9"):
+            _check_repository(tmp_path)
+
+    def test_a_required_input_no_runs_on_reads_is_not_held_to_the_calls(self, tmp_path):
+        """Only an input that a runs-on reads is the callers' label. A workflow that
+        requires another input, and has no call at all, is read as it was."""
+        callee = CALLEE.replace(
+            "        default: plain text\n", "        required: true\n"
+        )
+        assert "required: true" in callee
+        _repository(tmp_path, {}, callee=callee)
+        assert _check_repository(tmp_path) == {"callee.yml": {"ubuntu-latest"}}
+
+
+class TestTheCallsOfAWorkflow:
+    """call_sites lists, for each workflow of a repository, the jobs that call it."""
+
+    def test_each_workflow_has_the_calls_that_name_it_in_order(self):
+        a = "./.github/workflows/a.yml"
+        b = "./.github/workflows/b.yml"
+        other = "./.github/workflows/other.yml"
+        workflows = {
+            CALLEE_USES: ci.parse_workflow(CALLEE),
+            b: ci.parse_workflow(_calling(PASSES_A_LABEL, NOTE_ONLY)),
+            a: ci.parse_workflow(_calling("", uses=other)),
+            other: ci.parse_workflow(PLAIN_WORKFLOW),
+        }
+        sites = ci.call_sites(workflows)
+        assert list(sites) == list(workflows)
+        assert sites[CALLEE_USES] == ci.CallSites(
+            CALLEE_USES,
+            (
+                ci.Call(b, "call", {"runner": "macos-15"}),
+                ci.Call(b, "call_2", {"note": "plain text"}),
+            ),
+        )
+        assert sites[other] == ci.CallSites(other, (ci.Call(a, "call", None),))
+        assert sites[a] == ci.CallSites(a, ())
+        assert sites[b] == ci.CallSites(b, ())
+
+    def test_a_job_that_calls_no_workflow_of_the_repository_is_not_listed(self):
+        text = (
+            "on: push\n"
+            "jobs:\n"
+            "  action:\n    uses: actions/checkout@v4\n"
+            "  elsewhere:\n    uses: octo/repo/.github/workflows/x.yml@main\n"
+            "  missing:\n    uses: ./.github/workflows/missing.yml\n"
+            "  plain:\n    runs-on: ubuntu-latest\n"
+        )
+        workflows = {
+            CALLEE_USES: ci.parse_workflow(CALLEE),
+            CALLER_USES: ci.parse_workflow(text),
+        }
+        sites = ci.call_sites(workflows)
+        assert [site.calls for site in sites.values()] == [(), ()]
+
+    @pytest.mark.parametrize(
+        "spelled",
+        [
+            "./.github/workflows/../workflows/callee.yml",
+            "./.github//workflows/callee.yml",
+            "././.github/workflows/callee.yml",
+        ],
+    )
+    def test_a_path_is_folded_before_it_is_compared(self, spelled):
+        caller = ci.parse_workflow(_calling("", uses=spelled))
+        workflows = {CALLEE_USES: ci.parse_workflow(CALLEE), CALLER_USES: caller}
+        calls = ci.call_sites(workflows)[CALLEE_USES].calls
+        assert [call.caller for call in calls] == [CALLER_USES]
+
+
 CONSUMERS = [
     "tests/unit/test_unified_ci_job_counts.py",
     "tests/unit/test_ci_matrix_agreement.py",
     "tests/unit/test_oci_runner_ci_coverage.py",
     "tests/unit/docs/test_page_claims.py",
+    "tests/unit/test_pre_commit_hooks_manifest.py",
+    "tests/unit/test_unit_test_shards.py",
 ]
+
+#: The consumers that load the reader inside a function, when a test asks for it, so
+#: that importing the module again does not reach it. Every other consumer loads the
+#: reader as the module is imported.
+LOADS_ON_DEMAND = {"tests/unit/docs/test_page_claims.py"}
+LOADS_WHEN_IMPORTED = [path for path in CONSUMERS if path not in LOADS_ON_DEMAND]
+
+#: The one place a test loads the reader, and this file, which holds the loaders the
+#: scan below is tried on. Neither is read for a loader of its own.
+LOADER_HELPER = "tests/utils/ci_matrix_loader.py"
+THIS_FILE = Path(__file__).resolve().relative_to(REPO_ROOT).as_posix()
+
+
+#: The spellings by which a module names the reader: its file, the module name the
+#: shared helper registers it under, and the helper's two constants that hold them.
+READER_FILE = "_ci_matrix.py"
+READER_NAME = "_ash_ci_matrix"
+HELPER_CONSTANTS = frozenset({"CI_MATRIX_NAME", "CI_MATRIX_PATH"})
+
+#: The function a loader calls, and what the scan reads of a module's bytes before it
+#: parses the module: that function's name, and ``ci_matrix`` in any case, which every
+#: spelling above holds (``_ci_matrix.py``, ``_ash_ci_matrix``, ``CI_MATRIX_NAME``).
+LOADER_FUNCTION = "spec_from_file_location"
+LOADER_BYTES = LOADER_FUNCTION.encode()
+READER_BYTES = b"ci_matrix"
+
+
+def _docstring_values(tree: ast.AST) -> set[int]:
+    """The ids of the string nodes that are a docstring: prose, never a name."""
+    found: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(
+            node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+        ):
+            first = node.body[0] if node.body else None
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+                found.add(id(first.value))
+    return found
+
+
+def _names_the_reader(tree: ast.AST) -> bool:
+    """Whether a module names the reader outside its docstrings: by its file name or its
+    module name as a string, or by a constant of the shared helper, imported under its
+    name or another, or read as an attribute of the helper."""
+    prose = _docstring_values(tree)
+
+    def names_it(node: ast.AST) -> bool:
+        if isinstance(node, ast.Constant):
+            return (
+                isinstance(node.value, str)
+                and id(node) not in prose
+                and (
+                    node.value == READER_NAME
+                    or node.value == READER_FILE
+                    or node.value.endswith("/" + READER_FILE)
+                )
+            )
+        if isinstance(node, ast.ImportFrom):
+            return any(alias.name in HELPER_CONSTANTS for alias in node.names)
+        return isinstance(node, ast.Attribute) and node.attr in HELPER_CONSTANTS
+
+    return any(names_it(node) for node in ast.walk(tree))
+
+
+def _loader_names(tree: ast.AST) -> set[str]:
+    """The bare names a module calls ``spec_from_file_location`` by: its own, and the
+    name it imports it as."""
+    names = {LOADER_FUNCTION}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            names.update(
+                alias.asname or alias.name
+                for alias in node.names
+                if alias.name == LOADER_FUNCTION
+            )
+    return names
+
+
+def _own_loader_lines(source: bytes | str, filename: str) -> list[int]:
+    """The lines where a test module loads the reader with its own loader.
+
+    A module has one when it calls ``spec_from_file_location`` and also names the
+    reader, outside a docstring, as _names_the_reader reads it: the reader's file name
+    or its module name as a string, or a constant of the helper that holds one. The
+    call is the function's name as an attribute, or the bare name it is imported as.
+    Its calls are the lines. The call need not hold the name: a loader that takes the
+    path or the name from a constant, as ``MODULE`` or ``name`` here, is still one.
+    ``filename`` names the module in a SyntaxError.
+    """
+    tree = ast.parse(source, filename=filename)
+    if not _names_the_reader(tree):
+        return []
+    bare = _loader_names(tree)
+    return sorted(
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and (
+            node.func.attr == LOADER_FUNCTION
+            if isinstance(node.func, ast.Attribute)
+            else isinstance(node.func, ast.Name) and node.func.id in bare
+        )
+    )
+
+
+def _own_loaders(root: Path, modules: Iterable[Path]) -> dict[str, list[int]]:
+    """The modules among ``modules`` that load the reader with their own loader, by
+    path below ``root``, each with the lines of its loader calls.
+
+    The loader helper and this file are not read. A module whose bytes name no loader
+    or no reader is not parsed, so a fixture that is not Python does not stop the scan
+    until it names both."""
+    found: dict[str, list[int]] = {}
+    for path in modules:
+        name = path.relative_to(root).as_posix()
+        if name in (LOADER_HELPER, THIS_FILE):
+            continue
+        data = path.read_bytes()
+        if LOADER_BYTES not in data or READER_BYTES not in data.lower():
+            continue
+        lines = _own_loader_lines(data, name)
+        if lines:
+            found[name] = lines
+    return found
+
+
+def _test_modules() -> list[Path]:
+    """Every ``tests/**/*.py`` file of the checkout, in path order.
+
+    Walked with the repository's own walker, which leaves the tests' scratch tree out
+    before it descends: ``rglob`` over tests/ races the directories other workers make
+    there (tests/unit/test_repo_walkers_skip_scratch.py). It asks git nothing, so the
+    scan runs in the unit tier, on a tree that is not a checkout too.
+    """
+    from tests.utils.helpers import iter_repo_files
+
+    walked = iter_repo_files(
+        REPO_ROOT / "tests", skip_dirs=frozenset({"__pycache__", "node_modules"})
+    )
+    return sorted(path for path in walked if path.suffix == ".py" and path.is_file())
+
+
+def _plant(root: Path, sources: dict[str, str]) -> list[Path]:
+    """Write each module of ``sources`` below ``root``, at the path it is keyed by."""
+    paths: list[Path] = []
+    for name, source in sources.items():
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding="utf-8")
+        paths.append(path)
+    return paths
+
+
+#: Test modules that load the reader with a loader of their own, by the shape of it.
+#: They are parsed and never run, so ROOT and where name nothing.
+PLANTED_LOADERS = {
+    "path_in_the_call": (
+        "import importlib.util\n"
+        "spec = importlib.util.spec_from_file_location(\n"
+        "    'reader', ROOT / 'scripts' / '_ci_matrix.py'\n"
+        ")\n"
+    ),
+    "module_name_in_the_call": (
+        "import importlib.util\n"
+        "spec = importlib.util.spec_from_file_location('_ash_ci_matrix', where)\n"
+    ),
+    "path_and_name_in_constants": (
+        "import importlib.util\n"
+        "READER = ROOT / 'scripts' / '_ci_matrix.py'\n"
+        "def load():\n"
+        "    name = '_ash_ci_matrix'\n"
+        "    return importlib.util.spec_from_file_location(name, READER)\n"
+    ),
+    "the_function_imported_bare": (
+        "from importlib.util import spec_from_file_location\n"
+        "spec = spec_from_file_location('_ash_ci_matrix', where)\n"
+    ),
+    "inside_a_class": (
+        "import importlib.util\n"
+        "class Loader:\n"
+        "    def load(self):\n"
+        "        return importlib.util.spec_from_file_location(\n"
+        "            'x', 'scripts/_ci_matrix.py'\n"
+        "        )\n"
+    ),
+    "the_helpers_constants_in_the_call": (
+        "import importlib.util\n"
+        "import sys\n"
+        "from tests.utils.ci_matrix_loader import CI_MATRIX_NAME, CI_MATRIX_PATH\n"
+        "spec = importlib.util.spec_from_file_location(\n"
+        "    CI_MATRIX_NAME, CI_MATRIX_PATH\n"
+        ")\n"
+        "module = importlib.util.module_from_spec(spec)\n"
+        "sys.modules[CI_MATRIX_NAME] = module\n"
+        "spec.loader.exec_module(module)\n"
+    ),
+    "the_helpers_constant_imported_under_another_name": (
+        "import importlib.util\n"
+        "from tests.utils.ci_matrix_loader import CI_MATRIX_PATH as WHERE\n"
+        "spec = importlib.util.spec_from_file_location('reader', WHERE)\n"
+    ),
+    "the_helpers_constant_read_from_its_module": (
+        "import importlib.util\n"
+        "from tests.utils import ci_matrix_loader\n"
+        "spec = importlib.util.spec_from_file_location(\n"
+        "    'reader', ci_matrix_loader.CI_MATRIX_PATH\n"
+        ")\n"
+    ),
+    "the_function_imported_under_another_name": (
+        "from importlib.util import spec_from_file_location as find_spec\n"
+        "spec = find_spec('_ash_ci_matrix', where)\n"
+    ),
+}
+
+#: Test modules that do not load the reader by themselves: two that load another
+#: script (one calls the function by another name), two that use the helper (one reads
+#: its constant), and two that only name the reader in prose.
+PLANTED_FINE = {
+    "loads_another_script": (
+        "import importlib.util\n"
+        "spec = importlib.util.spec_from_file_location('other', where)\n"
+    ),
+    "loads_another_script_under_another_name": (
+        "from importlib.util import spec_from_file_location as find_spec\n"
+        "spec = find_spec('other', where)\n"
+    ),
+    "uses_the_helper": (
+        '"""Reads scripts/_ci_matrix.py through the helper."""\n'
+        "from tests.utils.ci_matrix_loader import load_ci_matrix\n"
+        "ci = load_ci_matrix()\n"
+    ),
+    "uses_the_helper_and_reads_its_constant": (
+        "from tests.utils.ci_matrix_loader import CI_MATRIX_NAME, load_ci_matrix\n"
+        "ci = load_ci_matrix()\n"
+        "assert ci.__name__ == CI_MATRIX_NAME\n"
+    ),
+    "names_the_reader_in_a_docstring_and_a_comment": (
+        '"""Compares scripts/_ci_matrix.py (_ash_ci_matrix) with other.py."""\n'
+        "import importlib.util\n"
+        "# scripts/_ci_matrix.py is loaded by the helper, not here.\n"
+        "spec = importlib.util.spec_from_file_location('other', where)\n"
+    ),
+    "names_the_reader_in_a_function_docstring": (
+        "import importlib.util\n"
+        "def load():\n"
+        "    '''Loads scripts/_ci_matrix.py.'''\n"
+        "    return importlib.util.spec_from_file_location('other', where)\n"
+    ),
+}
+
+
+@pytest.fixture(scope="module")
+def checkout_loaders() -> dict[str, list[int]]:
+    """The test modules of this checkout that load the reader with their own loader."""
+    return _own_loaders(REPO_ROOT, _test_modules())
 
 
 class TestTheByPathLoader:
@@ -1154,14 +1749,128 @@ class TestTheByPathLoader:
     ):
         text = (REPO_ROOT / relative).read_text(encoding="utf-8")
         assert "from tests.utils.ci_matrix_loader import load_ci_matrix" in text
-        own_loaders = [
-            ast.unparse(node)
-            for node in ast.walk(ast.parse(text))
-            if isinstance(node, ast.Call)
-            and getattr(node.func, "attr", "") == "spec_from_file_location"
-            and "_ci_matrix.py" in ast.unparse(node)
-        ]
-        assert not own_loaders, own_loaders
+        assert not _own_loader_lines(text, relative)
+
+    @pytest.mark.parametrize("relative", LOADS_WHEN_IMPORTED)
+    def test_a_reader_that_fails_to_load_is_not_left_in_sys_modules_by_a_test_module(
+        self, relative, monkeypatch
+    ):
+        """The module is imported again, with the reader raising as it runs.
+
+        A module that registers the reader before it runs and leaves it there when it
+        raises hands the next test module a half-built reader. That module then fails
+        on a name the reader lacks, and the error that broke the load is not the one
+        reported.
+        """
+        from tests.utils.ci_matrix_loader import CI_MATRIX_NAME
+
+        original = SourceFileLoader.exec_module
+
+        def fail_the_reader(loader, module):
+            if module.__name__ == CI_MATRIX_NAME:
+                raise RuntimeError("the reader failed to load")
+            original(loader, module)
+
+        name = f"_ash_probe_{Path(relative).stem}"
+        spec = importlib.util.spec_from_file_location(name, REPO_ROOT / relative)
+        assert spec and spec.loader, f"cannot load {relative}"
+        module = importlib.util.module_from_spec(spec)
+        monkeypatch.setattr(SourceFileLoader, "exec_module", fail_the_reader)
+        monkeypatch.delitem(sys.modules, CI_MATRIX_NAME, raising=False)
+        monkeypatch.setitem(sys.modules, name, module)
+        with pytest.raises(RuntimeError, match="the reader failed to load"):
+            spec.loader.exec_module(module)
+        left_behind = CI_MATRIX_NAME in sys.modules
+        assert not left_behind, f"{relative} left the unfinished reader in sys.modules"
+
+    @pytest.mark.parametrize(
+        "source", list(PLANTED_LOADERS.values()), ids=list(PLANTED_LOADERS)
+    )
+    def test_a_loader_of_the_reader_is_found_whatever_its_shape(self, source):
+        assert _own_loader_lines(source, "planted.py"), source
+
+    @pytest.mark.parametrize(
+        "source", list(PLANTED_FINE.values()), ids=list(PLANTED_FINE)
+    )
+    def test_a_module_that_does_not_load_the_reader_by_itself_is_not_found(
+        self, source
+    ):
+        assert _own_loader_lines(source, "planted.py") == []
+
+    @pytest.mark.parametrize(
+        "source", list(PLANTED_LOADERS.values()), ids=list(PLANTED_LOADERS)
+    )
+    def test_the_scan_of_a_tree_finds_a_loader_whatever_its_shape(
+        self, source, tmp_path
+    ):
+        """The scan reads the bytes of a module before it parses it, so each shape is
+        tried through the scan of a tree too, which starts there."""
+        paths = _plant(tmp_path, {"tests/unit/test_planted.py": source})
+        assert list(_own_loaders(tmp_path, paths)) == ["tests/unit/test_planted.py"]
+
+    @pytest.mark.parametrize(
+        "source", list(PLANTED_FINE.values()), ids=list(PLANTED_FINE)
+    )
+    def test_the_scan_of_a_tree_leaves_a_module_that_loads_no_reader_alone(
+        self, source, tmp_path
+    ):
+        paths = _plant(tmp_path, {"tests/unit/test_planted.py": source})
+        assert _own_loaders(tmp_path, paths) == {}
+
+    def test_the_helper_and_every_consumer_are_not_found(self):
+        """The shared loader is the one module the scan does not read, and no consumer
+        has a loader of its own."""
+        modules = [REPO_ROOT / name for name in (LOADER_HELPER, *CONSUMERS)]
+        assert _own_loaders(REPO_ROOT, modules) == {}
+
+    def test_the_scan_finds_a_loader_in_any_directory_and_skips_the_exempt_files(
+        self, tmp_path
+    ):
+        own = PLANTED_LOADERS["path_in_the_call"]
+        paths = _plant(
+            tmp_path,
+            {
+                "tests/unit/test_new.py": own,
+                "tests/integration/deeper/still/test_nested.py": own,
+                "tests/unit/test_fine.py": PLANTED_FINE["uses_the_helper"],
+                LOADER_HELPER: own,
+                THIS_FILE: own,
+            },
+        )
+        assert _own_loaders(tmp_path, paths) == {
+            "tests/unit/test_new.py": [2],
+            "tests/integration/deeper/still/test_nested.py": [2],
+        }
+
+    def test_a_module_that_is_not_python_is_skipped_unless_it_names_both(
+        self, tmp_path
+    ):
+        """A fixture that is not Python does not matter to the scan until its text
+        names a loader and the reader. Then it cannot be said to hold no loader, and
+        the scan stops and names it."""
+        quiet = _plant(tmp_path, {"tests/data/not_python.py": "def (:\n"})
+        assert _own_loaders(tmp_path, quiet) == {}
+        text = "spec_from_file_location('_ash_ci_matrix', where\n"
+        broken = _plant(tmp_path, {"tests/test_broken.py": text})
+        with pytest.raises(SyntaxError) as caught:
+            _own_loaders(tmp_path, broken)
+        # str() of a SyntaxError holds the file's base name only, so the path is read
+        # from the error.
+        assert caught.value.filename == "tests/test_broken.py"
+
+    def test_the_scan_reads_the_test_modules_of_the_checkout(self):
+        """The denominator: a walk that found none would find no loader."""
+        modules = {path.relative_to(REPO_ROOT).as_posix() for path in _test_modules()}
+        assert len(modules) > 1000, len(modules)
+        assert {THIS_FILE, LOADER_HELPER, *CONSUMERS} <= modules
+
+    def test_no_test_module_loads_the_reader_with_a_loader_of_its_own(
+        self, checkout_loaders
+    ):
+        assert not checkout_loaders, (
+            f"{checkout_loaders} load scripts/_ci_matrix.py with a loader of their "
+            "own: use load_ci_matrix() from tests/utils/ci_matrix_loader.py"
+        )
 
 
 VALIDATOR = "./.github/actions/validate-"

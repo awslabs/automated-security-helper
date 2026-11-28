@@ -25,7 +25,6 @@ environment install what the hook's own scanner preset needs.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import re
@@ -37,6 +36,8 @@ from typing import Any
 import pytest
 import typer
 import yaml
+
+from tests.utils.ci_matrix_loader import load_ci_matrix
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -276,22 +277,7 @@ _EXPRESSION = re.compile(
 )
 
 
-def _load_ci_matrix() -> Any:
-    """scripts/_ci_matrix.py, loaded by path: scripts/ is not a package."""
-    name = "_ash_ci_matrix"
-    module = sys.modules.get(name)
-    if module is None:
-        spec = importlib.util.spec_from_file_location(
-            name, REPO_ROOT / "scripts" / "_ci_matrix.py"
-        )
-        assert spec and spec.loader, "cannot load scripts/_ci_matrix.py"
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
-        spec.loader.exec_module(module)
-    return module
-
-
-ci_matrix = _load_ci_matrix()
+ci_matrix = load_ci_matrix()
 
 #: The event whose matrix is the static axes less the static excludes: the pull-request
 #: cover is void on a manual run. This test asks whether the cells the hooks are named

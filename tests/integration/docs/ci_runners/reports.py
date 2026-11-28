@@ -25,14 +25,12 @@
 from __future__ import annotations
 
 import calendar
-import importlib.util
 import json
 import math
 import os
 import re
 import shutil
 import struct
-import sys
 import xml.etree.ElementTree as ET
 import zipfile
 import zlib
@@ -375,9 +373,6 @@ def _input_on(inputs: Any, name: str) -> bool:
     return value not in (False, "false")
 
 
-#: scripts/_ci_matrix.py, the one reader of a workflow's matrices. scripts/ is not a
-#: package, so it is loaded by path, under the name the tests share.
-_CI_MATRIX_PATH = Path(__file__).resolve().parents[4] / "scripts" / "_ci_matrix.py"
 #: The event the matrices are read for. The caller names no event, so a matrix is read as
 #: on a manual run, where the pull-request overlay of an exclude entry matches nothing.
 #: The blocks the page tests run carry no overlay.
@@ -385,20 +380,14 @@ _STATIC_EVENT = "workflow_dispatch"
 
 
 def _ci_matrix() -> Any:
-    """The shared matrix reader, loaded on first use."""
-    name = "_ash_ci_matrix"
-    module = sys.modules.get(name)
-    if module is None:
-        spec = importlib.util.spec_from_file_location(name, _CI_MATRIX_PATH)
-        assert spec and spec.loader, f"cannot load {_CI_MATRIX_PATH}"
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
-        try:
-            spec.loader.exec_module(module)
-        except BaseException:
-            sys.modules.pop(name, None)
-            raise
-    return module
+    """The shared matrix reader, scripts/_ci_matrix.py, loaded on first use.
+
+    The helper that loads it is imported here and not at the top of the module, because
+    check_junit.py loads this module outside pytest and reads no matrix.
+    """
+    from tests.utils.ci_matrix_loader import load_ci_matrix
+
+    return load_ci_matrix()
 
 
 def matrix_entries(matrix: Mapping[str, Any]) -> list[dict[str, Any]]:

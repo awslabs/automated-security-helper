@@ -93,6 +93,7 @@ import pytest
 import yaml
 
 from tests.utils import sharding
+from tests.utils.ci_matrix_loader import load_ci_matrix
 from tests.utils.ci_tiers import (
     E2E_TEST_JOB_IDS,
     INTEGRATION_TEST_JOB_IDS,
@@ -121,22 +122,7 @@ COVERAGE_RUNNERS = [
 COVERAGE_PYTHON = "3.12"
 
 
-def _load_ci_matrix() -> Any:
-    """scripts/_ci_matrix.py, loaded by path: scripts/ is not a package."""
-    name = "_ash_ci_matrix"
-    module = sys.modules.get(name)
-    if module is None:
-        spec = importlib.util.spec_from_file_location(
-            name, REPO_ROOT / "scripts" / "_ci_matrix.py"
-        )
-        assert spec and spec.loader, "cannot load scripts/_ci_matrix.py"
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
-        spec.loader.exec_module(module)
-    return module
-
-
-ci_matrix = _load_ci_matrix()
+ci_matrix = load_ci_matrix()
 
 
 def _static_axes(matrix: dict[str, Any]) -> list[str]:
