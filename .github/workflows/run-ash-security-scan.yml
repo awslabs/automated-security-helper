@@ -2426,14 +2426,27 @@ jobs:
           # that refuses the word `fs`. A probe that fails any other way (uvx cannot
           # fetch the source, ASH crashes) says nothing about the ASH's commands, so
           # the step fails with status 70, which ASH never gives, and the end of what
-          # the probe printed, and neither spelling runs. The probe names the scan's
-          # config as the scan does, though --help reads none. It starts in
-          # RUNNER_TEMP and skips uv's config discovery (--no-config), as the job's
-          # other calls of uv do: uvx installs the ASH it is given, so what the
+          # the probe printed, and neither spelling runs. The probe installs the ASH
+          # with the same uv settings as the scan, and no uvx call in this job
+          # passes --no-config. uv's tool commands, which uvx runs, ignore local
+          # configuration files ("For `tool` commands, which operate at the user
+          # level, local configuration files will be ignored",
+          # https://docs.astral.sh/uv/concepts/configuration-files/), so what the
           # scanned repository says in its uv settings, such as a package index or
-          # an override, must not reach that install, and an ASH started in the
-          # checkout would look for a config there. The cd is inside the
-          # substitution, so the scan below still starts in the checkout. The help
+          # an override, reaches neither the probe nor the scan. --no-config would
+          # only drop the runner's own user- and system-level files, such as an
+          # index mirror in /etc/uv/uv.toml, which the scan's install reads: with
+          # them dropped, the probe could fail to install where the scan does not.
+          # Left in place, both read the same settings, so a runner's index mirror
+          # reaches both, and the probe answers for the ASH the scan installs.
+          # (`uv run` does read `[tool.uv]` and uv.toml, which is why every `uv run`
+          # in this job passes --no-config: see the Compute cache keys step.) The
+          # probe starts in RUNNER_TEMP because an ASH may read its own config
+          # before --help. This repository's CLI answers --help before it reads any
+          # config, and the probe still names the config by its absolute path, set
+          # below, so that an older ASH, which may read it first, finds the
+          # checkout's file. The cd is inside the substitution, so the scan below
+          # still starts in the checkout. The help
           # is read whole into a variable, with color off, so no pipe is closed
           # early and no style code falls between the words. It is printed only when
           # the probe fails, and then through one_line, a line at a time. The step
@@ -2486,7 +2499,7 @@ jobs:
             esac
           fi
           fs_help_status=0
-          fs_help="$(cd "${RUNNER_TEMP}" && NO_COLOR=1 ${probe_config:+env ASH_CONFIG="${probe_config}"} uvx --no-config --from "${ASH_UVX_SOURCE}" ash scan fs ${probe_config:+--config "${probe_config}"} --help 2>&1)" || fs_help_status=$?
+          fs_help="$(cd "${RUNNER_TEMP}" && NO_COLOR=1 ${probe_config:+env ASH_CONFIG="${probe_config}"} uvx --from "${ASH_UVX_SOURCE}" ash scan fs ${probe_config:+--config "${probe_config}"} --help 2>&1)" || fs_help_status=$?
           case "${fs_help_status}:${fs_help}" in
             0:*"scan fs"*)
               scan_form=fs
@@ -2508,7 +2521,7 @@ jobs:
           esac
           if [ "${scan_form}" = fs ] && [ -n "${routed_names}" ] && [ -z "${routed_twice}" ] && [ -z "${routed_mixed}" ] && [ -z "${source_dir_named}" ]; then
             subject_help_status=0
-            subject_help="$(cd "${RUNNER_TEMP}" && NO_COLOR=1 ${probe_config:+env ASH_CONFIG="${probe_config}"} uvx --no-config --from "${ASH_UVX_SOURCE}" ash scan "${routed_subject}" ${probe_config:+--config "${probe_config}"} --help 2>&1)" || subject_help_status=$?
+            subject_help="$(cd "${RUNNER_TEMP}" && NO_COLOR=1 ${probe_config:+env ASH_CONFIG="${probe_config}"} uvx --from "${ASH_UVX_SOURCE}" ash scan "${routed_subject}" ${probe_config:+--config "${probe_config}"} --help 2>&1)" || subject_help_status=$?
             case "${subject_help_status}:${subject_help}" in
               0:*"scan ${routed_subject}"*)
                 scan_form=routed
@@ -2615,13 +2628,22 @@ jobs:
           # `results`. A probe that fails any other way says nothing about the ASH's
           # commands, so the step fails with status 70, which ASH never gives, and
           # the end of what the probe printed, and neither spelling runs. The probe
-          # names the report's config as the report does, though --help reads none.
-          # It starts in RUNNER_TEMP and skips uv's config discovery (--no-config)
-          # for the reason the scan step's probe does: uvx installs the ASH it is
-          # given, and the scanned repository's uv settings must not reach that
-          # install. The cd is inside the substitution, so the report below still
-          # starts in the checkout. The step says which spelling it chose and why,
-          # on stderr.
+          # passes no --no-config, as the scan step's probe does not (see the comment
+          # there). uv's tool commands, which uvx runs, ignore local configuration
+          # files ("For `tool` commands, which operate at the user level, local
+          # configuration files will be ignored",
+          # https://docs.astral.sh/uv/concepts/configuration-files/), so the scanned
+          # repository's uv settings reach neither the probe nor the report, and
+          # --no-config would only drop the runner's own user- and system-level
+          # files, such as an index mirror, which the scan's install reads. Without
+          # it the probe, the report and the scan read the same settings, and the
+          # probe answers for the ASH the scan installed. The probe starts in
+          # RUNNER_TEMP because an ASH may read its own config before --help. This
+          # repository's CLI answers --help before it reads any config, and the
+          # probe still names the config by its absolute path, set below, so that an
+          # older ASH, which may read it first, finds the checkout's file. The cd is
+          # inside the substitution, so the report below still starts in the
+          # checkout. The step says which spelling it chose and why, on stderr.
           #
           # The config the probe names, by its absolute path, as the scan step's
           # probes name it. The probe starts in RUNNER_TEMP, and a config written
@@ -2638,7 +2660,7 @@ jobs:
             esac
           fi
           report_help_status=0
-          report_help="$(cd "${RUNNER_TEMP}" && NO_COLOR=1 ${probe_config:+env ASH_CONFIG="${probe_config}"} uvx --no-config --from "${ASH_UVX_SOURCE}" ash results report ${probe_config:+--config "${probe_config}"} --help 2>&1)" || report_help_status=$?
+          report_help="$(cd "${RUNNER_TEMP}" && NO_COLOR=1 ${probe_config:+env ASH_CONFIG="${probe_config}"} uvx --from "${ASH_UVX_SOURCE}" ash results report ${probe_config:+--config "${probe_config}"} --help 2>&1)" || report_help_status=$?
           case "${report_help_status}:${report_help}" in
             0:*"results report"*)
               report_has_results=yes
