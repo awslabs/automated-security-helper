@@ -1012,6 +1012,13 @@ FORCE_CASES = {
         'git push --force origin "HEAD:${TARGET}"'
     ),
     "to no named destination": "git push --force",
+    "to HEAD, after a checkout of the branch": (
+        "git checkout gh-pages && git push --force origin HEAD"
+    ),
+    "to @, with a lease": "git push --force-with-lease origin @",
+    "to HEAD, in a shell string run with a cluster": (
+        'bash -euo pipefail -c "git checkout gh-pages && git push -f origin HEAD"'
+    ),
     "of every branch": "git push --force --all origin",
     "as a mirror": "git push --mirror origin",
     "as a + refspec with a wildcard destination": (
@@ -1043,6 +1050,7 @@ CLEAN_CASES = {
     "a forced push of another branch with its errors discarded": (
         "git push --force origin preview 2>/dev/null"
     ),
+    "a forced push of HEAD to another branch": "git push --force origin HEAD:preview",
     "a plain push of every branch by refspec": (
         "git push origin 'refs/heads/*:refs/heads/*'"
     ),
@@ -1094,6 +1102,11 @@ TAG_REACHABLE_CASES = {
         "permissions": READ,
         "run": "git push origin 2>/dev/null",
     },
+    "a read token, and a push of HEAD": {
+        "on": ON_ANY_TAG,
+        "permissions": READ,
+        "run": "git push origin HEAD",
+    },
 }
 
 #: Each of these publishes the site and is reached by no tag push, or is reached by
@@ -1121,6 +1134,11 @@ TAG_UNREACHABLE_CASES = {
         "on": ON_ANY_TAG,
         "permissions": READ,
         "run": "git push origin preview 2>/dev/null",
+    },
+    "a tag trigger, a read token, and a push of HEAD to another branch": {
+        "on": ON_ANY_TAG,
+        "permissions": READ,
+        "run": "git push origin HEAD:preview",
     },
 }
 
