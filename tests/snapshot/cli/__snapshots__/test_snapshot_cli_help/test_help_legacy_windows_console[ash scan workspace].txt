@@ -520,8 +520,10 @@
 │                                    every report, the summary counts and the exit code. Findings │
 │                                    with no file location are kept. When git cannot list the     │
 │                                    changes, everything is reported; when nothing changed inside │
-│                                    --source-dir, nothing is. Not supported with --mode          │
-│                                    container, which refuses it (exit 5).                        │
+│                                    the scanned directory, nothing is. A workspace scan reads    │
+│                                    the changes of each project from that project's own          │
+│                                    repository, and skips a project where nothing changed. Not   │
+│                                    supported with --mode container, which refuses it (exit 5).  │
 │                                    [env var: ASH_CHANGED_FILES_ONLY]                            │
 │ --base-ref                  <str>  Git ref to diff against when --changed-files-only is set.    │
 │                                    [env var: ASH_BASE_REF]                                      │
