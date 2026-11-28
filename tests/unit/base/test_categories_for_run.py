@@ -644,10 +644,10 @@ def test_the_base_reads_an_option_value_as_mode_names(
     field_name: str,
     expected: list[str],
 ) -> None:
-    """The reading every scanner gets unless it overrides it (mcp-config keeps it):
-    a bool is ``"true"`` when true and nothing when false, an unset value nothing, a
-    string its comma-separated parts and a list its items, each stripped, empty ones
-    dropped."""
+    """The reading every scanner gets unless it overrides it (mcp-config keeps it for
+    its five switches): a bool is ``"true"`` when true and nothing when false, an unset
+    value nothing, a string its comma-separated parts and a list its items, each
+    stripped, empty ones dropped."""
     assert _base_mode_values(build(tmp_path), field_name) == expected
 
 

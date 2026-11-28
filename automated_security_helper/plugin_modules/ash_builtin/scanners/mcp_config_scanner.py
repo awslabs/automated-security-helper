@@ -982,6 +982,22 @@ class McpConfigScanner(ScannerPluginBase[McpConfigScannerConfig]):
             options.model_dump() if options is not None else {}
         )
 
+    def _category_mode_values(self, field_name: str) -> Optional[List[str]]:
+        """The value of option *field_name*, read as keys of its category map.
+
+        The two prefix lists are read as their checks test them: a list that is
+        not empty turns its check on whatever its items are, so it gives each item
+        as written, unstripped and with none dropped, and a blank item falls to
+        the map's ``"*"`` key; an empty list turns the check off and gives
+        ``[]``. Every other option is read as the plugin base reads it.
+        """
+        if field_name not in ("allowed_command_prefixes", "remote_url_prefixes"):
+            return super()._category_mode_values(field_name)
+        value = getattr(self._options(), field_name, None)
+        if not value:
+            return []
+        return [str(item) for item in value]
+
     def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
         """Abstract stub: this scanner overrides scan() directly; it is unreachable."""
         raise NotImplementedError(
