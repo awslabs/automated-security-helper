@@ -1159,7 +1159,7 @@ class TestTheHiddenMarkerOnTheCommandLine:
     def test_the_option_is_not_in_the_help(self, clean_cli_env):
         from automated_security_helper.cli.main import app
 
-        result = CliRunner().invoke(app, ["scan", "--help"])
+        result = CliRunner().invoke(app, ["scan", "fs", "--help"])
 
         assert "--require-scanner-selection" not in result.output
 

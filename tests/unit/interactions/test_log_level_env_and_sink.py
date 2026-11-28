@@ -216,7 +216,9 @@ class TestCli:
     def test_help_documents_both_variables(self):
         from automated_security_helper.cli.main import app
 
-        result = CliRunner().invoke(app, ["scan", "--help"], env={"COLUMNS": "250"})
+        result = CliRunner().invoke(
+            app, ["scan", "fs", "--help"], env={"COLUMNS": "250"}
+        )
 
         assert "ASH_DEBUG" in result.output
         assert "ASH_VERBOSE" in result.output
