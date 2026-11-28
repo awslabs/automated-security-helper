@@ -631,6 +631,11 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 provisionable=opsf.PLATFORMS_NO_WINDOWS_ARM64,
                 note="no windows/arm64 asset (tool_downloads.py docstring)",
             ),
+            image=opsf.ImageFacet(
+                route=opsf.ImageRoute.RELEASE_ASSET,
+                tool="grype",
+                version_check=("grype", "--version"),
+            ),
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.NATIVE,
                 note="the generic CVSS path; the per-result severity word is a dropped cell in the mapping register",

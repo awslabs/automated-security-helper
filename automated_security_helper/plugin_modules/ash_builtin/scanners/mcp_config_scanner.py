@@ -890,6 +890,7 @@ class McpConfigScanner(ScannerPluginBase[McpConfigScannerConfig]):
                 provisionable=(),
                 note="first-party Python; no tool is provisioned",
             ),
+            image=opsf.ImageFacet(route=opsf.ImageRoute.ASH_WHEEL),
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.NATIVE,
                 note="each rule has its own severity, HIGH, MEDIUM or LOW "

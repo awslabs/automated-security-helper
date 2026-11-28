@@ -103,6 +103,10 @@ class FixtureScanner:
                 provisionable=(),
                 note="installed by the user; ASH provisions nothing",
             ),
+            image=opsf.ImageFacet(
+                route=opsf.ImageRoute.NOT_IN_IMAGE,
+                reason="a test fixture; the user installs its CLI",
+            ),
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.DERIVED,
                 note="the native level through one table",

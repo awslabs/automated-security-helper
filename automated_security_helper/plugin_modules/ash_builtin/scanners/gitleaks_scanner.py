@@ -686,6 +686,14 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 provisionable=opsf.PLATFORMS_ALL,
                 note="asset table lists all six platform/arch pairs",
             ),
+            image=opsf.ImageFacet(
+                route=opsf.ImageRoute.RELEASE_ASSET,
+                tool="gitleaks",
+                version_check=("gitleaks", "--version"),
+                dockerfile_note=(
+                    "# gitleaks backs the builtin gitleaks scanner, which runs beside detect-secrets.",
+                ),
+            ),
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.CONSTANT,
                 note="every finding is CRITICAL",
