@@ -537,9 +537,9 @@ def _a_run_can_have(facts: sr.HostFacts) -> bool:
     """False for the one combination of facts no run has: the scanners on another
     operating system than the one ASH was started on, outside container mode.
 
-    ``os`` is where the scanners run and ``host_os`` is where ASH was started. Only the
-    container image runs the scanners anywhere else, in the Linux of the container
-    engine's virtual machine on a Mac or a Windows host."""
+    ``os`` is where the scanners run and ``host_os`` is where ASH was started. The
+    register models only the container image as running the scanners anywhere else, in
+    the Linux of the container engine's virtual machine on a Mac or a Windows host."""
     return facts.run_mode == "container" or facts.os == facts.host_os
 
 
@@ -1351,7 +1351,8 @@ def test_a_derived_row_leads_out_of_each_single_platform_gap(gap: str) -> None:
 #: The ways out each platform's missing-build row lists. The page says the same in its
 #: section on a missing scanner build. A Mac is offered the container image only: WSL 2
 #: is offered from Windows only, and the path to Linux or macOS is offered from Windows
-#: and from other systems, where it also names the platform that lacks the build.
+#: and from other systems, never from a Mac, where its sentence would also name macOS,
+#: the platform that lacks the build.
 _WAYS_OUT_OF_A_GAP: dict[str, tuple[str, ...]] = {
     "darwin/amd64": ("container-image",),
     "darwin/arm64": ("container-image",),

@@ -2428,10 +2428,11 @@ def _gap_paths(os_token: str, arch: str) -> tuple[str, ...]:
     WSL 2, the container image and another operating system keep the processor or land
     on Linux with it, so they lead out of a Windows gap. A Mac is offered the image
     only: WSL 2 is offered from Windows only, and the path to Linux or macOS is offered
-    from Windows and from other systems, where it also names the platform that lacks
-    the build. A Linux gap has no such way out: the image runs the same Linux on the
-    same processor. Its way out is another machine: an arm64 one for a missing x86-64
-    build, an x86-64 one or a CI runner for a missing arm64 build.
+    from Windows and from other systems, never from a Mac, where its sentence would
+    also name macOS, the platform that lacks the build. A Linux gap has no such way
+    out: the image runs the same Linux on the same processor. Its way out is another
+    machine: an arm64 one for a missing x86-64 build, an x86-64 one or a CI runner for
+    a missing arm64 build.
     """
     if os_token == "windows":
         return _HERE_PATHS
