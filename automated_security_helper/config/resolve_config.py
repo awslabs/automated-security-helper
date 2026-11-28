@@ -184,6 +184,7 @@ from automated_security_helper.config.config_validator import (
     describe_validation_error,
     environment_record_of_references,
     environment_record_read,
+    literal_rewrites,
     placed_at_appends,
     redact_values,
 )
@@ -1339,16 +1340,25 @@ def load_config_file_for_run(
     # pairs none of them: they are recorded as the operator's copy read them,
     # at the places the fill put them (environment_record_of_references).
     filled_values, filled_rewrites = environment_record_of_references(filled)
+    # A relative path a file whose own path the environment chose wrote itself
+    # holds that file's directory, which is part of the value: it is recorded as
+    # a view shows it, and its text is a value to redact. The entries are the
+    # displayed set's, so the places a later document or an overlay wrote over
+    # are not among them.
+    literal_values, literal_written = literal_rewrites(displayed)
     # Beside the reporter defaults the config recorded when it was built
     # (ash_config.reporter_default_values), each value once.
     config._environment_values = list(
-        dict.fromkeys([*filled_values, *values, *config._environment_values])
+        dict.fromkeys(
+            [*filled_values, *values, *literal_values, *config._environment_values]
+        )
     )
     # An append the load did not follow gets its index from the configuration
     # built.
     config._written_references = [
         *filled_rewrites,
         *placed_at_appends(config, rewrites),
+        *literal_written,
     ]
     config._written_key_mappings = _written_key_mappings(document.chain, texts)
     # Each value and key the chain read from the environment, at its place in
@@ -1463,12 +1473,18 @@ def _record_overlay_reads(
     values, rewrites = environment_record_read(
         overlay.chain, reads, texts, places=overlay.reference_places
     )
+    # The relative paths its files write themselves, where a file's own path
+    # came from the environment: recorded and redacted as the chain's own are.
+    literal_values, literal_written = literal_rewrites(
+        overlay.displayed_environment_references
+    )
     config._environment_values = list(
-        dict.fromkeys([*config._environment_values, *values])
+        dict.fromkeys([*config._environment_values, *values, *literal_values])
     )
     config._written_references = [
         *config._written_references,
         *placed_at_appends(config, rewrites),
+        *literal_written,
     ]
     config._written_key_mappings = (
         *tuple(config._written_key_mappings or ()),

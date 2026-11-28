@@ -444,6 +444,61 @@ def test_a_missing_config_file_a_variable_folded_is_warned_without_its_text(
     assert all(canary not in message for message in warned)
 
 
+@pytest.mark.parametrize(
+    "extends, chosen",
+    [
+        pytest.param("${ASH_PROBE_TEAM_BASE}", True, id="chosen"),
+        pytest.param("teams-4c7e/base.yaml", False, id="named"),
+    ],
+)
+def test_a_missing_config_file_a_chosen_base_writes_is_warned_without_its_directory(
+    tmp_path, monkeypatch, caplog, extends, chosen
+):
+    """The operator's file extends a base, and the base writes bandit's
+    ``config_file`` itself as a relative path to a file that is not there. Where a
+    variable named the base (``chosen``), the directory the path is taken from
+    holds what the variable gave, so the warning names the path with that text
+    hidden. Where the file's own text names the base (``named``, the control), the
+    directory is no value, and the warning names the path as it is."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    monkeypatch.setenv("ASH_PROBE_TEAM_BASE", "teams-4c7e/base.yaml")
+    operator = tmp_path / "op" / "operator.yaml"
+    base = tmp_path / "op" / "teams-4c7e" / "base.yaml"
+    base.parent.mkdir(parents=True)
+    operator.write_text(f"extends: {extends}\n", encoding="utf-8")
+    base.write_text(
+        "scanners:\n  bandit:\n    options:\n      config_file: lit-2a9f/bandit.yaml\n",
+        encoding="utf-8",
+    )
+    for directory in ("src", "out", "work"):
+        (tmp_path / directory).mkdir()
+    config = resolve_config(config_path=operator, source_dir=tmp_path / "src")
+    context = PluginContext(
+        source_dir=tmp_path / "src",
+        output_dir=tmp_path / "out",
+        work_dir=tmp_path / "work",
+        config=config,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        BanditScanner(
+            context=context, config=config.get_plugin_config("scanner", "bandit")
+        )
+
+    warned = [
+        message
+        for message in (record.getMessage() for record in caplog.records)
+        if "Configured bandit config file does not exist" in message
+    ]
+    assert warned, "no warning for the missing config file was logged"
+    if chosen:
+        assert all("teams-4c7e" not in message for message in warned)
+    else:
+        assert any("teams-4c7e" in message for message in warned)
+
+
 def _scan_argv(scanner, plugin_context):
     """The argv the scanner would run bandit with for a scan of the source dir."""
     final_args, _, _ = scanner._execute_scan(plugin_context.source_dir, "source", [])

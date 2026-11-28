@@ -29,8 +29,8 @@ are recorded as written; and the other writers of a resolved config (MCP
 ``get_config``, ``ash config get``, and the profile file the MCP server writes
 for a session) hold the reference, while the config they load back still reads
 the value, except that a session copy refuses a profile whose relative path the
-load folded; and ``ash config update`` refuses a file with references rather
-than rewrite each with its value.
+load folded, or that a base a variable chose writes itself; and ``ash config
+update`` refuses a file with references rather than rewrite each with its value.
 
 The positive controls: the scan's in-run report, rendered from the live
 config, holds the canary, so the scan did read the values; and each recorded
@@ -1419,6 +1419,48 @@ def test_select_profile_refuses_a_profile_whose_relative_path_the_anchoring_fold
         profile_registry.clear_all_session_state()
 
 
+@pytest.mark.parametrize("client_patched", [False, True], ids=["operator", "client"])
+def test_a_profile_whose_chosen_base_writes_a_relative_path_is_not_written_to_a_session(
+    tmp_path, probe_env, client_patched
+):
+    """A registered profile extends a base that a variable names, and the base
+    writes checkov's ``config_file`` itself as a relative path. The load takes that
+    path from the base's directory, which holds what the variable gave, so a
+    session copy that held it would hold part of the value, and written as the
+    text the base wrote it would resolve against the copy's directory. The profile
+    is refused for both copies, naming the key path and not the directory."""
+    from automated_security_helper.cli.mcp import profile_registry
+    from automated_security_helper.config.environment_record import (
+        EnvironmentValueInPath,
+    )
+
+    probe_env.setenv("ASH_PROBE_TEAM_BASE", "teams-4c7e/base.yaml")
+    _in_a_session_workspace(tmp_path, probe_env)
+    profile = _operator_config(
+        tmp_path, "extends: ${ASH_PROBE_TEAM_BASE}\n", "profile.ash.yaml"
+    )
+    base = tmp_path / "op" / "teams-4c7e" / "base.yaml"
+    base.parent.mkdir()
+    base.write_text(
+        "scanners:\n  checkov:\n    options:\n      config_file: lit-5e2b/checkov.yaml\n",
+        encoding="utf-8",
+    )
+    config = profile_registry.register_profiles([f"probe={profile}"])["probe"].config
+    # The control: the load took the path from the base's directory.
+    shown = str(config.scanners.checkov.options.config_file)
+    assert os.path.isabs(shown)
+    assert "teams-4c7e" in shown
+
+    with pytest.raises(EnvironmentValueInPath) as raised:
+        profile_registry.materialize_session_config(
+            "session-chosen", config, client_patched=client_patched
+        )
+
+    assert raised.value.key_path == "scanners.checkov.options.config_file"
+    assert "teams-4c7e" not in str(raised.value)
+    assert _files_holding(tmp_path / "mcp-workspaces", "teams-4c7e") == []
+
+
 @pytest.mark.parametrize(
     "client_patched, as_written",
     [
@@ -1699,33 +1741,48 @@ def test_ash_config_get_shows_a_choice_the_trusted_base_gives_a_plugin_section_b
 def test_a_relative_path_from_a_variable_in_a_base_a_variable_chose_is_recorded_without_its_directory(
     tmp_path, probe_env, held
 ):
-    """The operator's file extends a base that a variable names, and the base reads
-    bandit's ``config_file`` from another. The directory the load takes the path
-    from holds what the first variable gave, so the record holds ``<value>`` and
-    the reference, for a path the anchoring folded a ``./`` out of (``dot-dir``)
-    and for one it kept whole (``kept-whole``), and none of either variable's
-    text."""
+    """The operator's file extends a base that a variable names. The base reads
+    bandit's ``config_file`` from another variable, and writes checkov's
+    ``config_file`` itself as a relative path. The directory the load takes either
+    path from holds what the first variable gave, so the record and the body an
+    off-host reporter sends hold ``<value>`` and the reference for the first path
+    and ``<value>`` and the path as the base wrote it for the second, for a path
+    the anchoring folded a ``./`` out of (``dot-dir``) and for one it kept whole
+    (``kept-whole``), and none of either variable's text or the base's directory."""
     from automated_security_helper.config.resolve_config import resolve_config
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
 
     probe_env.setenv("ASH_PROBE_RELATIVE", held)
     probe_env.setenv("ASH_PROBE_TEAM_BASE", "teams-4c7e/base.yaml")
     path = _operator_config(tmp_path, "extends: ${ASH_PROBE_TEAM_BASE}\n")
     base = tmp_path / "op" / "teams-4c7e" / "base.yaml"
     base.parent.mkdir()
-    base.write_text(RELATIVE_CONFIG, encoding="utf-8")
+    base.write_text(
+        RELATIVE_CONFIG
+        + "  checkov:\n    options:\n      config_file: lit-5e2b/checkov.yaml\n",
+        encoding="utf-8",
+    )
 
     config = resolve_config(config_path=path, source_dir=tmp_path / "tree")
 
-    # The control: the load took the path from the base's directory.
+    # The control: the load took each path from the base's directory.
     directory = (tmp_path / "op" / "teams-4c7e").resolve()
     assert (
         Path(str(config.scanners.bandit.options.config_file))
         == directory / "cfg-7a3d" / "bandit.yaml"
     )
+    assert (
+        Path(str(config.scanners.checkov.options.config_file))
+        == directory / "lit-5e2b" / "checkov.yaml"
+    )
     recorded = _recorded(config)
     assert recorded["scanners"]["bandit"]["options"]["config_file"] == (
         os.path.join("<value>", "") + "${ASH_PROBE_RELATIVE}"
     )
-    dumped = json.dumps(recorded)
-    assert "teams-4c7e" not in dumped
-    assert "cfg-7a3d" not in dumped
+    assert recorded["scanners"]["checkov"]["options"]["config_file"] == (
+        os.path.join("<value>", "") + "lit-5e2b/checkov.yaml"
+    )
+    body = AshAggregatedResults(ash_config=config).to_simple_dict()
+    for dumped in (json.dumps(recorded), json.dumps(body, default=str)):
+        assert "teams-4c7e" not in dumped
+        assert "cfg-7a3d" not in dumped

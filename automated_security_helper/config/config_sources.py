@@ -2999,7 +2999,9 @@ class ResolvedConfigDocument:
     #: ``_mark_written_over``), whatever that value holds, and it is left out
     #: here; every other consumer reads ``environment_references``. The display-
     #: only entries for the literal relative paths of a file whose own path the
-    #: environment chose (``EnvironmentReference.literal``) are only here.
+    #: environment chose (``EnvironmentReference.literal``) are only here: the
+    #: record and the redaction values take them from here
+    #: (``config_validator.literal_rewrites``), and no session copy reads one.
     displayed_environment_references: List[EnvironmentReference] = field(
         default_factory=list
     )
@@ -3008,9 +3010,12 @@ class ResolvedConfigDocument:
     environment_paths: FrozenSet[Path] = frozenset()
     #: Every string the files of ``chain`` read from the environment, those of
     #: ``extends`` and ``patch`` included: each reference's resolved string and
-    #: the part the variable gave. Only for a free-text message that names no
-    #: field (``config_validator.redact_values``); a message about a field
-    #: quotes it by its place (``environment_record.with_environment_values_shown``).
+    #: the part the variable gave, and the text the load made of each relative
+    #: path a file whose own path the environment chose wrote itself, whose
+    #: directory holds what the variable gave. Only for a free-text message that
+    #: names no field (``config_validator.redact_values``); a message about a
+    #: field quotes it by its place
+    #: (``environment_record.with_environment_values_shown``).
     environment_values: List[str] = field(default_factory=list)
     #: Where each reference a file of ``chain`` wrote ended up in ``data``, by
     #: ``EnvironmentReference.place_key`` (the file, the path it holds in the
@@ -3059,9 +3064,21 @@ def _values_of(references: List[EnvironmentReference]) -> List[str]:
     The text the load made of a relative path (``EnvironmentReference.anchored``)
     joins where it no longer contains the variable's part, a ``..`` or ``./``
     folded out of it: the needles of the resolved string and the part miss it
-    there."""
+    there. A display-only entry (``EnvironmentReference.literal``) is a relative
+    path a file whose own path the environment chose wrote itself: nothing was
+    read at its place, so it has no value, and the text the anchoring made of it,
+    which holds that file's directory, is the one thing it gives."""
     values: List[str] = []
     for reference in references:
+        if reference.literal:
+            anchored_text = (
+                reference.anchored[0]
+                if reference.anchored is not None
+                else reference.resolved
+            )
+            if anchored_text and anchored_text not in values:
+                values.append(anchored_text)
+            continue
         for text in (reference.resolved, reference.value):
             if text and text not in values:
                 values.append(text)
@@ -5694,8 +5711,12 @@ def resolve_config_document(
             if _still_describes(data, reference)
         ],
         environment_paths=frozenset(state.environment_paths),
-        # The references carry the anchored form; the reads do not.
-        environment_values=_values_of([*state.read, *state.references]),
+        # The references carry the anchored form; the reads do not. So do the
+        # literal entries, whose directory is part of the value that chose their
+        # file.
+        environment_values=_values_of(
+            [*state.read, *state.references, *state.literals]
+        ),
         reference_places=places,
     )
 

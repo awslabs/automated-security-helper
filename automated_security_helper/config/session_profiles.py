@@ -943,8 +943,15 @@ def _stage_session_config(
         # !ENV, and the scan reads it from the environment when it loads the
         # copy. The client's copy, in a directory where !ENV is not resolved
         # (config_sources), holds it as quoted text, which a scan fills from the
-        # operator's copy (is_client_copy_of, resolve_config).
-        if getattr(config, "_environment_references", ()):
+        # operator's copy (is_client_copy_of, resolve_config). A relative path
+        # that a file whose own path a variable chose wrote itself is refused too
+        # (EnvironmentDirectoryInPath, from AshConfig.save): no reference
+        # describes it, but the directory it is taken from is part of the value,
+        # so a profile that holds one is written the same way, to be refused.
+        if getattr(config, "_environment_references", ()) or any(
+            getattr(reference, "literal", False)
+            for reference in getattr(config, "_displayed_environment_references", ())
+        ):
             config.save(
                 partial,
                 exclude_unset=not client_patched,

@@ -778,8 +778,11 @@ A client cannot add a profile.
   move its list entry. A profile in which such a value is part of a longer string, such as a
   relative path that ASH takes from the profile's directory (`${VAR}/bandit.yaml`), can't be
   written to a session with its reference, so `select_profile`, and a workspace scan's
-  `profile`, refuse it without naming the value. Set the variable to an absolute path, or to
-  the whole string.
+  `profile`, refuse it without naming the value. So is a profile with a file that a variable
+  chose, as `extends: ${VAR}` does, where that file writes a relative path itself: ASH takes
+  that path from the file's directory, which is part of the variable's value. Set the
+  variable to an absolute path, or to the whole string. Write such a path as an absolute
+  path.
 
 ## Clean up
 

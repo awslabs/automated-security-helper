@@ -22,6 +22,12 @@ is the profile that writes the same path as text: there a right guess binds the
 profile and a wrong one is refused, as it is for any setting nothing denies, so
 the uniform answer for the path read from the environment is the reading of the
 reference and not a refusal made before the op is read.
+
+The same setting is the target where a base that a variable chose writes the path
+itself: the load anchors it at the base's directory, which holds what the
+variable gave, and a ``test`` op reads that directory as ``<value>``, so a right
+and a wrong guess of the absolute path are answered alike. The control is a base
+the profile's own text names, where a right guess binds the profile.
 """
 
 from __future__ import annotations
@@ -422,6 +428,87 @@ def test_a_test_op_at_a_folded_operator_path_answers_the_same_for_any_guess(
     select = select_for(
         _scanner_profile("${ASH_PROBE_FOLDED}" if from_the_environment else right)
     )
+
+    def ops_for(guess: str) -> List[Dict[str, Any]]:
+        return [{"op": "test", "path": CONFIG_FILE, "value": guess}]
+
+    # A boolean, so a failure does not print the value.
+    same = _answers_the_same(select, ops_for, right, wrong)
+    if from_the_environment:
+        assert same, "the response tells a right guess from a wrong one"
+        # The uniform answer is the pipeline's own: the patch's refusal, for
+        # both, and not a refusal made before the op is read.
+        assert _is_a_patch_answer(select(ops_for(right))), (
+            "the right guess got no patch answer"
+        )
+        assert _is_a_patch_answer(select(ops_for(wrong))), (
+            "the wrong guess got no patch answer"
+        )
+        assert select(ops_for(right))["success"] is False
+    else:
+        assert not same, "the control: the answer does not depend on the guess"
+        assert select(ops_for(right))["success"] is True, (
+            "the control: the right guess did not bind the profile"
+        )
+        assert select(ops_for(wrong))["success"] is False, (
+            "the control: the wrong guess was not refused"
+        )
+
+
+def _runtime_overrides_block(*allowed: str) -> str:
+    """The ``global_settings`` block of a profile that lets a client aim ops at the
+    ``allowed`` paths and denies none of them: ``replace_default_denied_paths``
+    lifts the shipped denials, which would refuse an op at a scanner's config file
+    before the op is read."""
+    return (
+        "global_settings:\n"
+        "  mcp:\n"
+        "    runtime_overrides:\n"
+        "      enabled: true\n"
+        "      allowed_paths:\n"
+        + "".join(f"        - {path}\n" for path in allowed)
+        + "      denied_paths: []\n"
+        "      replace_default_denied_paths: true\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "from_the_environment",
+    [
+        pytest.param(True, id="chosen-base"),
+        pytest.param(False, id="named-base-control"),
+    ],
+)
+def test_a_test_op_at_a_relative_path_a_chosen_base_writes_answers_the_same_for_any_guess(
+    select_for, tmp_path, monkeypatch, from_the_environment
+):
+    """A profile extends a base, and the base writes bandit's ``config_file``
+    itself as a relative path. Where a variable names the base (``chosen-base``),
+    the load takes the path from a directory that holds what the variable gave, so
+    the configuration holds an absolute path with that text in it. A ``test`` op
+    reads the configuration as its files wrote it, which is ``<value>`` and the
+    path as the base wrote it, so the op names the setting the same way for the
+    path the configuration holds (the right guess) and for another of its length
+    (the wrong one), and the two answers are alike. The control is the profile
+    whose own text names the base: nothing there is a value, so a right guess binds
+    the profile and a wrong one is refused."""
+    monkeypatch.setenv("ASH_PROBE_TEAM_BASE", "teams-4c7e/base.yaml")
+    base = tmp_path / "teams-4c7e" / "base.yaml"
+    base.parent.mkdir()
+    base.write_text(
+        "scanners:\n  bandit:\n    options:\n      config_file: lit-2a9f/bandit.yaml\n",
+        encoding="utf-8",
+    )
+    right = os.path.normpath(
+        os.path.join(
+            os.path.realpath(tmp_path), "teams-4c7e", "lit-2a9f", "bandit.yaml"
+        )
+    )
+    wrong = right.replace("2a9f", "0000")
+    extends = (
+        "${ASH_PROBE_TEAM_BASE}" if from_the_environment else "teams-4c7e/base.yaml"
+    )
+    select = select_for(f"extends: {extends}\n" + _runtime_overrides_block(CONFIG_FILE))
 
     def ops_for(guess: str) -> List[Dict[str, Any]]:
         return [{"op": "test", "path": CONFIG_FILE, "value": guess}]

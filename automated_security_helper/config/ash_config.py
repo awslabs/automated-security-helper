@@ -3247,7 +3247,11 @@ class AshConfig(RedactedSection):
         changed after reading it (a relative path taken from the file's
         directory) is refused, naming the variable
         (``environment_record.EnvironmentValueInPath``), and any other string
-        that reads as an ``!ENV`` reference is written quoted. A list the field
+        that reads as an ``!ENV`` reference is written quoted. So is a relative
+        path that a file whose own path came from the environment wrote itself,
+        which is taken from a directory that is part of the value, naming the
+        key path and no variable
+        (``environment_record.EnvironmentDirectoryInPath``). A list the field
         made of one reference's text (``output_formats: ${VAR}``) is written as
         that reference, which loads back as the list; one that holds an entry a
         later step appended beside it is refused in the same way. A value read from
@@ -3270,7 +3274,18 @@ class AshConfig(RedactedSection):
 
         config_path = Path(config_path)
         if exclude_unset or (as_written and not env_tags):
-            writes_references = as_written and bool(self._environment_references)
+            # The display-only entries of the relative paths a file whose own
+            # path the environment chose wrote itself: nothing was read at their
+            # places, but the directory they hold is part of the value that chose
+            # that file, so a copy that holds one is refused below.
+            literals = tuple(
+                reference
+                for reference in (self._displayed_environment_references or ())
+                if getattr(reference, "literal", False)
+            )
+            writes_references = as_written and bool(
+                self._environment_references or literals
+            )
             if is_json_file(config_path):
                 if writes_references:
                     raise ValueError(
@@ -3293,6 +3308,7 @@ class AshConfig(RedactedSection):
                 if writes_references:
                     from automated_security_helper.config.environment_record import (
                         record_environment_references,
+                        refuse_a_literal_path_held,
                         written_without_tag,
                     )
 
@@ -3301,6 +3317,9 @@ class AshConfig(RedactedSection):
                         self._environment_references,
                         mark=TaggedReference if env_tags else written_without_tag,
                         whole_only=True,
+                    )
+                    refuse_a_literal_path_held(
+                        data, literals, self._environment_references
                     )
                     left = first_env_scalar(data)
                     if left is not None:

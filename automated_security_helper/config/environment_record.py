@@ -178,8 +178,11 @@ class EnvironmentReference:
     #: view shows (the directory as ``<value>`` and the path as the file wrote
     #: it), and ``resolved`` and ``anchored[0]`` are the anchored text. It is in
     #: ``ResolvedConfigDocument.displayed_environment_references`` only, never
-    #: in ``environment_references``, so no record, redaction or session copy
-    #: reads one; a view shows the path by ``written`` (``_Index._string``).
+    #: in ``environment_references``, so no session copy reads one as a
+    #: reference. A view shows the path by ``written`` (``_Index._string``), the
+    #: record writes it so (``config_validator.literal_rewrites``), the anchored
+    #: text is a redaction value, and a session copy refuses a profile that holds
+    #: it (``refuse_a_literal_path_held``).
     literal: bool = False
 
     def moved_to_unknown_list(
@@ -808,6 +811,28 @@ class EnvironmentValueInPath(RuntimeError):
         self.variable = variable
 
 
+class EnvironmentDirectoryInPath(EnvironmentValueInPath):
+    """A relative path a file whose own path the environment chose wrote itself
+    holds that file's directory, which is part of the value, so a copy written for
+    a session could not hold the path. The message names the key path, never the
+    directory.
+
+    Raised by ``refuse_a_literal_path_held``. It is an ``EnvironmentValueInPath``
+    with no variable of its own, so every caller that answers that refusal
+    answers this one the same way."""
+
+    def __init__(self, key_path: str) -> None:
+        RuntimeError.__init__(
+            self,
+            f"This profile can't be written to a session: at {key_path}, the "
+            "path is taken from the directory of a config file whose own path "
+            "was read from the environment, and that directory is part of the "
+            "value. Write the path as an absolute path in that file.",
+        )
+        self.key_path = key_path
+        self.variable = ""
+
+
 def _renamed_keys(
     keys: Iterable[Any], references: Sequence[EnvironmentReference]
 ) -> Dict[Any, EnvironmentReference]:
@@ -1296,6 +1321,49 @@ def record_environment_references(
     index = _Index(references, mark, whole_only, exact_indices, list_as_reference)
     index.scan(data, _exact_path(at))
     return index.record(data, _normal_path(at, exact_indices), _exact_path(at))
+
+
+def refuse_a_literal_path_held(
+    data: Any,
+    literals: Sequence[EnvironmentReference],
+    references: Sequence[EnvironmentReference] = (),
+) -> None:
+    """Raise EnvironmentDirectoryInPath where ``data``, a dump written to be
+    loaded again, holds the text the anchoring made of one of ``literals``
+    (``EnvironmentReference.literal``), wherever it sits: a patch can move an
+    entry, and a value a client wrote over the place is not that text.
+
+    ``references`` name the keys read from the environment, which the key path
+    shows as ``<key>`` (``_Index._key_path``). Entries of ``literals`` that are
+    not literals are left out. A string, a path, and the members of a mapping, a
+    list, a tuple or a set are looked at; a mapping's keys are not."""
+    texts = {
+        literal.anchored[0] if literal.anchored is not None else literal.resolved
+        for literal in literals
+        if literal.literal
+    }
+    texts.discard("")
+    if not texts:
+        return
+    index = _Index(references)
+
+    def walk(node: Any, place: Tuple[PathSegment, ...]) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                spelled = key if isinstance(key, str) else str(key)
+                walk(value, (*place, _normal(spelled)))
+        elif isinstance(node, (list, tuple)):
+            for position, value in enumerate(node):
+                walk(value, (*place, position))
+        elif isinstance(node, (set, frozenset)):
+            for member in node:
+                walk(member, (*place, _ANY_INDEX))
+        else:
+            text = os.fspath(node) if isinstance(node, os.PathLike) else node
+            if isinstance(text, str) and text in texts:
+                raise EnvironmentDirectoryInPath(index._key_path(place))
+
+    walk(data, ())
 
 
 def _marked(text: Any) -> bool:

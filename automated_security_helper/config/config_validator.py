@@ -2703,7 +2703,11 @@ class EnvironmentRewrite(typing.NamedTuple):
     the model normalized), only that part is replaced. A path is a tuple of
     the file's keys and list indices. ``anchored`` is set for a relative path
     the load took from its file's directory: where the record's string is that
-    text, whole, it is written as the directory and the reference.
+    text, whole, it is written as the directory and the reference. ``literal``
+    marks the rewrite of a relative path that a file whose own path the
+    environment chose wrote itself: nothing was read at its place, so it names no
+    part (``environment_part`` is empty) and the record holds ``written``, the
+    path as the file wrote it after ``<value>/``, where it holds ``resolved``.
     """
 
     kind: str
@@ -2717,6 +2721,13 @@ class EnvironmentRewrite(typing.NamedTuple):
     #: (``environment_record.EnvironmentReference.anchored``), at the place this
     #: rewrite names. None otherwise.
     anchored: Optional[Tuple[str, str]] = None
+    #: Set for a relative path that a file whose own path the environment chose
+    #: wrote itself (``environment_record.EnvironmentReference.literal``):
+    #: ``resolved`` is the text the anchoring made of it, which holds that file's
+    #: directory, ``written`` the text a view shows (``<value>/`` and the path as
+    #: written), and ``environment_part`` is empty, since nothing was read at its
+    #: place.
+    literal: bool = False
 
 
 def _rewrite_for(
@@ -3260,8 +3271,12 @@ def record_of_config(
     has. With ``mark`` the text stays, and the writer refuses it
     (config_writer): a file loaded again reads a reference only at the start of
     a string. Where the file's own path came from the environment, the directory
-    is ``<value>``, and a path the anchoring kept whole is recorded that way too,
-    so the record never holds the directory of such a file.
+    is ``<value>`` for a reference's path, a path the anchoring kept whole
+    included, and for a relative path the file writes itself
+    (``EnvironmentRewrite.literal``), recorded as ``<value>/`` and the path as the
+    file wrote it, so the record never holds the directory of such a file. A file
+    written to be loaded again keeps that text as the configuration holds it,
+    which the writer refuses.
 
     ``for_results``, for the results file and the off-host payload, records a
     list the field made of one reference's text (``output_formats: ${VAR}``) as
@@ -3310,6 +3325,11 @@ def record_of_config(
     record = copy.deepcopy(dumped)
     for rewrite in rewrites:
         if rewrite.kind != "value" or not rewrite.path:
+            continue
+        if rewrite.literal and mark is not None:
+            # A file written to be loaded again (config_writer) cannot hold
+            # `<value>/` as a path: the text stays as the configuration holds it,
+            # and the writer refuses it.
             continue
         if rewrite.path[-1] is UNKNOWN_INDEX:
             _record_unknown_position(config, record, rewrite, marked)
@@ -3734,6 +3754,42 @@ def environment_record_of_references(
                 values.append(value)
                 values += _typed_spellings(value)
         values += anchored_needles(rewrite)
+    return values, rewrites
+
+
+def literal_rewrites(
+    literals: Iterable[Any],
+) -> Tuple[List[str], List[EnvironmentRewrite]]:
+    """The rewrites and redaction values for ``literals``, display-only entries of
+    the relative paths a file whose own path the environment chose wrote itself
+    (``environment_record.EnvironmentReference.literal``): each place holding the
+    text the anchoring made of such a path is recorded as the view shows it,
+    ``<value>/`` and the path as the file wrote it, and that text, which holds the
+    chosen file's directory, joins the values.
+
+    Entries that are not literals are left out, so a caller can pass the whole of
+    ``ResolvedConfigDocument.displayed_environment_references``."""
+    values: List[str] = []
+    rewrites: List[EnvironmentRewrite] = []
+    for literal in literals:
+        if not getattr(literal, "literal", False):
+            continue
+        anchored = getattr(literal, "anchored", None)
+        text = anchored[0] if anchored is not None else literal.resolved
+        rewrites.append(
+            EnvironmentRewrite(
+                kind="value",
+                path=tuple(literal.path),
+                resolved=text,
+                written=literal.written,
+                environment_part="",
+                reference=literal.written,
+                anchored=anchored,
+                literal=True,
+            )
+        )
+        if text:
+            values.append(text)
     return values, rewrites
 
 
