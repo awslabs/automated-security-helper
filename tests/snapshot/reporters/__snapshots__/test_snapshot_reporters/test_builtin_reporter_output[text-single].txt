@@ -39,6 +39,7 @@ Threshold sources: global settings, scanner config, or scanner default.
 
 Scanners that did not run:
 - cdk-nag (SKIPPED): left out of this run
+- cfn-nag (ERROR): it failed on 1 of its 1 target(s)
 - npm-audit (MISSING): its dependencies were not available; no reason was recorded, and ash.log has the scanner's own message
 
 Top 4 Hotspots:

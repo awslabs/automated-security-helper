@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any, Dict, Iterable, Literal, List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.models.vocab import TargetType
@@ -88,6 +88,15 @@ class ScanResultsContainer(BaseModel):
     # and it fails the run whatever ``fail_on_incomplete_scanners`` says: the
     # tool may still write into the output directory after the gate reads it.
     could_not_stop: str | None = None
+    # Why this container ended in ERROR, as one short sentence with no path in it
+    # and the code of its kind (``core.exceptions.ReasonCode``), or None for both.
+    # Two plain strings, assigned together by ``record_error_reason`` and never
+    # appended to, for the reason the fields above give: the ``exclude_unset``
+    # per-target dump is the report ``core.unified_metrics`` reads them from. Not a
+    # ``core.exceptions.FailureReason``: this package does not import
+    # ``core.exceptions``.
+    error_reason: str | None = None
+    error_reason_code: str | None = None
     # The content databases whose staleness turned a clean result into ERROR, under
     # ``content_db_staleness: fail``. Set only then, and assigned for the same reason
     # as the two above. It is what lets the exit-1 message, the MCP payload and
@@ -148,6 +157,26 @@ class ScanResultsContainer(BaseModel):
         """
         return [home_as_tilde(error) for error in errors]
 
+    @model_validator(mode="after")
+    def _a_half_reason_is_no_reason(self) -> "ScanResultsContainer":
+        """Clear ``error_reason`` and ``error_reason_code`` unless both are set.
+
+        ``record_error_reason`` assigns the two together, but a container built with
+        ``model_validate`` from a one-key dict (a per-target report read back, or a
+        hand-built one) holds half a pair, and the readers treat half a pair as no
+        reason. Clearing it here keeps the promise that the two are never apart for
+        every way a container is built. A plain assignment runs no validator, which
+        is why ``record_error_reason`` also takes a full pair over a half one. The
+        cleared fields leave the set of fields set, so an ``exclude_unset`` dump does
+        not carry them.
+        """
+        if (self.error_reason is None) != (self.error_reason_code is None):
+            self.error_reason = None
+            self.error_reason_code = None
+            self.model_fields_set.discard("error_reason")
+            self.model_fields_set.discard("error_reason_code")
+        return self
+
     @field_validator("exception", "stack_trace", mode="after")
     @classmethod
     def _text_without_the_home_directory(cls, text: str | None) -> str | None:
@@ -202,6 +231,31 @@ class ScanResultsContainer(BaseModel):
         error = home_as_tilde(error)
         if error not in self.errors:
             self.errors = [*self.errors, error]
+
+    def record_error_reason(self, code: str, sentence: str) -> None:
+        """Record why this scanner ended in ERROR, unless a reason is recorded already.
+
+        The first reason is the one kept: the first error is the row's cause (it is
+        the one ``core.unified_metrics.recorded_error`` reads), and a later one is
+        what followed from it. The code and the sentence are assigned together, so
+        a report never holds the one without the other. Half a pair (one field set
+        by a direct assignment, which runs no validator) is no reason, so a later
+        full pair replaces it; only a full pair keeps the first reason. A code or a
+        sentence that is not a non-empty string records nothing.
+
+        The caller says what is fit to show: the executor passes the two parts of
+        a ``core.exceptions.FailureReason``, which holds no path. The reports
+        check the sentence again when they show it, since a results file read back
+        is not trusted.
+        """
+        if self.error_reason_code is not None and self.error_reason is not None:
+            return
+        if not (
+            isinstance(code, str) and code and isinstance(sentence, str) and sentence
+        ):
+            return
+        self.error_reason_code = code
+        self.error_reason = sentence
 
     def record_target_attempt(self, count: int = 1) -> None:
         """Record that the scanner is about to process ``count`` more targets.

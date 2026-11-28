@@ -21279,6 +21279,32 @@
           "default": 0.0,
           "title": "Duration"
         },
+        "error_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Why the scanner is ERROR, in one short sentence that names no path. Recorded by the scan or derived for an ERROR row, and None on every other row, including an ERROR row of a results file written before reasons were recorded.",
+          "title": "Error Reason"
+        },
+        "error_reason_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The kind of failure error_reason says, as a short lower-case code such as timed_out, could_not_start, exit_code_rejected or no_result. Set and cleared together with error_reason.",
+          "title": "Error Reason Code"
+        },
         "excluded": {
           "default": false,
           "description": "True when the run left the scanner out: --exclude-scanners or the shard split, --scanners, the configuration's enabled flag, --python-only, or a platform the scanner does not support.",

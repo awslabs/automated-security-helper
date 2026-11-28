@@ -243,6 +243,8 @@ Each `scanner_results` row has:
 | `exit_code` | The tool's exit code, the highest over the targets it ran on, or `null` when no tool ran: a `MISSING` or excluded scanner, one that had nothing to scan, or one that started no tool for its targets. |
 | `missing_reason` | On a `MISSING` row, why: the tool that was not found and where ASH looked, what the scanner's own dependency check reported, that the tool was found only inside the scanned directory, which ASH does not run unless you allow it (see [Tools inside the scanned directory](../docs/advanced-usage.md#tools-inside-the-scanned-directory)), or that the scanner could not be sandboxed. `null` otherwise. |
 | `skipped_reason` | On a `SKIPPED` row, why: the option that left it out, such as `not named by --scanners`, or what it had nothing to scan, such as `no CloudFormation template in the scanned files`. `null` otherwise. |
+| `error_reason` | On an `ERROR` row whose cause was recorded, why, in one short sentence that names no path: the tool timed out, could not be started, or exited with a code the scanner does not accept; ASH could not record, read or grade what it returned; no rule was evaluated against its targets; or it failed on some of them, when no recorded error says more. `null` on every other row, on an `ERROR` row whose recorded error already gives a sentence the reports list, and on an `ERROR` row of a results file written before reasons were recorded. |
+| `error_reason_code` | The kind of failure `error_reason` says, as a short lower-case code such as `timed_out`, `could_not_start`, `exit_code_rejected` or `no_result`. Set and cleared with `error_reason`. |
 
 <!-- doctest: config kind=ash-output model=automated_security_helper.models.asharp_model.AshAggregatedResults.scanner_results -->
 ```json
@@ -472,7 +474,8 @@ code.
 
 `ash.flat.json` holds `metadata` (the project name, the scan and report times, and ASH's
 version), `scanner_metrics` (one row per scanner with its counts, `status`, `excluded`,
-`dependencies_missing`, `missing_reason`, and `skipped_reason`), `content_databases`,
+`dependencies_missing`, `missing_reason`, `skipped_reason`, `error_reason`, and
+`error_reason_code`), `content_databases`,
 `top_hotspots`, and `findings`, one record per finding. A finding's `id` is
 `<scanner>-<rule>-<12 hex digits>`, such as `bandit-B602-426afbe0ae52`, and no two
 findings in a scan share one. The digits are a hash of what identifies the finding: the

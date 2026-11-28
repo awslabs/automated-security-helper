@@ -22,7 +22,11 @@ from yaml import YAMLError
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
-from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.core.exceptions import (
+    FailureReason,
+    ReasonCode,
+    ScannerError,
+)
 from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.scanner_facets import (
     FacetDecl,
@@ -1951,7 +1955,11 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                     if run_cdk_nag_against_cfn_template is None:
                         raise ScannerError(
                             "The cdk-nag wrapper could not be imported: "
-                            f"{_CDK_WRAPPER_IMPORT_ERROR or 'unknown error'}"
+                            f"{_CDK_WRAPPER_IMPORT_ERROR or 'unknown error'}",
+                            reason=FailureReason(
+                                ReasonCode.MODULE_IMPORT_FAILED,
+                                "its cdk-nag wrapper could not be imported",
+                            ),
                         )
                     nag_result_dict = run_cdk_nag_against_cfn_template(
                         template_path=Path(cfn_file),

@@ -50,7 +50,12 @@ from automated_security_helper.base.uv_tool_mixin import (
     _record_direct_route_version,
     tool_name,
 )
-from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.core.exceptions import (
+    FailureReason,
+    ReasonCode,
+    ScannerError,
+    reason_of,
+)
 from automated_security_helper.models.vocab import SeverityThreshold, TargetType
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
@@ -1099,7 +1104,14 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
 
         except Exception as e:
             raise ScannerError(
-                f"Failed to configure {self.__class__.__name__}: {str(e)}"
+                f"Failed to configure {self.__class__.__name__}: {str(e)}",
+                # What the refusal said when it carried a reason, else the kind
+                # of error only: its text can quote what the operator set.
+                reason=reason_of(e)
+                or FailureReason(
+                    ReasonCode.CONSTRUCTION_FAILED,
+                    f"its configuration could not be applied ({type(e).__name__})",
+                ),
             )
 
     def _apply_config(self) -> None:
@@ -1937,7 +1949,12 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             raise ScannerError(
                 f"Not running bandit on {Path(target).as_posix()!r}: its path "
                 "holds a line break, which no --exclude entry anchored at it can "
-                "carry, so bandit would run with no exclusion at all."
+                "carry, so bandit would run with no exclusion at all.",
+                reason=FailureReason(
+                    ReasonCode.TARGET_PATH_REFUSED,
+                    "its target path holds a line break, which no --exclude entry "
+                    "anchored at it can carry",
+                ),
             )
         if "," in Path(target).as_posix():
             # bandit splits --exclude on commas, so no entry anchored at this
@@ -1969,7 +1986,12 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 f"Not running bandit on {Path(target).as_posix()}: its --exclude "
                 "value would hold a line break (in the target's path or an output "
                 "directory inside it), which one command-line argument cannot "
-                "carry, so bandit would run with no exclusion at all."
+                "carry, so bandit would run with no exclusion at all.",
+                reason=FailureReason(
+                    ReasonCode.EXCLUDE_CANNOT_EXPRESS,
+                    "its --exclude value would hold a line break, which one "
+                    "command-line argument cannot carry",
+                ),
             )
         # A new list: the one extra_args holds is put back as it was, unchanged.
         original_extra_args = self.args.extra_args
@@ -2015,7 +2037,11 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             raise ScannerError(
                 f"Not running bandit on {Path(target).as_posix()}: its --exclude "
                 "argument was not placed in the command line, so bandit would run "
-                "with no exclusion at all."
+                "with no exclusion at all.",
+                reason=FailureReason(
+                    ReasonCode.EXCLUDE_CANNOT_EXPRESS,
+                    "its --exclude argument was not placed in its command line",
+                ),
             )
         rest = [str(argument) for argument in final_args]
         del rest[token_index]
@@ -2023,7 +2049,12 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             raise ScannerError(
                 f"Not running bandit on {Path(target).as_posix()}: its --exclude "
                 f"value, with the {len(links)} links that leave the scanned tree, "
-                f"does not fit {_command_line_bound_text()}."
+                f"does not fit {_command_line_bound_text()}.",
+                reason=FailureReason(
+                    ReasonCode.EXCLUDE_CANNOT_EXPRESS,
+                    f"its --exclude value, with the {len(links)} links that leave "
+                    "the scanned tree, does not fit its command line",
+                ),
             )
         left_out = 0
         for index, entry in enumerate(best_effort):
@@ -2099,6 +2130,13 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         root = Path(target).as_posix()
         walked = [f"{root}/{relative}" for relative in files]
         entries = []
+        # The one sentence every refusal below stands for: the link's own path
+        # is in the log line, and a reason never holds a path.
+        cannot_leave_out = FailureReason(
+            ReasonCode.EXCLUDE_CANNOT_EXPRESS,
+            "its --exclude cannot leave out a link that leaves the scanned tree "
+            "on its own, so it was not run",
+        )
         for relative in links:
             entry = f"{root}/{relative}"
             if os.sep != "/" or any(
@@ -2107,7 +2145,8 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 raise ScannerError(
                     f"Not running bandit on {root}: {relative!r}: "
                     f"{REASON_LINK_LEAVES_TREE}, and bandit's --exclude cannot leave "
-                    "out that file alone, so bandit would read the file it points at."
+                    "out that file alone, so bandit would read the file it points at.",
+                    reason=cannot_leave_out,
                 )
             spelled = glob.escape(entry)
             if spelled == entry:
@@ -2120,7 +2159,8 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                         f"Not running bandit on {root}: {relative!r}: "
                         f"{REASON_LINK_LEAVES_TREE}, and bandit's --exclude cannot "
                         "leave out that file alone, so bandit would read the file "
-                        "it points at."
+                        "it points at.",
+                        reason=cannot_leave_out,
                     )
                 spelled = bracketed
             if any(spelled in other for other in walked if other != entry):
@@ -2128,7 +2168,8 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                     f"Not running bandit on {root}: {relative!r}: "
                     f"{REASON_LINK_LEAVES_TREE}, and another file's path under the "
                     "target contains its --exclude entry as text, so bandit would "
-                    "skip that file too or read the file the link points at."
+                    "skip that file too or read the file the link points at.",
+                    reason=cannot_leave_out,
                 )
             if os.path.isdir(spelled):
                 # bandit rewrites an entry that names an existing directory to
@@ -2143,7 +2184,8 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                     f"{REASON_LINK_LEAVES_TREE}, and a directory under the target "
                     "is named like its --exclude entry, which bandit would rewrite "
                     "to cover that directory instead, so bandit would read the "
-                    "file the link points at."
+                    "file the link points at.",
+                    reason=cannot_leave_out,
                 )
             entries.append(spelled)
         return entries
@@ -2302,10 +2344,18 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 if failed
                 else ""
             )
+            # Counts only: the example file and the root are in the message.
+            nothing_scanned = (
+                f"it scanned none of the {len(unexcluded)} Python file(s) that are "
+                "not excluded"
+            )
+            if failed:
+                nothing_scanned += f", and it could not parse {len(failed)} of them"
             raise ScannerError(
                 f"bandit scanned no file below {root}, though {len(unexcluded)} Python "
                 f"files there are not excluded{cause}, so its result says nothing "
-                "about them."
+                "about them.",
+                reason=FailureReason(ReasonCode.NOTHING_SCANNED, nothing_scanned),
             )
         self.targets_attempted = 0
 

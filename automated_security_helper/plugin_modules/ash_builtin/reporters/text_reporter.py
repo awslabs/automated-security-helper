@@ -373,8 +373,8 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                 ]
             )
 
-            # Why each SKIPPED or MISSING scanner did not run, one line per
-            # reason. The names and the reason come from the results file: each
+            # Why each SKIPPED or MISSING scanner did not run, and why each
+            # ERROR scanner failed, one line per reason. The names and the reason come from the results file: each
             # entry is one shown line.
             not_run = emitter.get_scanners_not_run()
             if not_run:

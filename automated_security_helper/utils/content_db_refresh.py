@@ -139,7 +139,11 @@ from automated_security_helper.config.path_trust import (
     cwd_outside_scanned_tree,
     in_scanned_tree,
 )
-from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.core.exceptions import (
+    FailureReason,
+    ReasonCode,
+    ScannerError,
+)
 from automated_security_helper.utils.content_db_shared import EMPTY_TOOL_CONFIG
 from automated_security_helper.utils.file_lock import (
     LOCK_TIMEOUT_SECONDS,
@@ -604,7 +608,11 @@ def _lock_refused(tool: str, lock: Path, exc: OSError) -> ScannerError:
         f"the {tool} database update could not take its lock "
         f"{lock.as_posix()} ({exc}). Make that file and its directory "
         "usable by this account, or wait for the update that holds it, "
-        "and run ASH again."
+        "and run ASH again.",
+        reason=FailureReason(
+            ReasonCode.DATABASE_UPDATE_FAILED,
+            "its database update could not take its lock",
+        ),
     )
 
 
@@ -723,7 +731,12 @@ def prepare_content_db(
             f"the {tool} config file given to the database refresh, "
             f"{operator_config.as_posix()}, is inside the scanned tree "
             f"{Path(source_dir).as_posix()}; the refresh takes only the operator's "
-            "own config, outside the tree it scans"
+            "own config, outside the tree it scans",
+            reason=FailureReason(
+                ReasonCode.DATABASE_UPDATE_FAILED,
+                "the config file given to its database update is inside the "
+                "scanned tree, which the update refuses",
+            ),
         )
     key = (
         tool,
@@ -772,7 +785,11 @@ def prepare_content_db(
         program = executable or find_executable(tool)
         if not program:
             raise ScannerError(
-                f"{tool} is not installed, so its database cannot be updated"
+                f"{tool} is not installed, so its database cannot be updated",
+                reason=FailureReason(
+                    ReasonCode.DATABASE_UPDATE_FAILED,
+                    "its tool is not installed, so its database cannot be updated",
+                ),
             )
         lock = update_lock_path(tool, cache)
         shared, account = _temporary_locks(tool, cache)
@@ -934,10 +951,20 @@ def _run(
         )
     except subprocess.TimeoutExpired as exc:
         raise ScannerError(
-            f"could not update the {what} within {UPDATE_TIMEOUT_SECONDS}s"
+            f"could not update the {what} within {UPDATE_TIMEOUT_SECONDS}s",
+            reason=FailureReason(
+                ReasonCode.DATABASE_UPDATE_FAILED,
+                f"its {what} could not be updated within {UPDATE_TIMEOUT_SECONDS}s",
+            ),
         ) from exc
     except OSError as exc:
-        raise ScannerError(f"could not update the {what}: {exc}") from exc
+        raise ScannerError(
+            f"could not update the {what}: {exc}",
+            reason=FailureReason(
+                ReasonCode.DATABASE_UPDATE_FAILED,
+                f"its {what} could not be updated",
+            ),
+        ) from exc
     if proc.returncode != 0:
         from automated_security_helper.utils.error_text import shown_tool_stderr
 
@@ -951,7 +978,12 @@ def _run(
         if len(detail) > 2000:
             detail = f"{detail[:1000]} ... {detail[-1000:]}"
         raise ScannerError(
-            f"could not update the {what} (exit {proc.returncode}): {detail}"
+            f"could not update the {what} (exit {proc.returncode}): {detail}",
+            reason=FailureReason(
+                ReasonCode.DATABASE_UPDATE_FAILED,
+                f"its {what} could not be updated: its tool exited with code "
+                f"{proc.returncode}",
+            ),
         )
 
 

@@ -20,7 +20,12 @@ from automated_security_helper.base.scanner_operational_facets import (
 )
 from automated_security_helper.core.asset import Asset, AssetKind
 from automated_security_helper.core.enums import ExecutionPhase, ScannerStatus
-from automated_security_helper.core.exceptions import ScannerSelectionError
+from automated_security_helper.core.exceptions import (
+    FailureReason,
+    ReasonCode,
+    ScannerSelectionError,
+    reason_of,
+)
 from automated_security_helper.core.scanner_selection import (
     SelectionOrigin,
     exclusions_matching_no_scanner,
@@ -275,6 +280,26 @@ def _staged_nothing_to_scan_reason(
     if not (isinstance(reason, str) and reason):
         return None
     return text_without_values(reason, values)
+
+
+def _construction_reason(error: BaseException, values: Iterable[str]) -> FailureReason:
+    """Why a scanner could not be constructed, as a reason the reports show.
+
+    The reason the constructor's own error carries (a ``ScannerError`` raised with
+    ``reason=``, or raised from one), redacted with ``values``, the config's
+    environment values, as every recorded sentence is. Without one, the kind of
+    exception: a class name and never its text, which is redacted for the log but
+    can still hold a path.
+    """
+    recorded = reason_of(error)
+    if recorded is not None:
+        return FailureReason(
+            recorded.code, text_without_values(recorded.sentence, tuple(values))
+        )
+    return FailureReason(
+        ReasonCode.CONSTRUCTION_FAILED,
+        f"it could not be constructed ({type(error).__name__})",
+    )
 
 
 def _scanner_display_name(plugin_instance) -> str:
@@ -645,7 +670,12 @@ class ScanPhase(EnginePhase):
             "name it is selected and reported by, and cannot be empty or end in "
             "'Scanner'."
         )
-        return self._record_scanner_error(display_name, refusal, aggregated_results)
+        return self._record_scanner_error(
+            display_name,
+            refusal,
+            aggregated_results,
+            reason=FailureReason(ReasonCode.NAME_REFUSED),
+        )
 
     @staticmethod
     def _later_holder_row_name(
@@ -724,7 +754,12 @@ class ScanPhase(EnginePhase):
             "--exclude-scanners matching, so two scanners cannot share one. Give "
             "one of them a different configured name."
         )
-        return self._record_scanner_error(row_name, refusal, aggregated_results)
+        return self._record_scanner_error(
+            row_name,
+            refusal,
+            aggregated_results,
+            reason=FailureReason(ReasonCode.NAME_TAKEN),
+        )
 
     def _write_results_guarded(
         self,
@@ -759,15 +794,23 @@ class ScanPhase(EnginePhase):
             return aggregated_results
 
     def _record_scanner_error(
-        self, display_name: str, error_text_: str, aggregated_results: Any
+        self,
+        display_name: str,
+        error_text_: str,
+        aggregated_results: Any,
+        *,
+        reason: FailureReason,
     ) -> AshAggregatedResults:
         """Record ERROR for a constructed scanner that did not run, with *error_text_*
-        as its one error, and leave it out of the run.
+        as its one error and *reason* as the why the reports show, and leave it out
+        of the run.
 
         ERROR, not SKIPPED: the operator did not leave the scanner out, and the
         completeness gate has to see it. ``dependencies_satisfied`` is True because
         no dependency was checked (the construction-failure row says why False
-        would mislead).
+        would mislead). The reason is on the scanner's report and on its row, as a
+        row the rebuild reads from its reports gets it: the text above can name a
+        class, a module or a value, and the reason is a sentence with none.
         """
         ASH_LOGGER.error(error_text_)
         container = ScanResultsContainer(
@@ -776,6 +819,7 @@ class ScanPhase(EnginePhase):
             duration=None,
             errors=[error_text_],
         )
+        container.record_error_reason(reason.code, reason.sentence)
         aggregated_results = self._write_results_guarded(
             display_name, container, aggregated_results
         )
@@ -783,6 +827,8 @@ class ScanPhase(EnginePhase):
             status=ScannerStatus.ERROR,
             dependencies_satisfied=True,
             excluded=False,
+            error_reason=reason.sentence,
+            error_reason_code=reason.code,
         )
         return aggregated_results
 
@@ -1446,15 +1492,13 @@ class ScanPhase(EnginePhase):
                         # error can name an option the config read from the
                         # environment, and this text goes to the report, ash.log,
                         # the results files and scanner_reasons.
+                        environment_values = config_environment_values(
+                            getattr(self.plugin_context, "config", None)
+                        )
                         construction_error = (
                             f"Scanner {failed_name} could not be constructed, so it "
                             f"did not run{image_note}: {type(e).__name__}: "
-                            + error_text(
-                                e,
-                                config_environment_values(
-                                    getattr(self.plugin_context, "config", None)
-                                ),
-                            )
+                            + error_text(e, environment_values)
                         )
                         ASH_LOGGER.error(construction_error)
                         # `errors` passed to the constructor so the field is set
@@ -1466,6 +1510,16 @@ class ScanPhase(EnginePhase):
                             status=ScannerStatus.ERROR,
                             duration=None,
                             errors=[construction_error],
+                        )
+                        # The reason the constructor's own error carries, else the
+                        # kind of exception, a class name and never its text: the
+                        # text above is redacted but can still hold a path, and
+                        # the reports show this one.
+                        construction_reason = _construction_reason(
+                            e, environment_values
+                        )
+                        container.record_error_reason(
+                            construction_reason.code, construction_reason.sentence
                         )
                         # Guarded, as every other recorder of a scanner that did
                         # not run: this write is inside the handler of the
@@ -1484,6 +1538,8 @@ class ScanPhase(EnginePhase):
                                 # Windows semgrep case cost.
                                 dependencies_satisfied=True,
                                 excluded=False,
+                                error_reason=construction_reason.sentence,
+                                error_reason_code=construction_reason.code,
                             )
                         )
                         # With the class: the tracker accepts a configured name
@@ -2056,6 +2112,7 @@ class ScanPhase(EnginePhase):
                                 f"Python-only check raised "
                                 f"({check_failures[id(plugin_instance)]})",
                                 aggregated_results,
+                                reason=FailureReason(ReasonCode.CHECK_RAISED),
                             )
                             continue
                         if not passes_python_only:
@@ -2726,6 +2783,12 @@ class ScanPhase(EnginePhase):
                     duration=None,
                     errors=[module_error],
                 )
+                # The import error's own text is in the error line above: it
+                # names a module and often a file, so the reason is the kind.
+                import_reason = FailureReason(ReasonCode.MODULE_IMPORT_FAILED)
+                container.record_error_reason(
+                    import_reason.code, import_reason.sentence
+                )
                 aggregated_results = self._write_results_guarded(
                     failed_module, container, aggregated_results
                 )
@@ -2738,6 +2801,8 @@ class ScanPhase(EnginePhase):
                         # strength of a guess.
                         dependencies_satisfied=True,
                         excluded=False,
+                        error_reason=import_reason.sentence,
+                        error_reason_code=import_reason.code,
                     )
                 )
 

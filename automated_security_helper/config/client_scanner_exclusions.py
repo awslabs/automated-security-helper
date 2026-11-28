@@ -191,7 +191,11 @@ from automated_security_helper.base.plugin_manifest import (
     resolve_ref,
 )
 from automated_security_helper.config.patch_ops import VALUE_WRITING_OPS
-from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.core.exceptions import (
+    FailureReason,
+    ReasonCode,
+    ScannerError,
+)
 from automated_security_helper.plugin_manifests import exclusion_options
 
 T = TypeVar("T")
@@ -470,7 +474,12 @@ def bandit_would_skip(
         raise ScannerError(
             f"{where} does not declare a glob_builder for an exclusion option of "
             "kind 'bandit', so a client-supplied bandit exclusion cannot be "
-            "matched. Declare one on the option (ExclusionOption.glob_builder)."
+            "matched. Declare one on the option (ExclusionOption.glob_builder).",
+            reason=FailureReason(
+                ReasonCode.EXCLUSION_UNSUPPORTED,
+                "it declares no glob builder for a bandit exclusion option, so a "
+                "client-supplied bandit exclusion cannot be matched",
+            ),
         )
     bandit_excluded_path_globs = resolve_ref(builder_ref)
 
@@ -628,7 +637,12 @@ class EvaluationBudget:
                 f"A regular expression from {source} already ran past {timeout} "
                 "seconds, the pattern time limit (the scanner's scan_timeout, or "
                 "the scan_timeout default where the scanner's is null), earlier in "
-                "this pass. It is not searched again, and the scan fails."
+                "this pass. It is not searched again, and the scan fails.",
+                reason=FailureReason(
+                    ReasonCode.PATTERN_TIME_LIMIT,
+                    "a regular expression from the configuration already ran past "
+                    "the pattern time limit earlier in this pass",
+                ),
             )
         remaining = self.remaining(timeout)
         if remaining <= 0:
@@ -638,7 +652,13 @@ class EvaluationBudget:
                 "scan_timeout, or the scan_timeout default where the scanner's is "
                 "null) was spent on earlier regular expressions of this pass before "
                 f"one from {source} could be searched. The scan fails rather than "
-                "run past it."
+                "run past it.",
+                reason=FailureReason(
+                    ReasonCode.PATTERN_TIME_LIMIT,
+                    "the pattern time limit was spent on earlier regular "
+                    "expressions before one from the configuration could be "
+                    "searched",
+                ),
             )
         ran_out = False
         try:
@@ -728,7 +748,12 @@ class _EvaluationWorker:
             raise ScannerError(
                 f"The evaluation of a regular expression from {source} could "
                 "not be handed to its worker (the request pipe failed), so the "
-                "scan fails rather than guess at an answer."
+                "scan fails rather than guess at an answer.",
+                reason=FailureReason(
+                    ReasonCode.PATTERN_EVALUATION_FAILED,
+                    "a regular expression from the configuration could not be "
+                    "handed to its worker",
+                ),
             ) from None
         # The search is timed from here: ``_started`` has waited for a
         # worker that is running (its package import is behind it), and the
@@ -743,7 +768,12 @@ class _EvaluationWorker:
                     f"within {timeout} seconds, the pattern time limit (the "
                     "scanner's scan_timeout, or the scan_timeout default where the "
                     "scanner's is null). Its evaluation was stopped, and the scan "
-                    "fails rather than wait on it."
+                    "fails rather than wait on it.",
+                    reason=FailureReason(
+                        ReasonCode.PATTERN_TIME_LIMIT,
+                        "a regular expression from the configuration did not "
+                        "finish matching within the pattern time limit",
+                    ),
                 )
             answered, payload = connection.recv()
         except EvaluationTimedOut:
@@ -763,7 +793,12 @@ class _EvaluationWorker:
             raise ScannerError(
                 f"The evaluation of a regular expression from {source} ended without "
                 "an answer this process could read, so the scan fails rather than "
-                "guess at one."
+                "guess at one.",
+                reason=FailureReason(
+                    ReasonCode.PATTERN_EVALUATION_FAILED,
+                    "the evaluation of a regular expression from the configuration "
+                    "ended without an answer",
+                ),
             ) from None
         finally:
             self.last_search_seconds = time.monotonic() - began
@@ -833,7 +868,12 @@ class _EvaluationWorker:
             raise ScannerError(
                 "The process that evaluates a delivered regular expression did not "
                 f"start within {_WORKER_START_BOUND:g} seconds, so the scan fails "
-                "rather than guess at a match it did not see."
+                "rather than guess at a match it did not see.",
+                reason=FailureReason(
+                    ReasonCode.PATTERN_EVALUATION_FAILED,
+                    "the process that evaluates a delivered regular expression did "
+                    f"not start within {_WORKER_START_BOUND:g} seconds",
+                ),
             )
         return parent_end
 
@@ -886,7 +926,12 @@ def _serve_evaluations(connection: Any, inherited_parent_end: Any = None) -> Non
                         False,
                         ScannerError(
                             f"The evaluation's {what} could not be handed back from "
-                            "the process it ran in."
+                            "the process it ran in.",
+                            reason=FailureReason(
+                                ReasonCode.PATTERN_EVALUATION_FAILED,
+                                "the evaluation's answer could not be handed back "
+                                "from the process it ran in",
+                            ),
                         ),
                     )
                 )

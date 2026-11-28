@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 import json
 import re
-from typing import Dict, List, Any, Sequence, TYPE_CHECKING
+from typing import Dict, List, Any, Optional, Sequence, TYPE_CHECKING
 
 import polars as pl
 
@@ -16,7 +16,11 @@ from automated_security_helper.models.flat_vulnerability import (
 from automated_security_helper.models.vocab import Disposition
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.core.enums import ScannerStatus
-from automated_security_helper.core.unified_metrics import get_unified_scanner_metrics
+from automated_security_helper.core.unified_metrics import (
+    fit_error_reason,
+    get_unified_scanner_metrics,
+    recorded_error_sentence,
+)
 from automated_security_helper.core.scanner_statistics_calculator import (
     ScannerStatisticsCalculator,
 )
@@ -38,6 +42,11 @@ from automated_security_helper.utils.finding_clusters import (
     provenance_note,
 )
 from automated_security_helper.utils.policy_origin import is_policy_origin
+from automated_security_helper.utils.short_reason import (
+    SHORT_REASON_LIMIT,
+    is_short_reason,
+    short_error_reason,  # noqa: F401 -- written here first, so still read from here
+)
 from automated_security_helper.utils.severity_ladder import (
     SEVERITY_COUNT_KEYS,
     SEVERITY_DISPLAY_ORDER,
@@ -446,6 +455,15 @@ class ReportContentEmitter:
                 and durations_unrecorded
                 and not metrics.duration
             )
+            # The metrics hold only a pair that passed the check when they read it
+            # back; it is checked again where it is copied into the flat outputs,
+            # so a row built any other way cannot put a path or a malformed code
+            # into ash.flat.json or the YAML report. A pair that fails is dropped
+            # whole: a sentence is never shown under a code it was not recorded with.
+            fit_pair = fit_error_reason(metrics.error_reason_code, metrics.error_reason)
+            reason_fit_to_copy = (
+                (fit_pair[1], fit_pair[0]) if fit_pair is not None else (None, None)
+            )
             results.append(
                 {
                     "scanner_name": metrics.scanner_name,
@@ -468,6 +486,14 @@ class ReportContentEmitter:
                     # for every other status.
                     "missing_reason": metrics.missing_reason,
                     "skipped_reason": metrics.skipped_reason,
+                    # Why an ERROR scanner failed and the kind of failure it was, the
+                    # same two strings as its scanner_results row in
+                    # ash_aggregated_results.json. None for every other status, and
+                    # for an ERROR row whose cause nothing recorded. The reports for
+                    # people show the sentence only after get_scanners_not_run has
+                    # checked it again.
+                    "error_reason": reason_fit_to_copy[0],
+                    "error_reason_code": reason_fit_to_copy[1],
                     # Seconds the scanner took; None, in a report for people, when
                     # it did not run or the results record no duration for it. The
                     # text and html reporters render a Duration column from this
@@ -496,21 +522,38 @@ class ReportContentEmitter:
         return results
 
     def get_scanners_not_run(self) -> List[Dict[str, Any]]:
-        """Why the scanners that did not run did not, in scanner-results order.
+        """Why the scanners that did not run or failed did so, in scanner-results order.
 
-        The SKIPPED and MISSING rows of :meth:`get_scanner_results` that record
-        a reason, grouped by status and reason: each entry has the ``scanners``
-        that share them, the ``status``, and the ``reason``, which is the
-        ``skipped_reason`` or ``missing_reason`` of their rows in
-        ``ash_aggregated_results.json``. The scanner table shows only the
-        status, so without this list a report says that npm-audit was skipped
+        The SKIPPED, MISSING and ERROR rows of :meth:`get_scanner_results` that
+        have a reason, grouped by status and reason: each entry has the
+        ``scanners`` that share them, the ``status``, and the ``reason``. For
+        SKIPPED and MISSING it is the ``skipped_reason`` or ``missing_reason`` of
+        their rows in ``ash_aggregated_results.json``. The scanner table shows only
+        the status, so without this list a report says that npm-audit was skipped
         and leaves "no lockfile beside a package.json" in the log.
+
+        For ERROR it is the reason recorded for the scanner (the ``error_reason``
+        of its row, one sentence the scan phase and the executor wrote with no
+        path in it) when that still passes :func:`is_short_reason` here, because a
+        results file read back by ``ash report`` can hold any text in that field.
+        When none is recorded, or it does not pass, it is :func:`short_error_reason`
+        of the first error recorded in the scanner's per-target reports: one
+        sentence with no path, no stderr and no validation details, since a summary
+        can be posted where the machine's paths and the tool's output should not
+        be. A scanner with neither has no entry, and a scanner in ERROR only for a
+        stale content database has none either: it is reported under its own
+        heading.
 
         Scanners are grouped because one option often leaves many out: a run
         with ``--scanners npm-audit`` skips every other scanner for the one
         reason, which is one line here and not fifteen. A row that records no
         reason has no entry: the table already says all there is.
         """
+        from automated_security_helper.utils.content_db_staleness import (
+            scanners_in_error_for_a_stale_database,
+        )
+
+        stale = None
         groups: Dict[tuple[str, str], Dict[str, Any]] = {}
         for result in self.get_scanner_results():
             status = result["status"]
@@ -518,6 +561,12 @@ class ReportContentEmitter:
                 reason = result["skipped_reason"] or result["missing_reason"]
             elif status == ScannerStatus.MISSING:
                 reason = result["missing_reason"] or result["skipped_reason"]
+            elif status == ScannerStatus.ERROR:
+                if stale is None:
+                    stale = scanners_in_error_for_a_stale_database(self.model)
+                if result["scanner_name"] in stale:
+                    continue
+                reason = self._error_reason(result)
             else:
                 continue
             if not reason:
@@ -528,6 +577,36 @@ class ReportContentEmitter:
             )
             group["scanners"].append(result["scanner_name"])
         return list(groups.values())
+
+    def _error_reason(self, result: Dict[str, Any]) -> Optional[str]:
+        """The short reason an ERROR scanner is listed with, or None.
+
+        *result* is the scanner's row of :meth:`get_scanner_results`. Its recorded
+        ``error_reason`` is shown when it is still a short reason: this is where a
+        results file's text first reaches a reader, so it is held to the rule the
+        scan phase writes by (``utils/short_reason.py``) here too, and a recorded
+        sentence that names a local path, or is not one printable line, is not
+        shown. Otherwise the first sentence of the first error the scanner's
+        reports record, which is how a results file written before reasons were
+        recorded is read, and an error nobody gave a reason.
+        """
+        recorded = result.get("error_reason")
+        if is_short_reason(recorded):
+            return str(recorded).strip()
+        return self._first_error_sentence(result["scanner_name"])
+
+    def _first_error_sentence(self, scanner_name: str) -> Optional[str]:
+        """The short reason of the first error the scanner's reports record.
+
+        Read by ``recorded_error_sentence``, the reading the unified metrics decide
+        on: the scanner's own reports in the order ``recorded_error`` reads them,
+        each one's own ``errors`` and then the ``errors`` of its ``raw_results``,
+        which is where the executor also leaves the failure it recorded. The
+        metrics leave an ERROR row's ``error_reason`` empty when this has a
+        sentence, so the counts do not take its place; the report and the row agree
+        on which of the two a scanner has.
+        """
+        return recorded_error_sentence(self.model, scanner_name)
 
     def get_scan_summary(self) -> Dict[str, Any]:
         """Describe the outcome for people without changing the scan's exit policy.
@@ -1207,3 +1286,11 @@ def _snippet_text(snippet: Any) -> str | None:
         text = snippet.get("text")
         return text if isinstance(text, str) else None
     return None
+
+
+#: The longest reason shown; a longer first sentence is not a short reason. The
+#: limit, and the rest of the check ``short_error_reason`` makes (one printable
+#: line, no local path), are the ones a scanner's recorded reason is held to
+#: (``utils/short_reason.py``, where ``short_error_reason`` lives since the unified
+#: metrics read it too; it is imported above and so still comes from this module).
+SHORT_ERROR_REASON_LIMIT = SHORT_REASON_LIMIT

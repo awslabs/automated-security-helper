@@ -86,7 +86,7 @@
           "symbol": "_say_grype_auto_update_once"
         }
       ],
-      "sha256": "46a840f4102ad57aae6fda132ee27fab1c3485a1238ed1a44df8fb71f54c078f"
+      "sha256": "aa8a995f902a1e9d7935714068605b57f29542c65f95be81d6a72076ae44f975"
     },
     "automated_security_helper/utils/detect_secrets_worker.py": {
       "created": "2026-11-25T17:03:29Z",

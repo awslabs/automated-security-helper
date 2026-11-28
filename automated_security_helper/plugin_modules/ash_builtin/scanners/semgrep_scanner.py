@@ -493,7 +493,7 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
                 "only copy ASH can run here, and it does not run unverified.",
                 level=logging.WARNING,
             )
-            self.dependency_unavailable_reason = (
+            self._record_tool_unusable(
                 f"{self.command} cannot be used: the plugin's values hook {failure}, "
                 "so the copy on PATH could not be verified and its records could "
                 "not be redacted. Fix the plugin's values hook."
@@ -552,8 +552,8 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
                 level=logging.ERROR,
             )
             summary = getattr(answer, "summary", "") or answer.detail
-            self.dependency_unavailable_reason = _shown(
-                f"{self.command} cannot be used: {summary}. {remedy}"
+            self._record_tool_unusable(
+                _shown(f"{self.command} cannot be used: {summary}. {remedy}")
             )
             return False
         self._plugin_log(

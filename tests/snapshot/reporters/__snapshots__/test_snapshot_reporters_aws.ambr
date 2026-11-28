@@ -1881,6 +1881,8 @@
                 'cfn-nag': dict({
                   'actionable_finding_count': 0,
                   'duration': 0.25,
+                  'error_reason': 'it failed on 1 of its 1 target(s)',
+                  'error_reason_code': 'targets_failed',
                   'exit_code': 1,
                   'finding_count': 0,
                   'severity_counts': dict({
@@ -3447,6 +3449,8 @@
             'cfn-nag': dict({
               'actionable_finding_count': 0,
               'duration': 0.25,
+              'error_reason': 'it failed on 1 of its 1 target(s)',
+              'error_reason_code': 'targets_failed',
               'exit_code': 1,
               'finding_count': 0,
               'severity_counts': dict({

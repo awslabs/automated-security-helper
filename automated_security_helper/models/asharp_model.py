@@ -383,6 +383,33 @@ class ScannerTargetStatusInfo(StrippedRecordModel):
             ),
         ),
     ] = None
+    # Written by core.unified_metrics when it rebuilds the row (a reason the scan
+    # recorded, one read back from a results file that passes the check, or one
+    # derived from the row's own counts and statuses) and by models.scanner_validation
+    # for a queued scanner that never completed. Only ever on an ERROR row.
+    error_reason: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description=(
+                "Why the scanner is ERROR, in one short sentence that names no path. "
+                "Recorded by the scan or derived for an ERROR row, and None on every "
+                "other row, including an ERROR row of a results file written before "
+                "reasons were recorded."
+            ),
+        ),
+    ] = None
+    error_reason_code: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description=(
+                "The kind of failure error_reason says, as a short lower-case code "
+                "such as timed_out, could_not_start, exit_code_rejected or "
+                "no_result. Set and cleared together with error_reason."
+            ),
+        ),
+    ] = None
 
     @property
     def total_duration(self) -> float:

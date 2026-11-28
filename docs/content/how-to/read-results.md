@@ -209,14 +209,45 @@ where ASH looked, what the scanner's own check reported (semgrep offline with no
 cache, for example), or that the tool was found only inside the scanned directory.
 `skipped_reason` on a `SKIPPED` row names the option
 that left the scanner out, or what it had nothing to scan, as in
-`no CloudFormation template in the scanned files`. The row's `exit_code` is the tool's
+`no CloudFormation template in the scanned files`. `error_reason` on an `ERROR` row gives
+the cause in one short sentence that names no path, and `error_reason_code` gives its
+kind as a short code, such as `timed_out`, `could_not_start`, `exit_code_rejected`,
+`no_result` or `config_file_missing`. The row's `exit_code` is the tool's
 exit code, the highest over its targets, the start-failure code 127 for a tool that
 could not start as asked, or `null` when no tool ran.
 
 The HTML, Markdown and text reports list the same reasons under their scanner table, as
 "Scanners that did not run", with the scanners that share a reason on one line. The
-compact Markdown report lists them for `MISSING`
+compact Markdown report lists them for `MISSING` and `ERROR`
 scanners only, since it leaves `SKIPPED` rows out of the table.
+
+An `ERROR` scanner is listed there with its `error_reason`, for example
+`checkov (ERROR): its tool exited with code 2, which this scanner does not accept
+as a completed run, so its results file is not graded`. The full text, with the tool's
+command, its exit code and where its stderr was saved, stays in the `errors` of the
+scanner's entries under `additional_reports` in `ash_aggregated_results.json`, and in
+`ash.log`.
+
+ASH records the reason where the failure happens: a timeout, a tool that could not be
+started or stopped, output ASH could not record or read, an exit code the scanner does
+not accept, a result it could not grade, a content database that is absent or older than
+the configured policy allows, targets no rule was evaluated against, and a scanner that
+could not be built. Some scanners also name the failures of their own checks, such as a
+config file that does not exist, an ignore file in the scanned tree, an exclusion the
+tool cannot express, or a scan that read none of the files it was given. A sentence built
+from a value says the count or the option name and never the path. When the counts
+decide the status and no recorded error has a sentence to show, the sentence says so, as
+in `it failed on 2 of its 3 target(s)`. A scan that crashed is not one of those: the
+counts it kept before it stopped say nothing of why, so with no sentence to show its
+reason is `its run failed`.
+
+An `ERROR` row has a `null` `error_reason` when nothing recorded a reason, as in a
+results file written before ASH recorded them, or when a scanner's error gave none. The
+report then lists the first sentence of the scanner's recorded failure instead, and that
+sentence is listed over one made from the scanner's counts: how many targets failed does
+not say what failed them. A scanner with neither is not listed. A reason or sentence
+that would show a path, or is longer than 200 characters, is not listed. A scanner in `ERROR` only because its content
+database is stale is reported under its own heading.
 
 To read the results from a script:
 

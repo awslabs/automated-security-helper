@@ -55,6 +55,9 @@ TARGET_ONLY_FIELDS = (
     # what the scan phase and the executor recorded.
     "missing_reason",
     "skipped_reason",
+    # Why an ERROR row is so, and the code of its kind: rebuilt onto the row the same way.
+    "error_reason",
+    "error_reason_code",
 )
 
 

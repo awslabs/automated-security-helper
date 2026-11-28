@@ -973,6 +973,8 @@ class TestScannerResults:
             "dependencies_missing",
             "missing_reason",
             "skipped_reason",
+            "error_reason",
+            "error_reason_code",
             "duration",
             "targets_attempted",
             "targets_failed",
