@@ -50,7 +50,8 @@ export const DEPARTURES = Object.freeze(
       row: 'comma-separated-output-formats',
       schema: 'invalid',
       editor: 'warning',
-      reason: 'ASH reads a comma-separated string of output formats as the list it spells.',
+      reason:
+        'ASH reads a comma-separated string of output formats as the list it spells, and reads each name in a list without the white space around it.',
     },
     {
       row: 'unknown-top-level-key',
@@ -348,6 +349,8 @@ function entryFailures(failure) {
 // either, so a name that carries one is not a name.
 const PYTHON_SPACE = /^[\p{White_Space}\x1c-\x1f]+|[\p{White_Space}\x1c-\x1f]+$/gu;
 
+const pythonStrip = (text) => text.replace(PYTHON_SPACE, '');
+
 /**
  * The names ASH reads in a string at output_formats: the string split on commas, each piece
  * stripped the way Python strips, and the empty pieces dropped. "sarif,html," is two names,
@@ -356,8 +359,22 @@ const PYTHON_SPACE = /^[\p{White_Space}\x1c-\x1f]+|[\p{White_Space}\x1c-\x1f]+$/
 export function readOutputFormats(text) {
   return text
     .split(',')
-    .map((piece) => piece.replace(PYTHON_SPACE, ''))
+    .map(pythonStrip)
     .filter((piece) => piece !== '');
+}
+
+// The names ASH reads in the value of output_formats when it is a string or a list of strings,
+// and null for any other value, which ASH leaves to the field's type check. A list is not split
+// on commas and none of its entries is dropped: each is stripped the way Python strips, and an
+// entry that is empty once stripped is a name that no format has.
+function outputFormatNames(value) {
+  if (typeof value === 'string') {
+    return readOutputFormats(value);
+  }
+  if (Array.isArray(value) && value.every((entry) => typeof entry === 'string')) {
+    return value.map(pythonStrip);
+  }
+  return null;
 }
 
 // Every value in `instance` that sits at a field of the data block, as { field, pointer,
@@ -532,23 +549,22 @@ export function judge(block, path, instance, failures, options = {}) {
       );
     }
 
-    // A string where a list of output formats belongs, which ASH reads as the list.
-    if (field.kind === 'enumList' && typeof value === 'string') {
+    // Output formats that the schema refuses and ASH reads as the list of names they spell: a
+    // string, which ASH splits on commas, and a list whose entries ASH strips.
+    if (field.kind === 'enumList') {
+      const names = outputFormatNames(value);
       const index = seen.findIndex(
         (failure) => failure.pointer === pointer && failure.keyword === 'anyOf',
       );
-      const pieces = readOutputFormats(value);
       const allowed = Array.isArray(field.enum) ? field.enum : [];
-      if (index !== -1 && pieces.every((piece) => allowed.includes(piece))) {
+      if (names !== null && index !== -1 && names.every((name) => allowed.includes(name))) {
         replaced.add(index);
-        rows.push(
-          finding(
-            'comma-separated-output-formats',
-            'warning',
-            at,
-            `Write as a list: ${field.key}: [${pieces.join(', ')}]. ASH reads the string as the same list.`,
-          ),
-        );
+        const list = `${field.key}: [${names.join(', ')}]`;
+        const message =
+          typeof value === 'string'
+            ? `Write as a list: ${list}. ASH reads the string as the same list.`
+            : `Write each name without the white space around it: ${list}. ASH strips each name, so it reads the same list.`;
+        rows.push(finding('comma-separated-output-formats', 'warning', at, message));
       }
     }
 
