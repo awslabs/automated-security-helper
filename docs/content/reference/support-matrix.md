@@ -13,7 +13,7 @@ Each table says what ASH supports, with one row for every item the code knows ab
 
 ## Scanners
 
-One row for every scanner manifest: supported scanners first, then deprecated ones, then alpha ones, each group by name. A scanner that loads on its own needs no setting. An alpha scanner loads only when `ash_plugin_modules` lists its module. The platform columns say what ASH declares about running the scanner on each operating system and CPU.
+One row for every scanner manifest: supported scanners first, then deprecated ones, then alpha ones, each group by name. A scanner that loads on its own needs no setting. Any other scanner loads only when `ash_plugin_modules` lists its module. The platform columns say what ASH declares about running the scanner on each operating system and CPU.
 
 | Scanner | Tier | Loads on its own | Module to list | Install methods | Linux x86-64 | Linux arm64 | macOS Intel | macOS Apple silicon | Windows x86-64 | Windows arm64 | Linux libc |
 |---------|------|------------------|----------------|-----------------|--------------|-------------|-------------|---------------------|----------------|---------------|------------|
@@ -64,7 +64,7 @@ Where each column comes from:
 - `Scanner`: The name in the scanner's manifest, which is its name in the config.
 - `Tier`: The tier in the manifest. A deprecated scanner names the scanner that supersedes it.
 - `Loads on its own`: The manifest: whether the scanner's module loads without being listed in ash_plugin_modules.
-- `Module to list`: The manifest's plugin module, which ash_plugin_modules names to load an alpha scanner; a scanner that loads on its own is built in.
+- `Module to list`: The manifest's plugin module, which ash_plugin_modules names to load a scanner that does not load on its own; a scanner that loads on its own is built in.
 - `Install methods`: The runtime kind in the scanner class's operational facets, as the way its tool reaches the machine.
 - `Linux x86-64`: The scanner's own refusal of Linux, then whether the facets name a download for linux/amd64, then the scanner's enabled setting on Linux, then the facets' provisionable platforms. The first that applies is shown.
 - `Linux arm64`: The scanner's own refusal of Linux, then whether the facets name a download for linux/arm64, then the scanner's enabled setting on Linux, then the facets' provisionable platforms. The first that applies is shown.
