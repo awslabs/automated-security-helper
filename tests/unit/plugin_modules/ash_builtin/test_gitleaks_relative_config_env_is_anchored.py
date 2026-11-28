@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A relative GITLEAKS_CONFIG is resolved where the operator set it, not in the tree.
+"""A relative GITLEAKS_CONFIG is resolved where ASH runs, not where gitleaks runs.
 
 With GITLEAKS_CONFIG in the environment and no sandbox, the scanner passed no
 ``--config`` and left the resolution to gitleaks. gitleaks resolves a relative
@@ -10,9 +10,12 @@ directory, so a relative value the operator set in ASH's own working directory
 was read from the scanned tree: the repository supplied the config file.
 
 The relative value is now anchored to the directory ASH runs in and passed as
-``--config``, which gitleaks reads before the variable. An absolute path, and
-GITLEAKS_CONFIG_TOML (the config's text, not a path), are left to gitleaks as
-before.
+``--config``, which gitleaks reads before the variable. An absolute path is passed
+as ``--config`` as given, and GITLEAKS_CONFIG_TOML (the config's text, not a path)
+is written to a file outside the tree and passed as ``--config`` too. By default ASH
+scans the directory it runs in, so in the default run the anchor is the scanned tree
+itself and the tree can supply the file; an absolute path is the form that keeps
+the tree from supplying it. These tests run ASH from a directory outside the tree.
 
 The test is on the value AS GIVEN. A first shape tested ``os.path.isabs`` on the
 value after ``expanduser``, so ``~/rules.toml`` read as absolute and was left to

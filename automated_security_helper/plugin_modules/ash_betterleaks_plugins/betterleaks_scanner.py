@@ -66,7 +66,10 @@ of the release binary):
   still read as the fallback of each. Precedence: ``--config``, then the path
   variable, then the TOML-content variable. A relative path variable is resolved
   against Betterleaks' working directory, the scanned tree, so ASH anchors it where
-  the operator set it (``_resolve_config_file``).
+  the operator set it (``_resolve_config_file``). By default ASH scans the
+  directory it runs in, so in the default run that anchor is the scanned tree
+  itself; an absolute path is the form that keeps the tree from supplying the
+  config.
 * The ignore file is ``.betterleaksignore``, and ``.gitleaksignore`` still works. For
   each directory it looks in (the ``--gitleaks-ignore-path`` value and the scan path)
   it reads the first of the two that exists and not both. It reads the scan path's
@@ -224,9 +227,13 @@ _BINARY = getattr(os, "O_BINARY", 0)
 #: Betterleaks 1.10.1 read in each pair of them set together, run on its own. The tuple
 #: lists each product's two names together, which is not that order, so
 #: ``_config_env_read_name`` gives the one Betterleaks reads. When one is set, outside
-#: the scanner sandbox, ASH leaves the TOML variables and an absolute path to
-#: Betterleaks, and when the path variable Betterleaks reads is not absolute, passes it
-#: as ``--config`` anchored to the directory ASH runs in.
+#: the scanner sandbox and with no ``options.config_file``, ASH leaves the TOML
+#: variables and an absolute path to Betterleaks, and when the path variable
+#: Betterleaks reads is not absolute, passes it as ``--config``: a ``~`` value under
+#: the home directory it names, any other resolved against the directory ASH runs in.
+#: By default ASH scans the directory it runs in, so in the default run a relative
+#: value names a file in the scanned tree, which can then supply the config; an
+#: absolute path is the form that keeps the tree from supplying it.
 CONFIG_ENV_VARS = (
     "BETTERLEAKS_CONFIG",
     "BETTERLEAKS_CONFIG_TOML",
@@ -691,11 +698,14 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
         The operator's ``options.config_file``. Otherwise a config path variable the
         operator set, passed as ``--config`` only when it is not anchored as given
         (absolute, and on Windows with a drive or share): Betterleaks would resolve
-        it against its working directory, the scanned tree, so the repository would
-        supply the config file. Anchored where the operator typed it instead. An
-        absolute path, and a TOML-content variable, are left to Betterleaks. Without
-        any, Betterleaks uses its built-in rules and reads no config from the tree
-        (see the module docstring).
+        it against its working directory, the scanned tree. ASH anchors it where
+        the operator typed it instead: a ``~`` value under the home directory it
+        names, any other in the directory ASH runs in. By default ASH scans the
+        directory it runs in, so in the default run that anchor is the scanned tree
+        itself and the tree can supply the file; an absolute path is the form that
+        keeps the tree from supplying it. An absolute path, and a TOML-content
+        variable, are left to Betterleaks. Without any, Betterleaks uses its built-in
+        rules and reads no config from the tree (see the module docstring).
         """
         operator_config = self._operator_config_path()
         if operator_config is not None:
@@ -717,9 +727,12 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
             # A relative extend path in the config would be opened from the
             # scanned tree. Betterleaks opens only the config it reads by its
             # precedence, but each variable that is set is checked for one, in
-            # case Betterleaks reads a variable ASH does not expect it to. A byte
-            # order mark only stops Betterleaks from reading a config, so it is
-            # refused in the one Betterleaks reads and skipped in the others.
+            # case Betterleaks reads a variable ASH does not expect it to. For a
+            # relative path variable that check reads the file where ASH runs,
+            # which is the file Betterleaks would open only when ASH runs in the
+            # scanned tree, as it does by default. A byte order mark only stops
+            # Betterleaks from reading a config, so it is refused in the one
+            # Betterleaks reads and skipped in the others.
             environ = snapshot_environ()
             read = _config_env_read_name()
             for name in set_vars:
@@ -732,7 +745,8 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
                     # An absolute value is left to Betterleaks, which opens it as
                     # given, so it is checked as given: os.path.abspath would drop
                     # "link/.." by hand where the open follows the link first. Any
-                    # other value is checked where ASH anchors it, the file passed.
+                    # other value is checked where ASH anchors it, the file ASH
+                    # passes when it is the variable Betterleaks reads.
                     refuse_relative_extend_path(
                         "Betterleaks",
                         name,

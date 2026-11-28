@@ -1376,7 +1376,8 @@ def test_a_relative_gitleaks_config_variable_is_anchored_where_the_operator_set_
     the scanned source directory, so the repository would supply the file the
     operator named in ASH's own directory. The scanner anchors the value to the
     directory ASH runs in and passes it as ``--config`` to the first run and the
-    re-scans alike; the scanned tree's file of the same name is never read."""
+    re-scans alike. With ASH run from a directory outside the tree, as here, the
+    scanned tree's file of the same name is never read."""
     operator_dir = tmp_path / "operator"
     (operator_dir / "rules").mkdir(parents=True)
     (operator_dir / "rules" / "gl.toml").write_text('title = "operator"\n')
