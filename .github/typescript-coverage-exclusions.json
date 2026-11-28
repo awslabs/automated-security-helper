@@ -96,6 +96,30 @@
       "reason": "The vendored MIT animejs 4.5.0 build, written whole by docs/ui-tests/vendor-motion.cjs (which checks the upstream license and version before copying). Third-party vendored output, not code this repository authors; no ancestor directory holds a JS harness config, so no harness exists to measure it."
     },
     {
+      "kind": "node-test",
+      "path": "docs/content/assets/javascripts/config-editor/yaml-scalars.js",
+      "reason": "A DOM-free module of the docs site's configuration editor: how a plain YAML scalar is read the way ASH's YAML 1.1 loader reads it, and written so that a YAML 1.1 and a YAML 1.2 reader agree. Its tests run under node --test in docs/editor-tests, which writes no jest coverage summary, so no report can measure it.",
+      "test": "docs/editor-tests/yaml-scalars.test.js"
+    },
+    {
+      "kind": "node-test",
+      "path": "docs/content/assets/javascripts/config-editor/yaml-read.js",
+      "reason": "The configuration editor's YAML reader, a DOM-free port of PyYAML's scanner and parser that keeps offsets, styles and comments. Its tests, and the corpus test that compares it with ASH's own loader, run under node --test in docs/editor-tests, which writes no jest coverage summary, so no report can measure it.",
+      "test": "docs/editor-tests/yaml-read.test.js"
+    },
+    {
+      "kind": "node-test",
+      "path": "docs/content/assets/javascripts/config-editor/yaml-write.js",
+      "reason": "The configuration editor's YAML writer: line patches, the block emitter and the new-file text, with no DOM. Its tests run under node --test in docs/editor-tests, which writes no jest coverage summary, so no report can measure it.",
+      "test": "docs/editor-tests/yaml-write.test.js"
+    },
+    {
+      "kind": "node-test",
+      "path": "docs/content/assets/javascripts/config-editor/state.js",
+      "reason": "The configuration editor's document state: edits through the re-read gate, and the history behind undo and redo, with no DOM. Its tests run under node --test in docs/editor-tests, which writes no jest coverage summary, so no report can measure it.",
+      "test": "docs/editor-tests/state.test.js"
+    },
+    {
       "kind": "no-harness",
       "path": ".github/scripts/assert-coverage-completeness.mjs",
       "reason": "This census script itself. Invoked as `node .github/scripts/...` from a workflow step, and neither .github/scripts/, .github/ nor the repository root carries a package.json, tsconfig, jest or vitest config -- verified against `git ls-files` -- so no JS harness exists anywhere in its tree to measure it. Named here rather than left unlisted because the gate is deliberately self-inclusive: it censuses every tracked JS/TS file, including its own, and an unexplained absence is what it exists to reject."
