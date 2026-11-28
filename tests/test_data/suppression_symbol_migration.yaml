@@ -675,9 +675,9 @@ kept:
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: automated_security_helper/config/tool_config_trust.py
-  line_start: 139
-  line_end: 139
-  remeasured_at: e19cc22a5d6
+  line_start: 144
+  line_end: 144
+  remeasured_at: 77af0edee39
   kept_because: module-level code; the Python grammar addresses class and function definitions only.
     The migration kept two pins here (lines 116 and 122); the config now carries one, the
     detect-secrets baseline_file row, so this row replaces both

@@ -25,8 +25,8 @@ global_settings:
         the line is pinned so that a bind elsewhere in the file still reports.
     - rule_id: API_KEY_OR_SECRET
       path: automated_security_helper/config/tool_config_trust.py
-      line_start: 139
-      line_end: 139
+      line_start: 144
+      line_end: 144
       reason: >-
         False positive. ferret-scan reports this one line of the file, measured with
         2.6.1 over the tree. It is the SCANNER_CONFIG_FILE_OPTIONS row that pairs
