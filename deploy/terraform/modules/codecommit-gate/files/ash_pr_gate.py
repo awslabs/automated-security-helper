@@ -205,6 +205,8 @@ SCAN_ENV_DROPPED_VARIABLES = frozenset(
 #: and still report a status the completeness gate covers. --ignore-suppressions is
 #: absent for the same kind of reason -- it makes suppressed findings actionable, so
 #: it can only report more, and its negation is ASH's own default.
+#: --help and --version are diagnostic too, and are listed below all the same: each
+#: ends the run with exit 0 before any scanner starts.
 #:
 #: Every spelling ASH accepts is listed, enumerated from the real click command rather
 #: than derived by hand, because a near-miss reads like a closed hole and is not one.
@@ -261,6 +263,39 @@ GATE_OWNED_SCAN_OPTIONS = frozenset(
         # history, so --base-ref has real refs to point at.
         "--changed-files-only",
         "--base-ref",
+        # End the run with exit 0 before any scanner starts, which is outcome "pass":
+        # the help text, the version line and the --cli-json-input template. The
+        # gate's own probe in check_completeness_flag relies on that exit for --help.
+        "--help",
+        "--version",
+        "--generate-cli-skeleton",
+        # A document whose values fill in any option the command line leaves unset,
+        # so it could set options above that this gate does not pass, the scanner
+        # selection among them.
+        "--cli-json-input",
+        # Findings already in a saved results file stop counting toward the exit code.
+        "--baseline",
+        # Whether an over-age content database fails the scan. The base config's
+        # content_db_staleness key is where an operator accepts one.
+        "--allow-stale-content-db",
+        "--no-allow-stale-content-db",
+        # Replaces the file ASH_CONFIG names, which run_scan sets to this gate's own
+        # config, for the whole command; that file is the base the scan reads.
+        "--ash-config-from-host",
+        # Whether the scanned tree's own .gitignore and .ignore files shrink the scan
+        # set. A base config can turn that off, and either flag outvotes it.
+        "--honor-ignore-files",
+        "--no-honor-ignore-files",
+        # Hold this gate's config, or one file of its chain, to the limits of a config
+        # the scanned repository wrote, or, with --config-file-from-another-checkout,
+        # of a config in another git checkout. Either way that file can no longer
+        # grant what only an operator's file may, so this gate's own grants are lost.
+        "--config-from-scanned-repository",
+        "--config-file-from-scanned-repository",
+        "--config-file-from-another-checkout",
+        # Lets a program inside the scanned tree run where ASH would otherwise refuse
+        # it. Nothing in this gate's scan should run code from the pull request.
+        "--allow-in-tree-tools",
     }
 )
 

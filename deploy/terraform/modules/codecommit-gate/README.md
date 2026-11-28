@@ -209,13 +209,28 @@ One setting makes that more reachable, and the other is the fallback:
 **The scan cannot be narrowed from `ash_scan_extra_args`.** This gate can approve
 a pull request, so the handler decides every option that changes what is scanned
 or how the verdict is reached, and refuses them in `ash_scan_extra_args`:
-`--changed-files-only` and `--base-ref` are refused because they drop findings
-outside the diff before the exit code is computed, and so are the scanner
-selection, the shard options, `--config` and `--config-overrides`, `--phases`,
-`--use-existing`, and the options it passes itself. `GATE_OWNED_SCAN_OPTIONS` in
-`files/ash_pr_gate.py` is the full list. A
-refused option is not dropped: the scan reports an error outcome on every pull
-request, and any approval the gate gave is revoked, until the option is removed.
+
+- `--changed-files-only` and `--base-ref`, refused because they drop findings
+  outside the diff before the exit code is computed, and `--baseline`, which
+  drops findings a saved results file already holds;
+- the scanner selection, the shard options, `--phases` and `--use-existing`;
+- `--config`, `--config-overrides`, `--cli-json-input` and `--ash-config-from-host`,
+  which decide the configuration the scan reads;
+- the content database staleness flags; to accept an over-age database, set
+  `content_db_staleness: warn` in the base config;
+- `--honor-ignore-files` and `--no-honor-ignore-files`; set `honor_ignore_files`
+  in the base config instead;
+- the hidden options that hold the gate's config, or one file of its chain, to the
+  limits of a config the scanned repository wrote or of one in another git checkout;
+- `--allow-in-tree-tools`, since nothing in the scan should run code from the pull
+  request;
+- `--help`, `--version` and `--generate-cli-skeleton`, which end the run with exit 0
+  before any scanner starts;
+- the options it passes itself.
+
+`GATE_OWNED_SCAN_OPTIONS` in `files/ash_pr_gate.py` is the full list. A refused
+option is not dropped: the scan reports an error outcome on every pull request,
+and any approval the gate gave is revoked, until the option is removed.
 
 **The clone is not shallow.** CodeCommit does not reliably permit fetching an
 arbitrary commit SHA directly, so the pull request's source branch is cloned in
