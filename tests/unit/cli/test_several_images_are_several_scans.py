@@ -47,7 +47,7 @@ def _here(tmp_path, monkeypatch):
 
 
 def _scan(*options: str):
-    return CliRunner().invoke(app, ["scan", *options])
+    return CliRunner().invoke(app, ["scan", "fs", *options])
 
 
 def _exits_by_image(codes: dict):

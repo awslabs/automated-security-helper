@@ -527,7 +527,7 @@ def test_parity_an_unusable_option_value(layout, no_scan_runs, monkeypatch):
     from automated_security_helper.cli.main import app
 
     monkeypatch.chdir(layout["scan"])
-    cli = CliRunner().invoke(app, ["scan", "--min-severity", "loud"])
+    cli = CliRunner().invoke(app, ["scan", "fs", "--min-severity", "loud"])
     mcp = _scan_directory(directory_path=str(layout["scan"]), severity_threshold="LOUD")
 
     assert cli.exit_code == mcp["exit_code"] == USAGE, (cli.output, mcp)

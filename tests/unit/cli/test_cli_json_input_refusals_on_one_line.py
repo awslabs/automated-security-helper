@@ -44,7 +44,7 @@ def test_the_refusal_is_one_line_holding_the_whole_path(tmp_path, kind):
     if DOCUMENTS[kind] is not None:
         path.write_text(DOCUMENTS[kind], encoding="utf-8")
     with patch(RUN_ASH_SCAN) as mock_run:
-        result = CliRunner().invoke(app, ["scan", "--cli-json-input", str(path)])
+        result = CliRunner().invoke(app, ["scan", "fs", "--cli-json-input", str(path)])
     assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
     assert not mock_run.called
     lines = [line for line in result.output.splitlines() if "--cli-json-input:" in line]

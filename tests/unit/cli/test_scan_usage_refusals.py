@@ -73,7 +73,9 @@ class TestNonexistentSourceDir:
         missing = tmp_path / "also-missing"
         monkeypatch.setenv("ASH_SOURCE_DIR", str(missing))
         with patch(RUN_ASH_SCAN) as mock_run:
-            result = runner.invoke(app, ["scan", "--output-dir", str(tmp_path / "o")])
+            result = runner.invoke(
+                app, ["scan", "fs", "--output-dir", str(tmp_path / "o")]
+            )
         # The same text as for --source-dir: it names the case and the path, and no
         # option, so every surface can give it (utils/directory_refusals.py).
         _assert_refused(result, f"Source directory does not exist: {missing}")

@@ -43,12 +43,12 @@ def _scan(*options: str):
 
 class TestExclusivityIsRefusedBeforeAnyWork:
     def test_two_image_options_are_refused(self):
-        result = _scan("--image", IMAGE_REF, "--image-archive", "image.tar")
+        result = _scan("fs", "--image", IMAGE_REF, "--image-archive", "image.tar")
         assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert "only one may be given" in result.output
 
     def test_an_image_beside_source_dir_names_the_flag(self, tmp_path):
-        result = _scan("--image", IMAGE_REF, "--source-dir", str(tmp_path))
+        result = _scan("fs", "--image", IMAGE_REF, "--source-dir", str(tmp_path))
         assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert "--source-dir" in result.output
         assert "one scan has one subject" in result.output
@@ -57,7 +57,7 @@ class TestExclusivityIsRefusedBeforeAnyWork:
         self, tmp_path, monkeypatch
     ):
         monkeypatch.setenv("ASH_SOURCE_DIR", str(tmp_path))
-        result = _scan("--image", IMAGE_REF)
+        result = _scan("fs", "--image", IMAGE_REF)
         assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert "ASH_SOURCE_DIR" in result.output
 
@@ -92,7 +92,7 @@ class TestOptionsThatReadTheWorkingDirectoryAreRefused:
         ],
     )
     def test_each_is_refused_with_the_flag_named(self, image_options, other):
-        result = _scan(*image_options, *other)
+        result = _scan("fs", *image_options, *other)
         assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert other[0] in result.output
         assert image_options[0] in result.output
@@ -101,14 +101,14 @@ class TestOptionsThatReadTheWorkingDirectoryAreRefused:
 class TestThePayloadGateReachesTheOperator:
     def test_a_missing_archive_shows_the_gate_text(self, tmp_path):
         missing = tmp_path / "absent.tar"
-        result = _scan("--image-archive", str(missing))
+        result = _scan("fs", "--image-archive", str(missing))
         assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert f"Image archive does not exist: {missing}" in result.output
 
     def test_a_markerless_layout_shows_the_gate_text(self, tmp_path):
         bare = tmp_path / "layout"
         bare.mkdir()
-        result = _scan("--image-layout", str(bare))
+        result = _scan("fs", "--image-layout", str(bare))
         assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert f"Image layout has no oci-layout marker file: {bare}" in result.output
 
@@ -120,7 +120,7 @@ class TestWhatTheCliHandsRunAshScan:
             # cli/scan.py documents for a test's patch of `cli.scan.<name>`.
             "automated_security_helper.cli.scan.run_ash_scan",
         ) as run:
-            result = _scan("--image", IMAGE_REF)
+            result = _scan("fs", "--image", IMAGE_REF)
         assert result.exit_code == 0, result.output
         assert run.call_count == 1
         kwargs = run.call_args.kwargs

@@ -39,7 +39,7 @@ def _flat(output: str) -> str:
 
 def _scan(args, **kwargs):
     with patch(RUN_ASH_SCAN) as mock_run:
-        result = CliRunner().invoke(app, ["scan", *args], **kwargs)
+        result = CliRunner().invoke(app, ["scan", "fs", *args], **kwargs)
     return result, mock_run
 
 
@@ -359,7 +359,7 @@ def test_the_skeleton_is_printed_whatever_document_was_named(tmp_path):
     )
 
     assert result.exit_code == 0, result.output
-    assert "source_dir" in json.loads(result.stdout)
+    assert "path" in json.loads(result.stdout)
     assert not mock_run.called
 
 

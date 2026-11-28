@@ -157,7 +157,7 @@ class TestTheCloneIsGitInTheSameEnvironment:
 
 
 def _scan(*options: str):
-    return CliRunner().invoke(app, ["scan", *options])
+    return CliRunner().invoke(app, ["scan", "fs", *options])
 
 
 def _scan_fs(tmp_path, values: dict, *options: str, clone=None):
