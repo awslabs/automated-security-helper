@@ -34,6 +34,11 @@ What is asserted
 * An option that takes a value, with no word after it (`--config`, `-vc`,
   `--source-dir`), fails the step the same way: passed on, it would take the next option
   the step adds as its value.
+* `--cli-json-input`, written either way, fails the step the same way, named by the
+  position of its word: it hands `ash scan fs` a document of parameters, and the step
+  checks ash-args word by word, so a mode, a directory or a workspace set inside the
+  document would reach ASH past every check the step makes. The word after another
+  option that takes a value is that value, though it is spelled `--cli-json-input`.
 * Options whose values name a subcommand reach uvx unchanged, after the workflow's own
   options, and ash's own CLI parses that command line, strictly as a run does (an
   option the command lacks, or a value its type refuses, is a failure here too), as the
@@ -59,6 +64,9 @@ What is asserted
 * The step's list of options that take a value is the `ash` group's and `ash scan fs`'s:
   every option that is not a flag or a count, long and short spellings, each taking one
   word. `ash scan fs` takes two the group does not, `--archive` and `--cli-json-input`.
+  The scan step refuses the second by name, so a document of parameters cannot come in
+  through ash-args; it stays in the list so that the step that reads the effective mode
+  skips its value, as click does. It has no short spelling for the refusal to miss.
 * Click does read a bare word after the options as a subcommand, and a word after a
   value-taking option as its value (a control on ASH's own CLI).
 * An ASH that has the `fs` subject (3.9 and later) scans the checkout as the path of
@@ -910,7 +918,12 @@ def test_the_options_that_take_a_value_are_those_of_the_ash_group_and_the_fs_sub
     the scan with, and of `ash scan fs`, which an ASH with the subject runs it with. The
     list holds neither fewer nor more: an option it lacks has its value read as a bare
     word and refused, and one it holds that neither command takes would skip a word
-    both commands read."""
+    both commands read.
+
+    `--cli-json-input` is in it, though the scan step refuses that option by name: the
+    document it names would carry past the step's word-by-word checks what the words do
+    not show. The step that reads the effective mode reads the same list, and skips the
+    word after the option, its value, as click does."""
     assert _value_options_in_the_step() == (
         _takes_a_value(_ash_group()) | _takes_a_value(_fs())
     )
@@ -933,19 +946,82 @@ def test_the_options_that_take_a_value_include_those_of_the_fs_subject():
     assert all(option.nargs == 1 for option in _options_of(_fs()))
 
 
+@pytest.mark.unit
+def test_the_document_option_of_fs_has_its_long_spelling_only():
+    """The scan step refuses `--cli-json-input` by that one spelling, alone or with `=`.
+    A short one would come in inside a cluster of short options (`-vX params.json`),
+    which the step reads letter by letter and passes on, so a short spelling added to
+    the option needs a refusal of its own, and this test fails first."""
+    (option,) = [o for o in _options_of(_fs()) if "--cli-json-input" in o.opts]
+
+    assert option.opts == ["--cli-json-input"], option.opts
+    assert not option.secondary_opts, option.secondary_opts
+
+
 @pytest.mark.integration
 @posix_only
-@pytest.mark.parametrize("option", ["--archive", "--cli-json-input"])
+@pytest.mark.parametrize("option", ["--archive"])
 def test_an_option_only_the_fs_subject_takes_keeps_its_value_in_ash_args(
     tmp_path, option
 ):
-    """The two options `ash scan fs` takes and the `ash` group does not. Each is in the
-    step's list, so the word after it is its value and is passed on to `fs`, not
-    refused as a bare word, as the word after any other option is."""
-    result, argv = _run(tmp_path, f"{option} params.json", help_text=SUBJECT_HELP)
+    """`--archive` is one of the two options `ash scan fs` takes and the `ash` group
+    does not. It is in the step's list, so the word after it is its value and is passed
+    on to `fs`, not refused as a bare word, as the word after any other option is. The
+    other, `--cli-json-input`, is refused by name (the next test)."""
+    result, argv = _run(tmp_path, f"{option} source.zip", help_text=SUBJECT_HELP)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert argv == _SUBJECT_OPTIONS + [option, "params.json"], argv
+    assert argv == _SUBJECT_OPTIONS + [option, "source.zip"], argv
+
+
+#: --cli-json-input in ash-args, written either way and after other words, with the
+#: position of the word that names it.
+_DOCUMENT_OPTION_IN_ASH_ARGS = [
+    ("--cli-json-input params.json", 1),
+    ("--cli-json-input=params.json", 1),
+    ("--exclude-scanners grype --cli-json-input params.json", 3),
+    ("--verbose --cli-json-input=params.json", 2),
+]
+
+
+@pytest.mark.integration
+@posix_only
+@pytest.mark.parametrize("help_text", [OLDER_HELP, SUBJECT_HELP], ids=["older", "fs"])
+@pytest.mark.parametrize(("ash_args", "position"), _DOCUMENT_OPTION_IN_ASH_ARGS)
+def test_a_document_of_parameters_in_ash_args_is_refused_by_name(
+    tmp_path, help_text, ash_args, position
+):
+    """`--cli-json-input FILE` hands `ash scan fs` a JSON document of parameters, which
+    the step does not read. The step checks ash-args word by word: the changed-files-only
+    check reads `--mode` among the words, and the directory and the subject are taken
+    from them. A mode, a directory or a workspace set inside the document would reach
+    ASH past each of those checks, so the step refuses the option by name, in both
+    forms, on either spelling of the scan, and starts no scan. The refusal names the
+    word by its position, as the others do, and says why; the value is the caller's and
+    is not printed."""
+    result, argv = _run(tmp_path, ash_args, help_text=help_text)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    _assert_refused(result, argv)
+    output = result.stdout + result.stderr
+    (command,) = command_lines(output)
+    assert command.startswith(f"::error::ash-args word {position} "), command
+    assert "--cli-json-input" in command, command
+    assert "a document of parameters" in command, command
+    assert "word by word" in command, command
+    assert "params.json" not in output, output
+
+
+@pytest.mark.integration
+@posix_only
+def test_a_value_spelled_like_the_document_option_is_that_value(tmp_path):
+    """The control of the refusal above: the word after an option that takes a value is
+    that value, as click reads it, so `--config --cli-json-input` names a config file
+    and no document. The step refuses the option, not its spelling."""
+    result, argv = _run(tmp_path, "--config --cli-json-input", help_text=SUBJECT_HELP)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert argv == _SUBJECT_OPTIONS + ["--config", "--cli-json-input"], argv
 
 
 @pytest.mark.integration
