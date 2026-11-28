@@ -1,0 +1,324 @@
+{
+  "cases": [
+    {
+      "id": "alias",
+      "lines": [
+        "a: &x 1",
+        "b: *x"
+      ],
+      "refuse": {
+        "code": "alias",
+        "column": 4,
+        "line": 2
+      }
+    },
+    {
+      "id": "alias-in-a-flow-collection",
+      "lines": [
+        "a: &x 1",
+        "b: [*x]"
+      ],
+      "refuse": {
+        "code": "alias",
+        "column": 5,
+        "line": 2
+      }
+    },
+    {
+      "id": "second-document",
+      "lines": [
+        "a: 1",
+        "---",
+        "b: 2"
+      ],
+      "refuse": {
+        "code": "second-document",
+        "column": 1,
+        "line": 2
+      }
+    },
+    {
+      "id": "second-document-after-an-end-marker",
+      "lines": [
+        "a: 1",
+        "...",
+        "---",
+        "b: 2"
+      ],
+      "refuse": {
+        "code": "second-document",
+        "column": 1,
+        "line": 3
+      }
+    },
+    {
+      "id": "content-after-an-end-marker",
+      "lines": [
+        "a: 1",
+        "...",
+        "b: 2"
+      ],
+      "refuse": {
+        "code": "syntax",
+        "column": 1,
+        "line": 3
+      }
+    },
+    {
+      "id": "unknown-tag",
+      "lines": [
+        "a: !custom x"
+      ],
+      "refuse": {
+        "code": "tag",
+        "column": 4,
+        "line": 1
+      }
+    },
+    {
+      "id": "python-object-tag",
+      "lines": [
+        "a: !!python/object:os.system x"
+      ],
+      "refuse": {
+        "code": "tag",
+        "column": 4,
+        "line": 1
+      }
+    },
+    {
+      "ash": "loads",
+      "id": "set-tag-loads-in-ash",
+      "lines": [
+        "a: !!set {x, y}"
+      ],
+      "refuse": {
+        "code": "tag",
+        "column": 4,
+        "line": 1
+      }
+    },
+    {
+      "ash": "loads",
+      "id": "binary-tag-loads-in-ash",
+      "lines": [
+        "a: !!binary aGk="
+      ],
+      "refuse": {
+        "code": "tag",
+        "column": 4,
+        "line": 1
+      }
+    },
+    {
+      "ash": "loads",
+      "id": "timestamp-tag-loads-in-ash",
+      "lines": [
+        "a: !!timestamp 2001-12-14"
+      ],
+      "refuse": {
+        "code": "tag",
+        "column": 4,
+        "line": 1
+      }
+    },
+    {
+      "ash": "loads",
+      "id": "omap-tag-loads-in-ash",
+      "lines": [
+        "a: !!omap [b: 1]"
+      ],
+      "refuse": {
+        "code": "tag",
+        "column": 4,
+        "line": 1
+      }
+    },
+    {
+      "ash": "loads",
+      "id": "verbatim-tag-loads-in-ash",
+      "lines": [
+        "a: !<tag:yaml.org,2002:str> x"
+      ],
+      "refuse": {
+        "code": "tag",
+        "column": 4,
+        "line": 1
+      }
+    },
+    {
+      "ash": "loads",
+      "id": "non-specific-tag-loads-in-ash",
+      "lines": [
+        "a: ! x"
+      ],
+      "refuse": {
+        "code": "tag",
+        "column": 4,
+        "line": 1
+      }
+    },
+    {
+      "ash": "loads",
+      "id": "complex-key-loads-in-ash",
+      "lines": [
+        "? a",
+        ": b"
+      ],
+      "refuse": {
+        "code": "complex-key",
+        "column": 1,
+        "line": 1
+      }
+    },
+    {
+      "ash": "loads",
+      "id": "indented-complex-key-loads-in-ash",
+      "lines": [
+        "m:",
+        "  ? a",
+        "  : b"
+      ],
+      "refuse": {
+        "code": "complex-key",
+        "column": 3,
+        "line": 2
+      }
+    },
+    {
+      "ash": "loads",
+      "id": "directive-loads-in-ash",
+      "lines": [
+        "%YAML 1.1",
+        "---",
+        "a: 1"
+      ],
+      "refuse": {
+        "code": "directive",
+        "column": 1,
+        "line": 1
+      }
+    },
+    {
+      "id": "tag-directive",
+      "lines": [
+        "%TAG !e! tag:example.com,2000:",
+        "---",
+        "a: !e!x 1"
+      ],
+      "refuse": {
+        "code": "directive",
+        "column": 1,
+        "line": 1
+      }
+    },
+    {
+      "id": "tab-indentation",
+      "refuse": {
+        "code": "tab",
+        "column": 1,
+        "line": 2
+      },
+      "text": "a:\n\tb: 1\n"
+    },
+    {
+      "id": "tab-after-a-value",
+      "refuse": {
+        "code": "tab",
+        "column": 5,
+        "line": 1
+      },
+      "text": "a: 1\t# c\n"
+    },
+    {
+      "ash": "skip",
+      "fill": {
+        "char": "x",
+        "count": 2097152,
+        "prefix": "a: "
+      },
+      "id": "input-over-two-mebibytes",
+      "refuse": {
+        "code": "too-large",
+        "column": 1,
+        "line": 1
+      }
+    },
+    {
+      "id": "unclosed-double-quote",
+      "refuse": {
+        "code": "syntax",
+        "column": 1,
+        "line": 3
+      },
+      "text": "a: \"abc\nb: 1\n"
+    },
+    {
+      "id": "unclosed-single-quote",
+      "refuse": {
+        "code": "syntax",
+        "column": 1,
+        "line": 2
+      },
+      "text": "a: 'abc\n"
+    },
+    {
+      "id": "bad-indentation",
+      "lines": [
+        "a:",
+        "  b: 1",
+        " c: 2"
+      ],
+      "refuse": {
+        "code": "syntax",
+        "column": 2,
+        "line": 3
+      }
+    },
+    {
+      "id": "colon-inside-a-plain-value",
+      "lines": [
+        "a: b: c"
+      ],
+      "refuse": {
+        "code": "syntax",
+        "column": 5,
+        "line": 1
+      }
+    },
+    {
+      "id": "unclosed-flow-sequence",
+      "lines": [
+        "a: [1, 2",
+        "b: 3"
+      ],
+      "refuse": {
+        "code": "syntax",
+        "column": 1,
+        "line": 2
+      }
+    },
+    {
+      "id": "stray-flow-sequence-end",
+      "lines": [
+        "a: ]"
+      ],
+      "refuse": {
+        "code": "syntax",
+        "column": 4,
+        "line": 1
+      }
+    },
+    {
+      "id": "control-character",
+      "refuse": {
+        "code": "character",
+        "column": 6,
+        "line": 1
+      },
+      "text": "a: x<SOH>y\n"
+    }
+  ],
+  "format": "yaml-oracle/1",
+  "notes": "Inputs the reader must refuse, with the 1-based line and column it names. ash says what ASH's loader does with the same text: error (the default), loads (the reader refuses it by its own policy) or skip (not loaded here). Placeholder tokens in an input: <SOH> is the control character U+0001. fill builds an input of prefix followed by count copies of char."
+}

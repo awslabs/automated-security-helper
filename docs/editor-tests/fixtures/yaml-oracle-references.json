@@ -1,0 +1,109 @@
+{
+  "cases": [
+    {
+      "id": "reference-implicit-forms",
+      "lines": [
+        "a: ${HOME}",
+        "b: ${HOME:default}",
+        "c: ${HOME:}",
+        "d: ${HOME:-x}",
+        "e: ${HOME}/bin",
+        "f: ${HOME} trailing words",
+        "g: ${A_B1:with spaces}",
+        "h: ${\u00c4B}"
+      ],
+      "value": {
+        "a": "${HOME}",
+        "b": "${HOME:default}",
+        "c": "${HOME:}",
+        "d": "${HOME:-x}",
+        "e": "${HOME}/bin",
+        "f": "${HOME} trailing words",
+        "g": "${A_B1:with spaces}",
+        "h": "${\u00c4B}"
+      }
+    },
+    {
+      "id": "reference-lookalikes-are-plain-strings",
+      "lines": [
+        "a: x${HOME}",
+        "b: \"${HOME}\"",
+        "c: '${HOME}'",
+        "d: ${}",
+        "e: ${HOME",
+        "f: $HOME",
+        "g: $ {HOME}"
+      ],
+      "value": {
+        "a": "x${HOME}",
+        "b": "${HOME}",
+        "c": "${HOME}",
+        "d": "${}",
+        "e": "${HOME",
+        "f": "$HOME",
+        "g": "$ {HOME}"
+      }
+    },
+    {
+      "id": "reference-explicit-tag",
+      "lines": [
+        "a: !ENV ${HOME}",
+        "b: !ENV \"${HOME:x}\"",
+        "c: !ENV plain text",
+        "d: !ENV 'single'",
+        "e: !ENV",
+        "f: !ENV \"\""
+      ],
+      "value": {
+        "a": "!ENV ${HOME}",
+        "b": "!ENV ${HOME:x}",
+        "c": "!ENV plain text",
+        "d": "!ENV single",
+        "e": "!ENV ",
+        "f": "!ENV "
+      }
+    },
+    {
+      "id": "reference-in-collections",
+      "lines": [
+        "list:",
+        "  - ${A}",
+        "  - !ENV ${B}",
+        "  - \"${C}\"",
+        "map:",
+        "  ${KEY}: value",
+        "  k: ${V:{}}",
+        "flow: [\"${A}\", !ENV \"${B}\", x]"
+      ],
+      "value": {
+        "flow": [
+          "${A}",
+          "!ENV ${B}",
+          "x"
+        ],
+        "list": [
+          "${A}",
+          "!ENV ${B}",
+          "${C}"
+        ],
+        "map": {
+          "${KEY}": "value",
+          "k": "${V:{}}"
+        }
+      }
+    },
+    {
+      "id": "reference-unquoted-in-a-flow-collection-is-an-error",
+      "lines": [
+        "a: [${HOME}]"
+      ],
+      "refuse": {
+        "code": "syntax",
+        "column": 6,
+        "line": 1
+      }
+    }
+  ],
+  "format": "yaml-oracle/1",
+  "notes": "Environment references as ASH's loader returns them when it keeps them as written: a plain scalar that starts with a reference is returned as its text; a value the file tags with the explicit environment tag is returned with the tag word and a space before the text."
+}

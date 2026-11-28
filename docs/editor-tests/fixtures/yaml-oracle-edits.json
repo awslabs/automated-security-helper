@@ -1,0 +1,1451 @@
+{
+  "edits": [
+    {
+      "after": {
+        "lines": [
+          "a: three",
+          "b: two"
+        ]
+      },
+      "before": {
+        "lines": [
+          "a: one",
+          "b: two"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a"
+        ],
+        "value": "three"
+      },
+      "how": "patch",
+      "id": "set-plain-string"
+    },
+    {
+      "after": {
+        "lines": [
+          "a: x # why",
+          "b: 2"
+        ]
+      },
+      "before": {
+        "lines": [
+          "a: one # why",
+          "b: 2"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a"
+        ],
+        "value": "x"
+      },
+      "how": "patch",
+      "id": "set-keeps-the-trailing-comment"
+    },
+    {
+      "after": {
+        "lines": [
+          "a: 'it''s'"
+        ]
+      },
+      "before": {
+        "lines": [
+          "a: 'one'"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a"
+        ],
+        "value": "it's"
+      },
+      "how": "patch",
+      "id": "set-keeps-single-quotes"
+    },
+    {
+      "after": {
+        "lines": [
+          "a: \"two\""
+        ]
+      },
+      "before": {
+        "lines": [
+          "a: \"one\""
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a"
+        ],
+        "value": "two"
+      },
+      "how": "patch",
+      "id": "set-keeps-double-quotes"
+    },
+    {
+      "after": {
+        "lines": [
+          "a: \"yes\""
+        ]
+      },
+      "before": {
+        "lines": [
+          "a: x"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a"
+        ],
+        "value": "yes"
+      },
+      "how": "patch",
+      "id": "set-yes-is-quoted"
+    },
+    {
+      "after": {
+        "lines": [
+          "a: \"0755\""
+        ]
+      },
+      "before": {
+        "lines": [
+          "a: x"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a"
+        ],
+        "value": "0755"
+      },
+      "how": "patch",
+      "id": "set-octal-looking-text-is-quoted"
+    },
+    {
+      "after": {
+        "lines": [
+          "a: \"1:30\""
+        ]
+      },
+      "before": {
+        "lines": [
+          "a: x"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a"
+        ],
+        "value": "1:30"
+      },
+      "how": "patch",
+      "id": "set-time-looking-text-is-quoted"
+    },
+    {
+      "after": {
+        "lines": [
+          "a: \"2026-12-31\""
+        ]
+      },
+      "before": {
+        "lines": [
+          "a: x"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a"
+        ],
+        "value": "2026-12-31"
+      },
+      "how": "patch",
+      "id": "set-date-looking-text-is-quoted"
+    },
+    {
+      "after": {
+        "lines": [
+          "a: \"k: v\""
+        ]
+      },
+      "before": {
+        "lines": [
+          "a: x"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a"
+        ],
+        "value": "k: v"
+      },
+      "how": "patch",
+      "id": "set-text-with-a-colon-and-space-is-quoted"
+    },
+    {
+      "after": {
+        "lines": [
+          "a: \"x #y\""
+        ]
+      },
+      "before": {
+        "lines": [
+          "a: x"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a"
+        ],
+        "value": "x #y"
+      },
+      "how": "patch",
+      "id": "set-text-with-a-space-and-hash-is-quoted"
+    },
+    {
+      "after": {
+        "lines": [
+          "a: \"\""
+        ]
+      },
+      "before": {
+        "lines": [
+          "a: x"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a"
+        ],
+        "value": ""
+      },
+      "how": "patch",
+      "id": "set-empty-text-is-quoted"
+    },
+    {
+      "after": {
+        "lines": [
+          "a: \"${HOME}\""
+        ]
+      },
+      "before": {
+        "lines": [
+          "a: x"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a"
+        ],
+        "value": "${HOME}"
+      },
+      "how": "patch",
+      "id": "set-text-that-looks-like-a-reference-is-quoted"
+    },
+    {
+      "after": {
+        "lines": [
+          "a: \"- x\""
+        ]
+      },
+      "before": {
+        "lines": [
+          "a: x"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a"
+        ],
+        "value": "- x"
+      },
+      "how": "patch",
+      "id": "set-text-with-a-leading-dash-is-quoted"
+    },
+    {
+      "after": {
+        "lines": [
+          "a: \"one\\ntwo\""
+        ]
+      },
+      "before": {
+        "lines": [
+          "a: x"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a"
+        ],
+        "value": "one\ntwo"
+      },
+      "how": "patch",
+      "id": "set-multiline-text"
+    },
+    {
+      "after": {
+        "lines": [
+          "a: 2"
+        ]
+      },
+      "before": {
+        "lines": [
+          "a: 1"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a"
+        ],
+        "value": 2
+      },
+      "how": "patch",
+      "id": "set-number"
+    },
+    {
+      "after": {
+        "lines": [
+          "a: false"
+        ]
+      },
+      "before": {
+        "lines": [
+          "a: true"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a"
+        ],
+        "value": false
+      },
+      "how": "patch",
+      "id": "set-boolean"
+    },
+    {
+      "after": {
+        "lines": [
+          "a: null"
+        ]
+      },
+      "before": {
+        "lines": [
+          "a: 1"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a"
+        ],
+        "value": null
+      },
+      "how": "patch",
+      "id": "set-null"
+    },
+    {
+      "after": {
+        "lines": [
+          "a: 5"
+        ]
+      },
+      "before": {
+        "lines": [
+          "a: \"1\""
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a"
+        ],
+        "value": 5
+      },
+      "how": "patch",
+      "id": "set-number-over-a-quoted-string"
+    },
+    {
+      "after": {
+        "lines": [
+          "a: !ENV ${HOME:x}"
+        ]
+      },
+      "before": {
+        "lines": [
+          "a: x"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a"
+        ],
+        "value": {
+          "$ref": "${HOME:x}",
+          "explicit": true
+        }
+      },
+      "how": "patch",
+      "id": "set-explicit-reference"
+    },
+    {
+      "after": {
+        "lines": [
+          "a: ${HOME}"
+        ]
+      },
+      "before": {
+        "lines": [
+          "a: x"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a"
+        ],
+        "value": {
+          "$ref": "${HOME}"
+        }
+      },
+      "how": "patch",
+      "id": "set-implicit-reference"
+    },
+    {
+      "after": {
+        "lines": [
+          "a:",
+          "  reason: short",
+          "  other: 1"
+        ]
+      },
+      "before": {
+        "lines": [
+          "a:",
+          "  reason: >-",
+          "    one",
+          "    two",
+          "  other: 1"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a",
+          "reason"
+        ],
+        "value": "short"
+      },
+      "how": "patch",
+      "id": "set-replaces-a-folded-block-scalar"
+    },
+    {
+      "after": {
+        "lines": [
+          "a: x",
+          "c: 2"
+        ]
+      },
+      "before": {
+        "lines": [
+          "a:",
+          "  b: 1",
+          "c: 2"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a"
+        ],
+        "value": "x"
+      },
+      "how": "patch",
+      "id": "set-replaces-a-mapping-with-a-scalar"
+    },
+    {
+      "after": {
+        "lines": [
+          "a:",
+          "  b: 1",
+          "c: 2"
+        ]
+      },
+      "before": {
+        "lines": [
+          "a: x",
+          "c: 2"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a"
+        ],
+        "value": {
+          "b": 1
+        }
+      },
+      "how": "patch",
+      "id": "set-replaces-a-scalar-with-a-mapping"
+    },
+    {
+      "after": {
+        "lines": [
+          "a:",
+          "  - p",
+          "  - q"
+        ]
+      },
+      "before": {
+        "lines": [
+          "a: x"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a"
+        ],
+        "value": [
+          "p",
+          "q"
+        ]
+      },
+      "how": "patch",
+      "id": "set-a-list-value"
+    },
+    {
+      "after": {
+        "lines": [
+          "a: []"
+        ]
+      },
+      "before": {
+        "lines": [
+          "a:",
+          "  - p"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a"
+        ],
+        "value": []
+      },
+      "how": "patch",
+      "id": "set-an-empty-list"
+    },
+    {
+      "after": {
+        "lines": [
+          "items:",
+          "  - name: a",
+          "    n: 5"
+        ]
+      },
+      "before": {
+        "lines": [
+          "items:",
+          "  - name: a",
+          "    n: 1"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "items",
+          0,
+          "n"
+        ],
+        "value": 5
+      },
+      "how": "patch",
+      "id": "set-inside-a-list-item"
+    },
+    {
+      "after": {
+        "lines": [
+          "a: {x: 1, y: 3}"
+        ]
+      },
+      "before": {
+        "lines": [
+          "a: {x: 1, y: 2}"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a",
+          "y"
+        ],
+        "value": 3
+      },
+      "how": "patch",
+      "id": "set-inside-a-flow-mapping"
+    },
+    {
+      "after": {
+        "lines": [
+          "# yaml-language-server: $schema=x",
+          "project_name: y"
+        ]
+      },
+      "before": {
+        "lines": [
+          "# yaml-language-server: $schema=x",
+          "project_name: x"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "project_name"
+        ],
+        "value": "y"
+      },
+      "how": "patch",
+      "id": "set-keeps-the-modeline"
+    },
+    {
+      "after": {
+        "lines": [
+          "a: 1",
+          "b: x"
+        ]
+      },
+      "before": {
+        "lines": [
+          "a: 1"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "b"
+        ],
+        "value": "x"
+      },
+      "how": "patch",
+      "id": "set-creates-a-missing-top-level-key"
+    },
+    {
+      "after": {
+        "lines": [
+          "a: 1",
+          "scanners:",
+          "  bandit:",
+          "    enabled: false"
+        ]
+      },
+      "before": {
+        "lines": [
+          "a: 1"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "scanners",
+          "bandit",
+          "enabled"
+        ],
+        "value": false
+      },
+      "how": "patch",
+      "id": "set-creates-a-nested-chain"
+    },
+    {
+      "after": {
+        "lines": [
+          "scanners:",
+          "  bandit:",
+          "    enabled: true",
+          "    options:",
+          "      severity_threshold: HIGH",
+          "reporters:",
+          "  html:",
+          "    enabled: false"
+        ]
+      },
+      "before": {
+        "lines": [
+          "scanners:",
+          "  bandit:",
+          "    enabled: true",
+          "reporters:",
+          "  html:",
+          "    enabled: false"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "scanners",
+          "bandit",
+          "options",
+          "severity_threshold"
+        ],
+        "value": "HIGH"
+      },
+      "how": "patch",
+      "id": "set-creates-a-key-inside-a-section"
+    },
+    {
+      "after": {
+        "lines": [
+          "scanners:",
+          "  bandit:",
+          "    enabled: true",
+          "reporters:",
+          "  html:"
+        ]
+      },
+      "before": {
+        "lines": [
+          "scanners:",
+          "  bandit:",
+          "reporters:",
+          "  html:"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "scanners",
+          "bandit",
+          "enabled"
+        ],
+        "value": true
+      },
+      "how": "patch",
+      "id": "set-creates-under-a-null-value"
+    },
+    {
+      "after": {
+        "lines": [
+          "scanners:",
+          "  bandit:",
+          "    enabled: false"
+        ]
+      },
+      "before": {
+        "lines": [
+          "scanners:",
+          "  bandit: {}"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "scanners",
+          "bandit",
+          "enabled"
+        ],
+        "value": false
+      },
+      "how": "patch",
+      "id": "set-creates-under-an-empty-flow-mapping"
+    },
+    {
+      "after": {
+        "lines": [
+          "a:",
+          "    b: 1",
+          "    c: 2"
+        ]
+      },
+      "before": {
+        "lines": [
+          "a:",
+          "    b: 1"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a",
+          "c"
+        ],
+        "value": 2
+      },
+      "how": "patch",
+      "id": "set-creates-a-key-in-a-four-space-document"
+    },
+    {
+      "after": {
+        "lines": [
+          "a:",
+          "    b: 1",
+          "    c:",
+          "        d: 2"
+        ]
+      },
+      "before": {
+        "lines": [
+          "a:",
+          "    b: 1"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a",
+          "c",
+          "d"
+        ],
+        "value": 2
+      },
+      "how": "patch",
+      "id": "set-creates-a-chain-in-a-four-space-document"
+    },
+    {
+      "after": {
+        "lines": [
+          "a: 1 # one",
+          "b: 2",
+          "# about the end"
+        ]
+      },
+      "before": {
+        "lines": [
+          "a: 1 # one",
+          "# about the end"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "b"
+        ],
+        "value": 2
+      },
+      "how": "patch",
+      "id": "set-creates-a-key-after-trailing-comments"
+    },
+    {
+      "after": {
+        "lines": [
+          "project_name: x"
+        ]
+      },
+      "before": {
+        "text": ""
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "project_name"
+        ],
+        "value": "x"
+      },
+      "how": "patch",
+      "id": "set-into-an-empty-document"
+    },
+    {
+      "after": {
+        "lines": [
+          "# yaml-language-server: $schema=x",
+          "project_name: x"
+        ]
+      },
+      "before": {
+        "lines": [
+          "# yaml-language-server: $schema=x"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "project_name"
+        ],
+        "value": "x"
+      },
+      "how": "patch",
+      "id": "set-into-a-comment-only-document"
+    },
+    {
+      "after": {
+        "text": "a: 1\r\nb: 2\r\nc: 3\r\n"
+      },
+      "before": {
+        "text": "a: 1\r\nb: 2\r\n"
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "c"
+        ],
+        "value": 3
+      },
+      "how": "patch",
+      "id": "set-keeps-crlf"
+    },
+    {
+      "after": {
+        "text": "a: 1\nb: 2\nc: 3"
+      },
+      "before": {
+        "text": "a: 1\nb: 2"
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "c"
+        ],
+        "value": 3
+      },
+      "how": "patch",
+      "id": "set-keeps-a-missing-final-newline"
+    },
+    {
+      "after": {
+        "lines": [
+          "list:",
+          "  - a",
+          "  - b",
+          "  - c",
+          "other: 1"
+        ]
+      },
+      "before": {
+        "lines": [
+          "list:",
+          "  - a",
+          "  - b",
+          "other: 1"
+        ]
+      },
+      "edit": {
+        "op": "append",
+        "path": [
+          "list"
+        ],
+        "value": "c"
+      },
+      "how": "patch",
+      "id": "append-to-a-block-list"
+    },
+    {
+      "after": {
+        "lines": [
+          "list:",
+          "- a",
+          "- b",
+          "- c",
+          "other: 1"
+        ]
+      },
+      "before": {
+        "lines": [
+          "list:",
+          "- a",
+          "- b",
+          "other: 1"
+        ]
+      },
+      "edit": {
+        "op": "append",
+        "path": [
+          "list"
+        ],
+        "value": "c"
+      },
+      "how": "patch",
+      "id": "append-to-an-indentless-list"
+    },
+    {
+      "after": {
+        "lines": [
+          "a: 1",
+          "list:",
+          "  - x"
+        ]
+      },
+      "before": {
+        "lines": [
+          "a: 1"
+        ]
+      },
+      "edit": {
+        "op": "append",
+        "path": [
+          "list"
+        ],
+        "value": "x"
+      },
+      "how": "patch",
+      "id": "append-creates-the-list"
+    },
+    {
+      "after": {
+        "lines": [
+          "list:",
+          "  - x",
+          "other: 1"
+        ]
+      },
+      "before": {
+        "lines": [
+          "list:",
+          "other: 1"
+        ]
+      },
+      "edit": {
+        "op": "append",
+        "path": [
+          "list"
+        ],
+        "value": "x"
+      },
+      "how": "patch",
+      "id": "append-to-a-null-value"
+    },
+    {
+      "after": {
+        "lines": [
+          "list:",
+          "  - x",
+          "other: 1"
+        ]
+      },
+      "before": {
+        "lines": [
+          "list: []",
+          "other: 1"
+        ]
+      },
+      "edit": {
+        "op": "append",
+        "path": [
+          "list"
+        ],
+        "value": "x"
+      },
+      "how": "patch",
+      "id": "append-to-an-empty-flow-list"
+    },
+    {
+      "after": {
+        "lines": [
+          "items:",
+          "  - name: a",
+          "    n: 1",
+          "  - name: b",
+          "    n: 2"
+        ]
+      },
+      "before": {
+        "lines": [
+          "items:",
+          "  - name: a",
+          "    n: 1"
+        ]
+      },
+      "edit": {
+        "op": "append",
+        "path": [
+          "items"
+        ],
+        "value": {
+          "n": 2,
+          "name": "b"
+        }
+      },
+      "how": "patch",
+      "id": "append-a-mapping-to-a-list-of-mappings"
+    },
+    {
+      "after": {
+        "lines": [
+          "list:",
+          "  - a # first",
+          "  - b # last",
+          "  - c",
+          "z: 1"
+        ]
+      },
+      "before": {
+        "lines": [
+          "list:",
+          "  - a # first",
+          "  - b # last",
+          "z: 1"
+        ]
+      },
+      "edit": {
+        "op": "append",
+        "path": [
+          "list"
+        ],
+        "value": "c"
+      },
+      "how": "patch",
+      "id": "append-keeps-the-comment-on-the-last-item"
+    },
+    {
+      "after": {
+        "lines": [
+          "a: 1",
+          "c: 3"
+        ]
+      },
+      "before": {
+        "lines": [
+          "a: 1",
+          "b: 2",
+          "c: 3"
+        ]
+      },
+      "edit": {
+        "op": "delete",
+        "path": [
+          "b"
+        ]
+      },
+      "how": "patch",
+      "id": "delete-a-middle-key"
+    },
+    {
+      "after": {
+        "text": "a: 1"
+      },
+      "before": {
+        "text": "a: 1\nb: 2"
+      },
+      "edit": {
+        "op": "delete",
+        "path": [
+          "b"
+        ]
+      },
+      "how": "patch",
+      "id": "delete-the-last-key-without-a-final-newline"
+    },
+    {
+      "after": {
+        "lines": [
+          "a:",
+          "  b: 1",
+          "e: 3"
+        ]
+      },
+      "before": {
+        "lines": [
+          "a:",
+          "  b: 1",
+          "  c:",
+          "    d: 2",
+          "e: 3"
+        ]
+      },
+      "edit": {
+        "op": "delete",
+        "path": [
+          "a",
+          "c"
+        ]
+      },
+      "how": "patch",
+      "id": "delete-a-nested-block"
+    },
+    {
+      "after": {
+        "lines": [
+          "a: {}",
+          "e: 3"
+        ]
+      },
+      "before": {
+        "lines": [
+          "a:",
+          "  b: 1",
+          "e: 3"
+        ]
+      },
+      "edit": {
+        "op": "delete",
+        "path": [
+          "a",
+          "b"
+        ]
+      },
+      "how": "patch",
+      "id": "delete-the-last-child-leaves-an-empty-mapping"
+    },
+    {
+      "after": {
+        "lines": [
+          "list: []",
+          "e: 3"
+        ]
+      },
+      "before": {
+        "lines": [
+          "list:",
+          "  - a",
+          "e: 3"
+        ]
+      },
+      "edit": {
+        "op": "delete",
+        "path": [
+          "list",
+          0
+        ]
+      },
+      "how": "patch",
+      "id": "delete-the-last-item-leaves-an-empty-list"
+    },
+    {
+      "after": {
+        "lines": [
+          "list:",
+          "  - a",
+          "  - c"
+        ]
+      },
+      "before": {
+        "lines": [
+          "list:",
+          "  - a",
+          "  - b",
+          "  - c"
+        ]
+      },
+      "edit": {
+        "op": "delete",
+        "path": [
+          "list",
+          1
+        ]
+      },
+      "how": "patch",
+      "id": "delete-a-list-item"
+    },
+    {
+      "after": {
+        "lines": [
+          "items:",
+          "  - name: b",
+          "    n: 2"
+        ]
+      },
+      "before": {
+        "lines": [
+          "items:",
+          "  - name: a",
+          "    n: 1",
+          "  - name: b",
+          "    n: 2"
+        ]
+      },
+      "edit": {
+        "op": "delete",
+        "path": [
+          "items",
+          0
+        ]
+      },
+      "how": "patch",
+      "id": "delete-a-mapping-item-of-several-lines"
+    },
+    {
+      "after": {
+        "lines": [
+          "# keep me",
+          "a: 1",
+          "# about b",
+          "c: 3"
+        ]
+      },
+      "before": {
+        "lines": [
+          "# keep me",
+          "a: 1",
+          "# about b",
+          "b: 2 # inline",
+          "c: 3"
+        ]
+      },
+      "edit": {
+        "op": "delete",
+        "path": [
+          "b"
+        ]
+      },
+      "how": "patch",
+      "id": "delete-keeps-the-comment-lines-above"
+    },
+    {
+      "before": {
+        "lines": [
+          "a: 1"
+        ]
+      },
+      "edit": {
+        "op": "delete",
+        "path": [
+          "x",
+          "y"
+        ]
+      },
+      "how": "none",
+      "id": "delete-a-missing-path-changes-nothing"
+    },
+    {
+      "after": {
+        "lines": [
+          "list:",
+          "  - a",
+          "  - b",
+          "  - c",
+          "other: 1"
+        ]
+      },
+      "before": {
+        "lines": [
+          "list: [a, b] # note",
+          "other: 1"
+        ]
+      },
+      "droppedComments": 1,
+      "edit": {
+        "op": "append",
+        "path": [
+          "list"
+        ],
+        "value": "c"
+      },
+      "how": "reemit",
+      "id": "append-to-a-flow-list-writes-the-entry-again"
+    },
+    {
+      "after": {
+        "lines": [
+          "a:",
+          "  x: 1",
+          "  y: 2"
+        ]
+      },
+      "before": {
+        "lines": [
+          "a: {x: 1}"
+        ]
+      },
+      "droppedComments": 0,
+      "edit": {
+        "op": "set",
+        "path": [
+          "a",
+          "y"
+        ],
+        "value": 2
+      },
+      "how": "reemit",
+      "id": "set-a-new-key-in-a-flow-mapping-writes-the-entry-again"
+    },
+    {
+      "after": {
+        "lines": [
+          "list:",
+          "  - a",
+          "  - c"
+        ]
+      },
+      "before": {
+        "lines": [
+          "list: [a, b, c]"
+        ]
+      },
+      "droppedComments": 0,
+      "edit": {
+        "op": "delete",
+        "path": [
+          "list",
+          1
+        ]
+      },
+      "how": "reemit",
+      "id": "delete-from-a-flow-list-writes-the-entry-again"
+    },
+    {
+      "before": {
+        "lines": [
+          "a: 1",
+          "a: 2"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a"
+        ],
+        "value": 3
+      },
+      "how": "refused",
+      "id": "refuse-an-edit-in-a-mapping-with-a-repeated-key",
+      "reason": "duplicate-key"
+    },
+    {
+      "before": {
+        "lines": [
+          "d:",
+          "  <<: {x: 2}",
+          "  y: 1"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "d",
+          "y"
+        ],
+        "value": 2
+      },
+      "how": "refused",
+      "id": "refuse-an-edit-in-a-mapping-with-a-merge-key",
+      "reason": "merge-key"
+    },
+    {
+      "before": {
+        "lines": [
+          "a: &x 1",
+          "b: *x"
+        ]
+      },
+      "edit": {
+        "op": "set",
+        "path": [
+          "a"
+        ],
+        "value": 2
+      },
+      "how": "refused",
+      "id": "refuse-an-edit-when-the-text-is-not-readable",
+      "reason": "unreadable"
+    }
+  ],
+  "format": "yaml-oracle/1",
+  "notes": "Planted edits. before and after are the exact texts. An edit is set (path, value), delete (path) or append (path, value); a path is a list of keys and list indexes. A value of the form {\"$ref\": text} is an environment reference, with \"explicit\": true for the tagged form. how says how the new text is produced: patch (only the touched lines change), reemit (the smallest enclosing entry is written again; droppedComments counts the comments inside it), none (nothing to change) or refused (the edit is not made; reason names why)."
+}

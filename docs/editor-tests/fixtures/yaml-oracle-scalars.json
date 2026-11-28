@@ -1,0 +1,695 @@
+{
+  "cases": [
+    {
+      "id": "bool-words",
+      "lines": [
+        "a: true",
+        "b: True",
+        "c: TRUE",
+        "d: false",
+        "e: False",
+        "f: FALSE",
+        "g: yes",
+        "h: Yes",
+        "i: YES",
+        "j: no",
+        "k: No",
+        "l: NO",
+        "m: on",
+        "n: On",
+        "o: ON",
+        "p: off",
+        "q: Off",
+        "r: OFF"
+      ],
+      "value": {
+        "a": true,
+        "b": true,
+        "c": true,
+        "d": false,
+        "e": false,
+        "f": false,
+        "g": true,
+        "h": true,
+        "i": true,
+        "j": false,
+        "k": false,
+        "l": false,
+        "m": true,
+        "n": true,
+        "o": true,
+        "p": false,
+        "q": false,
+        "r": false
+      }
+    },
+    {
+      "id": "bool-lookalikes-are-strings",
+      "lines": [
+        "a: y",
+        "b: n",
+        "c: tRUE",
+        "d: fALSE",
+        "e: yEs",
+        "f: nO",
+        "g: oN",
+        "h: oFF",
+        "i: t",
+        "j: f",
+        "k: 1",
+        "l: 'yes'",
+        "m: \"no\""
+      ],
+      "value": {
+        "a": "y",
+        "b": "n",
+        "c": "tRUE",
+        "d": "fALSE",
+        "e": "yEs",
+        "f": "nO",
+        "g": "oN",
+        "h": "oFF",
+        "i": "t",
+        "j": "f",
+        "k": 1,
+        "l": "yes",
+        "m": "no"
+      }
+    },
+    {
+      "id": "null-words",
+      "lines": [
+        "a: ~",
+        "b: null",
+        "c: Null",
+        "d: NULL",
+        "e:",
+        "g: ''",
+        "h: nULL",
+        "i: nil",
+        "j: None",
+        "k: \"~\"",
+        "l: [~, null, ]"
+      ],
+      "value": {
+        "a": null,
+        "b": null,
+        "c": null,
+        "d": null,
+        "e": null,
+        "g": "",
+        "h": "nULL",
+        "i": "nil",
+        "j": "None",
+        "k": "~",
+        "l": [
+          null,
+          null
+        ]
+      }
+    },
+    {
+      "id": "int-decimal-and-octal",
+      "lines": [
+        "a: 0",
+        "b: 7",
+        "c: -7",
+        "d: +7",
+        "e: 1_000",
+        "f: 1_0_0",
+        "g: -1_000",
+        "h: 007",
+        "i: 0_7",
+        "j: 00",
+        "k: 08",
+        "l: 09",
+        "m: 0o17",
+        "n: 12abc",
+        "o: 1,000",
+        "p: 1_",
+        "q: 1__0"
+      ],
+      "value": {
+        "a": 0,
+        "b": 7,
+        "c": -7,
+        "d": 7,
+        "e": 1000,
+        "f": 100,
+        "g": -1000,
+        "h": 7,
+        "i": 7,
+        "j": 0,
+        "k": "08",
+        "l": "09",
+        "m": "0o17",
+        "n": "12abc",
+        "o": "1,000",
+        "p": 1,
+        "q": 10
+      }
+    },
+    {
+      "id": "int-bases-and-sexagesimal",
+      "lines": [
+        "a: 0b101",
+        "b: 0B101",
+        "c: -0b11",
+        "d: +0b1",
+        "e: 0x1F",
+        "f: 0X1F",
+        "g: 0xdead_beef",
+        "h: -0x10",
+        "i: 0755",
+        "j: -0755",
+        "k: 1:30",
+        "l: 1:30:45",
+        "m: -1:30",
+        "n: +1:30",
+        "o: 190:20:30",
+        "p: 0:30",
+        "q: 1:60",
+        "r: 1:5",
+        "s: 10:00"
+      ],
+      "value": {
+        "a": 5,
+        "b": "0B101",
+        "c": -3,
+        "d": 1,
+        "e": 31,
+        "f": "0X1F",
+        "g": 3735928559,
+        "h": -16,
+        "i": 493,
+        "j": -493,
+        "k": 90,
+        "l": 5445,
+        "m": -90,
+        "n": 90,
+        "o": 685230,
+        "p": "0:30",
+        "q": "1:60",
+        "r": 65,
+        "s": 600
+      }
+    },
+    {
+      "id": "int-beyond-two-to-the-53",
+      "lines": [
+        "a: 9007199254740991",
+        "b: 9007199254740993",
+        "c: -123456789012345678901234567890",
+        "d: 0xFFFFFFFFFFFFFFFFFF"
+      ],
+      "value": {
+        "a": 9007199254740991,
+        "b": {
+          "$int": "9007199254740993"
+        },
+        "c": {
+          "$int": "-123456789012345678901234567890"
+        },
+        "d": {
+          "$int": "4722366482869645213695"
+        }
+      }
+    },
+    {
+      "id": "float-forms",
+      "lines": [
+        "a: 1.5",
+        "b: -1.5",
+        "c: +1.5",
+        "d: .5",
+        "e: 1.",
+        "f: 1.5e+3",
+        "g: 1.5E-3",
+        "h: 1_0.5",
+        "i: 1:30.5",
+        "j: -1:30.5",
+        "k: .inf",
+        "l: -.inf",
+        "m: +.inf",
+        "n: .Inf",
+        "o: .INF",
+        "p: .nan",
+        "q: .NaN",
+        "r: .NAN",
+        "s: 0.0",
+        "t: -0.0",
+        "u: 1.e+3"
+      ],
+      "value": {
+        "a": {
+          "$float": "1.5"
+        },
+        "b": {
+          "$float": "-1.5"
+        },
+        "c": {
+          "$float": "1.5"
+        },
+        "d": {
+          "$float": "0.5"
+        },
+        "e": {
+          "$float": "1.0"
+        },
+        "f": {
+          "$float": "1500.0"
+        },
+        "g": {
+          "$float": "0.0015"
+        },
+        "h": {
+          "$float": "10.5"
+        },
+        "i": {
+          "$float": "90.5"
+        },
+        "j": {
+          "$float": "-90.5"
+        },
+        "k": {
+          "$float": "inf"
+        },
+        "l": {
+          "$float": "-inf"
+        },
+        "m": {
+          "$float": "inf"
+        },
+        "n": {
+          "$float": "inf"
+        },
+        "o": {
+          "$float": "inf"
+        },
+        "p": {
+          "$float": "nan"
+        },
+        "q": {
+          "$float": "nan"
+        },
+        "r": {
+          "$float": "nan"
+        },
+        "s": {
+          "$float": "0.0"
+        },
+        "t": {
+          "$float": "-0.0"
+        },
+        "u": {
+          "$float": "1000.0"
+        }
+      }
+    },
+    {
+      "id": "float-lookalikes-are-strings",
+      "lines": [
+        "a: 1e3",
+        "b: 1.5e3",
+        "c: -.5",
+        "d: +.5",
+        "e: inf",
+        "f: Infinity",
+        "g: NaN",
+        "h: 1.2.3",
+        "i: 1.5e",
+        "k: ."
+      ],
+      "value": {
+        "a": "1e3",
+        "b": "1.5e3",
+        "c": "-.5",
+        "d": "+.5",
+        "e": "inf",
+        "f": "Infinity",
+        "g": "NaN",
+        "h": "1.2.3",
+        "i": "1.5e",
+        "k": "."
+      }
+    },
+    {
+      "id": "float-dot-underscore-probe",
+      "lines": [
+        "a: ._"
+      ],
+      "note": "PyYAML 5.4 reads this as a float and then fails to build it; later releases read a string. The probe pins which one ASH's pinned version does.",
+      "value": {
+        "a": "._"
+      }
+    },
+    {
+      "id": "timestamps",
+      "lines": [
+        "a: 2001-12-14",
+        "b: 2001-12-14t21:59:43.10-05:00",
+        "c: 2001-12-14 21:59:43.10 -5",
+        "d: 2001-12-15 2:59:43.10",
+        "e: 2001-12-14T21:59:43Z",
+        "f: 2001-12-14 21:59:43",
+        "g: 2001-12-14T21:59:43.1234567+05:30",
+        "h: 2001-12-14T21:59:43.",
+        "i: 2001-1-1",
+        "j: 2001-12-14T21:59",
+        "k: '2001-12-14'"
+      ],
+      "value": {
+        "a": {
+          "$date": "2001-12-14"
+        },
+        "b": {
+          "$datetime": "2001-12-14T21:59:43.100000-05:00"
+        },
+        "c": {
+          "$datetime": "2001-12-14T21:59:43.100000-05:00"
+        },
+        "d": {
+          "$datetime": "2001-12-15T02:59:43.100000"
+        },
+        "e": {
+          "$datetime": "2001-12-14T21:59:43+00:00"
+        },
+        "f": {
+          "$datetime": "2001-12-14T21:59:43"
+        },
+        "g": {
+          "$datetime": "2001-12-14T21:59:43.123456+05:30"
+        },
+        "h": {
+          "$datetime": "2001-12-14T21:59:43"
+        },
+        "i": "2001-1-1",
+        "j": "2001-12-14T21:59",
+        "k": "2001-12-14"
+      }
+    },
+    {
+      "id": "timestamp-invalid-month",
+      "lines": [
+        "a: 2001-13-45"
+      ],
+      "refuse": {
+        "code": "constructor",
+        "column": 4,
+        "line": 1
+      }
+    },
+    {
+      "id": "timestamp-invalid-hour",
+      "lines": [
+        "a: 2001-12-14T25:00:00"
+      ],
+      "refuse": {
+        "code": "constructor",
+        "column": 4,
+        "line": 1
+      }
+    },
+    {
+      "id": "strings-that-look-like-syntax",
+      "lines": [
+        "a: http://example.com/x?y=1#frag",
+        "b: a:b",
+        "c: a#b",
+        "d: a  b",
+        "e: -x",
+        "f: ?x",
+        "g: :x",
+        "h: --- x",
+        "i: \"...\""
+      ],
+      "value": {
+        "a": "http://example.com/x?y=1#frag",
+        "b": "a:b",
+        "c": "a#b",
+        "d": "a  b",
+        "e": "-x",
+        "f": "?x",
+        "g": ":x",
+        "h": "--- x",
+        "i": "..."
+      }
+    },
+    {
+      "id": "trailing-comment-after-scalars",
+      "lines": [
+        "a: value # comment",
+        "b: \"quoted\" # comment",
+        "c: 'single' #comment",
+        "d: 12 # num"
+      ],
+      "value": {
+        "a": "value",
+        "b": "quoted",
+        "c": "single",
+        "d": 12
+      }
+    },
+    {
+      "id": "quoted-scalars-stay-strings",
+      "lines": [
+        "a: \"123\"",
+        "b: '1.5'",
+        "c: \"true\"",
+        "d: 'null'",
+        "e: \"2001-12-14\"",
+        "f: '0755'",
+        "g: \"\"",
+        "h: '~'"
+      ],
+      "value": {
+        "a": "123",
+        "b": "1.5",
+        "c": "true",
+        "d": "null",
+        "e": "2001-12-14",
+        "f": "0755",
+        "g": "",
+        "h": "~"
+      }
+    },
+    {
+      "id": "merge-key-inline-mapping",
+      "lines": [
+        "base: &b",
+        "  x: 1",
+        "  y: 2",
+        "derived:",
+        "  <<: {x: 10, z: 3}",
+        "  y: 5"
+      ],
+      "value": {
+        "base": {
+          "x": 1,
+          "y": 2
+        },
+        "derived": {
+          "x": 10,
+          "y": 5,
+          "z": 3
+        }
+      }
+    },
+    {
+      "id": "merge-key-list-of-mappings",
+      "lines": [
+        "m:",
+        "  <<: [{a: 1, c: 1}, {a: 2, b: 2}]",
+        "  d: 4"
+      ],
+      "value": {
+        "m": {
+          "a": 1,
+          "b": 2,
+          "c": 1,
+          "d": 4
+        }
+      }
+    },
+    {
+      "id": "merge-key-scalar-value-is-an-error",
+      "lines": [
+        "m:",
+        "  <<: x"
+      ],
+      "refuse": {
+        "code": "merge",
+        "column": 7,
+        "line": 2
+      }
+    },
+    {
+      "id": "equals-is-a-key-string",
+      "lines": [
+        "=: x",
+        "a: 1"
+      ],
+      "value": {
+        "=": "x",
+        "a": 1
+      }
+    },
+    {
+      "id": "equals-as-a-value-is-an-error",
+      "lines": [
+        "a: ="
+      ],
+      "refuse": {
+        "code": "constructor",
+        "column": 4,
+        "line": 1
+      }
+    },
+    {
+      "id": "explicit-core-tags",
+      "lines": [
+        "a: !!str 123",
+        "b: !!str yes",
+        "c: !!int \"12\"",
+        "d: !!float 1",
+        "e: !!bool yes",
+        "f: !!null anything",
+        "g: !!int 0x10",
+        "h: !!str",
+        "i: !!map {x: 1}",
+        "j: !!seq [1, 2]",
+        "k: !!float .5"
+      ],
+      "value": {
+        "a": "123",
+        "b": "yes",
+        "c": 12,
+        "d": {
+          "$float": "1.0"
+        },
+        "e": true,
+        "f": null,
+        "g": 16,
+        "h": "",
+        "i": {
+          "x": 1
+        },
+        "j": [
+          1,
+          2
+        ],
+        "k": {
+          "$float": "0.5"
+        }
+      }
+    },
+    {
+      "id": "explicit-int-tag-with-text-is-an-error",
+      "lines": [
+        "a: !!int abc"
+      ],
+      "refuse": {
+        "code": "constructor",
+        "column": 4,
+        "line": 1
+      }
+    },
+    {
+      "id": "explicit-bool-tag-with-text-is-an-error",
+      "lines": [
+        "a: !!bool maybe"
+      ],
+      "refuse": {
+        "code": "constructor",
+        "column": 4,
+        "line": 1
+      }
+    },
+    {
+      "id": "explicit-float-tag-with-text-is-an-error",
+      "lines": [
+        "a: !!float x"
+      ],
+      "refuse": {
+        "code": "constructor",
+        "column": 4,
+        "line": 1
+      }
+    },
+    {
+      "id": "int-prefix-without-digits-is-an-error",
+      "lines": [
+        "a: 0b_"
+      ],
+      "refuse": {
+        "code": "constructor",
+        "column": 4,
+        "line": 1
+      }
+    },
+    {
+      "id": "non-string-keys",
+      "lines": [
+        "1: a",
+        "false: b",
+        "null: c",
+        "2001-12-14: d",
+        "1.5: e",
+        "x: f"
+      ],
+      "value": {
+        "$map": [
+          [
+            1,
+            "a"
+          ],
+          [
+            false,
+            "b"
+          ],
+          [
+            null,
+            "c"
+          ],
+          [
+            {
+              "$date": "2001-12-14"
+            },
+            "d"
+          ],
+          [
+            {
+              "$float": "1.5"
+            },
+            "e"
+          ],
+          [
+            "x",
+            "f"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "keys-with-dollar-prefix-project-as-a-map",
+      "lines": [
+        "$date: x",
+        "b: 1"
+      ],
+      "value": {
+        "$map": [
+          [
+            "$date",
+            "x"
+          ],
+          [
+            "b",
+            1
+          ]
+        ]
+      }
+    }
+  ],
+  "format": "yaml-oracle/1",
+  "notes": "Scalar resolution as ASH's YAML loader reads it (YAML 1.1 words, numbers, nulls, timestamps, explicit tags). value is the projection of the loader's result; see yaml-oracle.test.js for the projection rules."
+}

@@ -1,0 +1,807 @@
+{
+  "cases": [
+    {
+      "id": "block-nested-maps",
+      "lines": [
+        "a:",
+        "  b:",
+        "    c: 1",
+        "  d: 2",
+        "e: 3"
+      ],
+      "value": {
+        "a": {
+          "b": {
+            "c": 1
+          },
+          "d": 2
+        },
+        "e": 3
+      }
+    },
+    {
+      "id": "block-seq-indented",
+      "lines": [
+        "list:",
+        "  - a",
+        "  - b",
+        "  - 3",
+        "other: x"
+      ],
+      "value": {
+        "list": [
+          "a",
+          "b",
+          3
+        ],
+        "other": "x"
+      }
+    },
+    {
+      "id": "block-seq-indentless",
+      "lines": [
+        "list:",
+        "- a",
+        "- b",
+        "other: x"
+      ],
+      "value": {
+        "list": [
+          "a",
+          "b"
+        ],
+        "other": "x"
+      }
+    },
+    {
+      "id": "seq-of-maps-compact",
+      "lines": [
+        "items:",
+        "  - name: a",
+        "    n: 1",
+        "  - name: b",
+        "    n: 2"
+      ],
+      "value": {
+        "items": [
+          {
+            "n": 1,
+            "name": "a"
+          },
+          {
+            "n": 2,
+            "name": "b"
+          }
+        ]
+      }
+    },
+    {
+      "id": "seq-of-maps-dash-then-newline",
+      "lines": [
+        "items:",
+        "  -",
+        "    name: a",
+        "  -",
+        "    name: b"
+      ],
+      "value": {
+        "items": [
+          {
+            "name": "a"
+          },
+          {
+            "name": "b"
+          }
+        ]
+      }
+    },
+    {
+      "id": "seq-items-holding-lists",
+      "lines": [
+        "- name: a",
+        "  tags:",
+        "    - x",
+        "    - y",
+        "- name: b",
+        "  tags: []"
+      ],
+      "value": [
+        {
+          "name": "a",
+          "tags": [
+            "x",
+            "y"
+          ]
+        },
+        {
+          "name": "b",
+          "tags": []
+        }
+      ]
+    },
+    {
+      "id": "top-level-seq-of-seqs",
+      "lines": [
+        "- - a",
+        "  - b",
+        "- - c"
+      ],
+      "value": [
+        [
+          "a",
+          "b"
+        ],
+        [
+          "c"
+        ]
+      ]
+    },
+    {
+      "id": "empty-values",
+      "lines": [
+        "a:",
+        "b: ~",
+        "c:",
+        "  - x",
+        "d:",
+        "  e:"
+      ],
+      "value": {
+        "a": null,
+        "b": null,
+        "c": [
+          "x"
+        ],
+        "d": {
+          "e": null
+        }
+      }
+    },
+    {
+      "id": "seq-null-entries",
+      "lines": [
+        "-",
+        "- a",
+        "-"
+      ],
+      "value": [
+        null,
+        "a",
+        null
+      ]
+    },
+    {
+      "id": "indent-four-and-mixed",
+      "lines": [
+        "a:",
+        "    b:",
+        "        c: 1",
+        "    d:",
+        "      - x",
+        "      - y"
+      ],
+      "value": {
+        "a": {
+          "b": {
+            "c": 1
+          },
+          "d": [
+            "x",
+            "y"
+          ]
+        }
+      }
+    },
+    {
+      "id": "flow-collections",
+      "lines": [
+        "a: [1, 2, 3]",
+        "b: {x: 1, y: [a, b]}",
+        "c: []",
+        "d: {}",
+        "e: [a, [b, c], {d: e}]",
+        "f: [a, b, ]",
+        "g: {x: 1, }",
+        "h: [ 1 ,2 , 3 ]",
+        "i: [a: 1, b: 2]",
+        "j: {a, b: , c: 3}",
+        "k: [{a: 1}, {b: 2}]"
+      ],
+      "value": {
+        "a": [
+          1,
+          2,
+          3
+        ],
+        "b": {
+          "x": 1,
+          "y": [
+            "a",
+            "b"
+          ]
+        },
+        "c": [],
+        "d": {},
+        "e": [
+          "a",
+          [
+            "b",
+            "c"
+          ],
+          {
+            "d": "e"
+          }
+        ],
+        "f": [
+          "a",
+          "b"
+        ],
+        "g": {
+          "x": 1
+        },
+        "h": [
+          1,
+          2,
+          3
+        ],
+        "i": [
+          {
+            "a": 1
+          },
+          {
+            "b": 2
+          }
+        ],
+        "j": {
+          "a": null,
+          "b": null,
+          "c": 3
+        },
+        "k": [
+          {
+            "a": 1
+          },
+          {
+            "b": 2
+          }
+        ]
+      }
+    },
+    {
+      "id": "flow-multiline-with-comment",
+      "lines": [
+        "a: [",
+        "  1,",
+        "  2,",
+        "  # comment",
+        "  3",
+        "]",
+        "b: {",
+        "  x: 1,",
+        "  y: 2",
+        "}"
+      ],
+      "value": {
+        "a": [
+          1,
+          2,
+          3
+        ],
+        "b": {
+          "x": 1,
+          "y": 2
+        }
+      }
+    },
+    {
+      "id": "flow-plain-scalars-with-punctuation",
+      "lines": [
+        "a: [x-y, -x, a:b, 'c, d']"
+      ],
+      "value": {
+        "a": [
+          "x-y",
+          "-x",
+          "a:b",
+          "c, d"
+        ]
+      }
+    },
+    {
+      "id": "plain-multiline-folding",
+      "lines": [
+        "a: one",
+        "  two",
+        "  three",
+        "b: x",
+        "",
+        "  y",
+        "c: p",
+        "",
+        "",
+        "  q"
+      ],
+      "value": {
+        "a": "one two three",
+        "b": "x\ny",
+        "c": "p\n\nq"
+      }
+    },
+    {
+      "id": "single-quoted",
+      "lines": [
+        "a: 'it''s'",
+        "b: 'a",
+        "  b'",
+        "c: 'x",
+        "",
+        "  y'",
+        "d: ''",
+        "e: ' pad '",
+        "f: 'back\\slash'"
+      ],
+      "value": {
+        "a": "it's",
+        "b": "a b",
+        "c": "x\ny",
+        "d": "",
+        "e": " pad ",
+        "f": "back\\slash"
+      }
+    },
+    {
+      "id": "double-quoted-escapes",
+      "lines": [
+        "a: \"tab\\there\"",
+        "b: \"nl\\nhere\"",
+        "c: \"quote\\\"inside\"",
+        "d: \"back\\\\slash\"",
+        "e: \"slash\\/x\"",
+        "f: \"\\x41\\x7e\"",
+        "j: \"space\\ x\"",
+        "k: \"te\\\tx\"",
+        "l: \"caf<BSu>00e9\"",
+        "m: \"<BSU>0001F600\"",
+        "n: \"cr\\r\""
+      ],
+      "value": {
+        "a": "tab\there",
+        "b": "nl\nhere",
+        "c": "quote\"inside",
+        "d": "back\\slash",
+        "e": "slash/x",
+        "f": "A~",
+        "j": "space x",
+        "k": "te\tx",
+        "l": "caf\u00e9",
+        "m": "\ud83d\ude00",
+        "n": "cr\r"
+      }
+    },
+    {
+      "id": "double-quoted-control-escapes",
+      "lines": [
+        "a: \"\\0\\a\\b\\e\\f\\v\"",
+        "b: \"\\N\\_\\L\\P\"",
+        "c: \"\\x85\\xA0\""
+      ],
+      "value": {
+        "a": {
+          "$codes": [
+            0,
+            7,
+            8,
+            27,
+            12,
+            11
+          ]
+        },
+        "b": {
+          "$codes": [
+            133,
+            160,
+            8232,
+            8233
+          ]
+        },
+        "c": {
+          "$codes": [
+            133,
+            160
+          ]
+        }
+      }
+    },
+    {
+      "id": "double-quoted-multiline",
+      "lines": [
+        "a: \"one",
+        "  two\"",
+        "b: \"x",
+        "",
+        "  y\"",
+        "c: \"trailing\\",
+        "  continuation\"",
+        "d: \"keep  \\",
+        "  spaces\"",
+        "e: \"a \\n b\""
+      ],
+      "value": {
+        "a": "one two",
+        "b": "x\ny",
+        "c": "trailingcontinuation",
+        "d": "keep  spaces",
+        "e": "a \n b"
+      }
+    },
+    {
+      "id": "literal-block-scalars",
+      "lines": [
+        "a: |",
+        "  line1",
+        "  line2",
+        "b: |-",
+        "  line1",
+        "  line2",
+        "c: |+",
+        "  line1",
+        "  line2",
+        "",
+        "d: |",
+        "  line1",
+        "",
+        "  line3",
+        "e: |2",
+        "    indented",
+        "f: |",
+        "  keep",
+        "    more"
+      ],
+      "value": {
+        "a": "line1\nline2\n",
+        "b": "line1\nline2",
+        "c": "line1\nline2\n\n",
+        "d": "line1\n\nline3\n",
+        "e": "  indented\n",
+        "f": "keep\n  more\n"
+      }
+    },
+    {
+      "id": "folded-block-scalars",
+      "lines": [
+        "a: >",
+        "  folded",
+        "  text",
+        "  here",
+        "b: >-",
+        "  one",
+        "  two",
+        "",
+        "  three",
+        "c: >",
+        "  normal",
+        "    more indented",
+        "  back to normal",
+        "d: >+",
+        "  keep",
+        "",
+        "e: >2",
+        "   x"
+      ],
+      "value": {
+        "a": "folded text here\n",
+        "b": "one two\nthree",
+        "c": "normal\n  more indented\nback to normal\n",
+        "d": "keep\n\n",
+        "e": " x\n"
+      }
+    },
+    {
+      "id": "block-scalars-in-a-sequence",
+      "lines": [
+        "- |",
+        "  a",
+        "  b",
+        "- >-",
+        "  c",
+        "  d",
+        "- last"
+      ],
+      "value": [
+        "a\nb\n",
+        "c d",
+        "last"
+      ]
+    },
+    {
+      "id": "block-scalar-header-with-comment",
+      "lines": [
+        "a: | # why",
+        "  text",
+        "# after",
+        "b: 1"
+      ],
+      "value": {
+        "a": "text\n",
+        "b": 1
+      }
+    },
+    {
+      "id": "block-scalar-followed-by-less-indented-comment",
+      "lines": [
+        "a:",
+        "  b: >-",
+        "    text",
+        "    more",
+        "  # about c",
+        "  c: 1"
+      ],
+      "value": {
+        "a": {
+          "b": "text more",
+          "c": 1
+        }
+      }
+    },
+    {
+      "id": "comments-everywhere",
+      "lines": [
+        "# leading comment",
+        "a: 1 # trailing",
+        "# between",
+        "b:   # after key",
+        "  # inside",
+        "  c: 2",
+        "  # end of b",
+        "",
+        "d:",
+        "  - x # item comment",
+        "  # between items",
+        "  - y",
+        "# before e",
+        "e: [1, # in flow",
+        "  2]",
+        "# last"
+      ],
+      "value": {
+        "a": 1,
+        "b": {
+          "c": 2
+        },
+        "d": [
+          "x",
+          "y"
+        ],
+        "e": [
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "id": "document-start-marker",
+      "lines": [
+        "---",
+        "a: 1"
+      ],
+      "value": {
+        "a": 1
+      }
+    },
+    {
+      "id": "document-start-with-comment",
+      "lines": [
+        "--- # note",
+        "a: 1"
+      ],
+      "value": {
+        "a": 1
+      }
+    },
+    {
+      "id": "document-end-marker",
+      "lines": [
+        "a: 1",
+        "..."
+      ],
+      "value": {
+        "a": 1
+      }
+    },
+    {
+      "id": "document-start-and-end-markers",
+      "lines": [
+        "---",
+        "a: 1",
+        "..."
+      ],
+      "value": {
+        "a": 1
+      }
+    },
+    {
+      "id": "document-start-then-scalar",
+      "lines": [
+        "--- a"
+      ],
+      "value": "a"
+    },
+    {
+      "id": "empty-explicit-document",
+      "lines": [
+        "---"
+      ],
+      "value": null
+    },
+    {
+      "id": "empty-document",
+      "text": "",
+      "value": null
+    },
+    {
+      "id": "comment-only-document",
+      "lines": [
+        "# nothing here"
+      ],
+      "value": null
+    },
+    {
+      "id": "blank-lines-only-document",
+      "text": "\n\n  \n",
+      "value": null
+    },
+    {
+      "id": "top-level-plain-scalar",
+      "lines": [
+        "just a string"
+      ],
+      "value": "just a string"
+    },
+    {
+      "id": "top-level-int",
+      "lines": [
+        "42"
+      ],
+      "value": 42
+    },
+    {
+      "id": "top-level-flow-seq",
+      "lines": [
+        "[1, 2]"
+      ],
+      "value": [
+        1,
+        2
+      ]
+    },
+    {
+      "id": "top-level-quoted",
+      "lines": [
+        "\"quoted\""
+      ],
+      "value": "quoted"
+    },
+    {
+      "id": "top-level-null-word",
+      "lines": [
+        "~"
+      ],
+      "value": null
+    },
+    {
+      "id": "top-level-multiline-plain",
+      "lines": [
+        "one",
+        "two"
+      ],
+      "value": "one two"
+    },
+    {
+      "id": "anchors-without-aliases",
+      "lines": [
+        "a: &x 1",
+        "b: &y [1, 2]",
+        "c: &z",
+        "  k: v",
+        "d: &w \"s\""
+      ],
+      "value": {
+        "a": 1,
+        "b": [
+          1,
+          2
+        ],
+        "c": {
+          "k": "v"
+        },
+        "d": "s"
+      }
+    },
+    {
+      "id": "duplicate-keys-keep-the-last-value",
+      "lines": [
+        "a: 1",
+        "b: 2",
+        "a: 3"
+      ],
+      "value": {
+        "a": 3,
+        "b": 2
+      }
+    },
+    {
+      "id": "keys-with-spaces-and-quotes",
+      "lines": [
+        "\"quoted key\": 1",
+        "'single key': 2",
+        "plain key with spaces: 3",
+        "\"a: b\": 4"
+      ],
+      "value": {
+        "a: b": 4,
+        "plain key with spaces": 3,
+        "quoted key": 1,
+        "single key": 2
+      }
+    },
+    {
+      "id": "unicode-text",
+      "lines": [
+        "a: caf\u00e9",
+        "b: \"\u65e5\u672c\u8a9e\"",
+        "c: \ud83d\ude00",
+        "d: \u2014"
+      ],
+      "value": {
+        "a": "caf\u00e9",
+        "b": "\u65e5\u672c\u8a9e",
+        "c": "\ud83d\ude00",
+        "d": "\u2014"
+      }
+    },
+    {
+      "id": "crlf-line-endings",
+      "text": "a: 1\r\nb:\r\n  - x\r\n  - y\r\n",
+      "value": {
+        "a": 1,
+        "b": [
+          "x",
+          "y"
+        ]
+      }
+    },
+    {
+      "id": "block-scalars-with-crlf",
+      "text": "a: |\r\n  x\r\n  y\r\nb: >-\r\n  p\r\n  q\r\n",
+      "value": {
+        "a": "x\ny\n",
+        "b": "p q"
+      }
+    },
+    {
+      "id": "no-final-newline",
+      "text": "a: 1\nb: 2",
+      "value": {
+        "a": 1,
+        "b": 2
+      }
+    },
+    {
+      "id": "block-scalar-without-final-newline",
+      "text": "a: |\n  x",
+      "value": {
+        "a": "x"
+      }
+    },
+    {
+      "id": "tabs-inside-quoted-and-block-scalars",
+      "text": "a: \"x\ty\"\nb: |\n  p\tq\n",
+      "value": {
+        "a": "x\ty",
+        "b": "p\tq\n"
+      }
+    }
+  ],
+  "format": "yaml-oracle/1",
+  "notes": "Collections, quoting styles, block scalars, comments, document markers and line endings, as ASH's YAML loader reads them. Placeholder tokens in an input: <BSu> and <BSU> stand for a backslash followed by u or U."
+}

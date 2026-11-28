@@ -1,0 +1,642 @@
+{
+  "cases": [
+    {
+      "id": "docs-steering-suppression-with-scope",
+      "lines": [
+        "suppressions:",
+        "  - rule_id: AwsSolutions-IAM5",
+        "    path: 'cdk.out/*.template.json'",
+        "    reason: 'Wildcard is scoped to the collector log group prefix'",
+        "    scope:",
+        "      resource_id: 'Stack/CollectorTaskRole/DefaultPolicy/Resource'",
+        "      resource_type: 'AWS::IAM::Policy'",
+        "      engines:",
+        "        cdk-nag:",
+        "          applies_to: 'Action::logs:*'"
+      ],
+      "source": "docs/content/docs/genai-steering-guide.md:921",
+      "value": {
+        "suppressions": [
+          {
+            "path": "cdk.out/*.template.json",
+            "reason": "Wildcard is scoped to the collector log group prefix",
+            "rule_id": "AwsSolutions-IAM5",
+            "scope": {
+              "engines": {
+                "cdk-nag": {
+                  "applies_to": "Action::logs:*"
+                }
+              },
+              "resource_id": "Stack/CollectorTaskRole/DefaultPolicy/Resource",
+              "resource_type": "AWS::IAM::Policy"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "docs-steering-exclusions",
+      "lines": [
+        "exclusions:",
+        "  - rule_id: B101",
+        "    path: '**/tests/**'",
+        "    scanner: bandit",
+        "    reason: 'pytest assert idiom; tests are not shipped'"
+      ],
+      "source": "docs/content/docs/genai-steering-guide.md:947",
+      "value": {
+        "exclusions": [
+          {
+            "path": "**/tests/**",
+            "reason": "pytest assert idiom; tests are not shipped",
+            "rule_id": "B101",
+            "scanner": "bandit"
+          }
+        ]
+      }
+    },
+    {
+      "id": "docs-steering-quoted-rule-id",
+      "lines": [
+        "suppressions:",
+        "  - path: 'src/utils.py'",
+        "    rule_id: 'B603'",
+        "    reason: 'subprocess.call uses list args (no shell=True), validated inputs only'"
+      ],
+      "source": "docs/content/docs/genai-steering-guide.md:972",
+      "value": {
+        "suppressions": [
+          {
+            "path": "src/utils.py",
+            "reason": "subprocess.call uses list args (no shell=True), validated inputs only",
+            "rule_id": "B603"
+          }
+        ]
+      }
+    },
+    {
+      "id": "docs-steering-sequence-with-comments",
+      "lines": [
+        "# Good - specific file",
+        "- path: 'src/auth/login.py'",
+        "  rule_id: 'B201'",
+        "  reason: 'Debug mode is only enabled in the local development server'",
+        "",
+        "# Good - specific directory",
+        "- path: 'tests/**/*.py'",
+        "  rule_id: 'B101'",
+        "  reason: 'assert is how the tests check results'",
+        "",
+        "# Avoid - too broad",
+        "- path: '**/*.py'",
+        "  rule_id: 'B201'",
+        "  reason: 'Too broad: this hides B201 in every Python file'"
+      ],
+      "source": "docs/content/docs/genai-steering-guide.md:981",
+      "value": [
+        {
+          "path": "src/auth/login.py",
+          "reason": "Debug mode is only enabled in the local development server",
+          "rule_id": "B201"
+        },
+        {
+          "path": "tests/**/*.py",
+          "reason": "assert is how the tests check results",
+          "rule_id": "B101"
+        },
+        {
+          "path": "**/*.py",
+          "reason": "Too broad: this hides B201 in every Python file",
+          "rule_id": "B201"
+        }
+      ]
+    },
+    {
+      "id": "docs-steering-line-range",
+      "lines": [
+        "suppressions:",
+        "  - path: 'src/app.py'",
+        "    rule_id: 'B201'",
+        "    line_start: 42",
+        "    line_end: 42",
+        "    reason: 'Debug mode only enabled in development environment'"
+      ],
+      "source": "docs/content/docs/genai-steering-guide.md:1000",
+      "value": {
+        "suppressions": [
+          {
+            "line_end": 42,
+            "line_start": 42,
+            "path": "src/app.py",
+            "reason": "Debug mode only enabled in development environment",
+            "rule_id": "B201"
+          }
+        ]
+      }
+    },
+    {
+      "id": "docs-steering-quoted-expiry",
+      "lines": [
+        "suppressions:",
+        "  - path: 'src/legacy/old_api.py'",
+        "    rule_id: 'B501'",
+        "    reason: 'Legacy code - will be refactored in Q2 2026'",
+        "    expires: '2026-06-30'"
+      ],
+      "source": "docs/content/docs/genai-steering-guide.md:1011",
+      "value": {
+        "suppressions": [
+          {
+            "expires": "2026-06-30",
+            "path": "src/legacy/old_api.py",
+            "reason": "Legacy code - will be refactored in Q2 2026",
+            "rule_id": "B501"
+          }
+        ]
+      }
+    },
+    {
+      "id": "docs-steering-global-and-scanner-threshold",
+      "lines": [
+        "global_settings:",
+        "  severity_threshold: MEDIUM  # ALL, LOW, MEDIUM, HIGH, CRITICAL",
+        "scanners:",
+        "  bandit:",
+        "    options:",
+        "      severity_threshold: HIGH"
+      ],
+      "source": "docs/content/docs/genai-steering-guide.md:1622",
+      "value": {
+        "global_settings": {
+          "severity_threshold": "MEDIUM"
+        },
+        "scanners": {
+          "bandit": {
+            "options": {
+              "severity_threshold": "HIGH"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "docs-configure-default-scanners",
+      "lines": [
+        "project_name: platform",
+        "default_scanners:",
+        "  only:",
+        "    - bandit",
+        "    - trivy"
+      ],
+      "source": "docs/content/how-to/configure.md:105",
+      "value": {
+        "default_scanners": {
+          "only": [
+            "bandit",
+            "trivy"
+          ]
+        },
+        "project_name": "platform"
+      }
+    },
+    {
+      "id": "docs-configure-misspelled-key",
+      "lines": [
+        "global_settings:",
+        "  suppressions:",
+        "    - path: src/deploy.py",
+        "      ruleId: B602",
+        "      reason: The command is a constant; no user input reaches it"
+      ],
+      "source": "docs/content/how-to/configure.md:273",
+      "value": {
+        "global_settings": {
+          "suppressions": [
+            {
+              "path": "src/deploy.py",
+              "reason": "The command is a constant; no user input reaches it",
+              "ruleId": "B602"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "docs-export-reporters",
+      "lines": [
+        "reporters:",
+        "  spdx:",
+        "    enabled: true",
+        "  html:",
+        "    enabled: false"
+      ],
+      "source": "docs/content/how-to/export-reports.md:90",
+      "value": {
+        "reporters": {
+          "html": {
+            "enabled": false
+          },
+          "spdx": {
+            "enabled": true
+          }
+        }
+      }
+    },
+    {
+      "id": "docs-mcp-resource-management",
+      "lines": [
+        "max_concurrent_scans: 3",
+        "scan_timeout_seconds: 1800"
+      ],
+      "source": "docs/content/how-to/mcp-server.md:428",
+      "value": {
+        "max_concurrent_scans": 3,
+        "scan_timeout_seconds": 1800
+      }
+    },
+    {
+      "id": "docs-pre-commit-only-scanners",
+      "lines": [
+        "project_name: my-project",
+        "precommit:",
+        "  only_scanners:",
+        "    - bandit",
+        "    - detect-secrets"
+      ],
+      "source": "docs/content/how-to/pre-commit.md:159",
+      "value": {
+        "precommit": {
+          "only_scanners": [
+            "bandit",
+            "detect-secrets"
+          ]
+        },
+        "project_name": "my-project"
+      }
+    },
+    {
+      "id": "docs-pre-commit-suppression",
+      "lines": [
+        "global_settings:",
+        "  suppressions:",
+        "    - path: .pre-commit-config.yaml",
+        "      rule_id: SECRET-HEX-HIGH-ENTROPY-STRING",
+        "      reason: pre-commit autoupdate --freeze pins hooks to commit SHAs"
+      ],
+      "source": "docs/content/how-to/pre-commit.md:364",
+      "value": {
+        "global_settings": {
+          "suppressions": [
+            {
+              "path": ".pre-commit-config.yaml",
+              "reason": "pre-commit autoupdate --freeze pins hooks to commit SHAs",
+              "rule_id": "SECRET-HEX-HIGH-ENTROPY-STRING"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "docs-offline-staleness-overrides",
+      "lines": [
+        "content_db_staleness: fail",
+        "content_db_staleness_overrides:",
+        "  - database: trivy-db",
+        "    policy: warn",
+        "    expiration: \"2027-06-30\"",
+        "    reason: Air-gapped runners get a new image weekly until the mirror is ready."
+      ],
+      "source": "docs/content/how-to/run-offline.md:183",
+      "value": {
+        "content_db_staleness": "fail",
+        "content_db_staleness_overrides": [
+          {
+            "database": "trivy-db",
+            "expiration": "2027-06-30",
+            "policy": "warn",
+            "reason": "Air-gapped runners get a new image weekly until the mirror is ready."
+          }
+        ]
+      }
+    },
+    {
+      "id": "docs-history",
+      "lines": [
+        "global_settings:",
+        "  history:",
+        "    enabled: true",
+        "    keep_runs: 50"
+      ],
+      "source": "docs/content/how-to/track-findings-over-time.md:44",
+      "value": {
+        "global_settings": {
+          "history": {
+            "enabled": true,
+            "keep_runs": 50
+          }
+        }
+      }
+    },
+    {
+      "id": "docs-reviewer-suppression-with-expiry",
+      "lines": [
+        "global_settings:",
+        "  suppressions:",
+        "    - path: src/deploy.py",
+        "      rule_id: B602",
+        "      line_start: 40",
+        "      line_end: 48",
+        "      reason: The command is a constant; no user input reaches it",
+        "      expires: \"2027-01-31\""
+      ],
+      "source": "docs/content/personas/security-reviewer.md:40",
+      "value": {
+        "global_settings": {
+          "suppressions": [
+            {
+              "expires": "2027-01-31",
+              "line_end": 48,
+              "line_start": 40,
+              "path": "src/deploy.py",
+              "reason": "The command is a constant; no user input reaches it",
+              "rule_id": "B602"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "docs-aws-reporters",
+      "lines": [
+        "ash_plugin_modules:",
+        "  - automated_security_helper.plugin_modules.ash_aws_plugins",
+        "reporters:",
+        "  s3:",
+        "    enabled: true",
+        "    options:",
+        "      aws_region: us-west-2",
+        "      bucket_name: example-security-scan-results",
+        "      key_prefix: ash-reports/",
+        "  cloudwatch-logs:",
+        "    enabled: true",
+        "    options:",
+        "      aws_region: us-west-2",
+        "      log_group_name: /security/ash"
+      ],
+      "source": "docs/content/plugins/aws.md:45",
+      "value": {
+        "ash_plugin_modules": [
+          "automated_security_helper.plugin_modules.ash_aws_plugins"
+        ],
+        "reporters": {
+          "cloudwatch-logs": {
+            "enabled": true,
+            "options": {
+              "aws_region": "us-west-2",
+              "log_group_name": "/security/ash"
+            }
+          },
+          "s3": {
+            "enabled": true,
+            "options": {
+              "aws_region": "us-west-2",
+              "bucket_name": "example-security-scan-results",
+              "key_prefix": "ash-reports/"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "docs-aws-security-hub",
+      "lines": [
+        "ash_plugin_modules:",
+        "  - automated_security_helper.plugin_modules.ash_aws_plugins",
+        "reporters:",
+        "  aws-security-hub:",
+        "    enabled: true",
+        "    options:",
+        "      aws_region: us-east-1",
+        "      findings_scope: my-repository"
+      ],
+      "source": "docs/content/plugins/aws.md:274",
+      "value": {
+        "ash_plugin_modules": [
+          "automated_security_helper.plugin_modules.ash_aws_plugins"
+        ],
+        "reporters": {
+          "aws-security-hub": {
+            "enabled": true,
+            "options": {
+              "aws_region": "us-east-1",
+              "findings_scope": "my-repository"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "docs-reporter-plugin-flow-module-list",
+      "lines": [
+        "project_name: my-service",
+        "ash_plugin_modules: [acme_ash_plugins]",
+        "reporters:",
+        "  findings-list:",
+        "    enabled: true",
+        "    options:",
+        "      include_suppressed: true"
+      ],
+      "source": "docs/content/plugins/write-a-reporter.md:117",
+      "value": {
+        "ash_plugin_modules": [
+          "acme_ash_plugins"
+        ],
+        "project_name": "my-service",
+        "reporters": {
+          "findings-list": {
+            "enabled": true,
+            "options": {
+              "include_suppressed": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "docs-scanner-plugin-quoted-option",
+      "lines": [
+        "project_name: my-service",
+        "ash_plugin_modules: [acme_ash_plugins]",
+        "scanners:",
+        "  ruff-security:",
+        "    options:",
+        "      select: \"S,B\""
+      ],
+      "source": "docs/content/plugins/write-a-scanner.md:111",
+      "value": {
+        "ash_plugin_modules": [
+          "acme_ash_plugins"
+        ],
+        "project_name": "my-service",
+        "scanners": {
+          "ruff-security": {
+            "options": {
+              "select": "S,B"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "repository-config-first-75-lines",
+      "lines": [
+        "# yaml-language-server: $schema=./automated_security_helper/schemas/AshConfig.json",
+        "project_name: automated-security-helper",
+        "fail_on_findings: true",
+        "ash_plugin_modules: []",
+        "# ash_plugin_modules:",
+        "#   - automated_security_helper.plugin_modules.ash_aws_plugins",
+        "#   - automated_security_helper.plugin_modules.ash_trivy_plugins",
+        "external_reports_to_include: []",
+        "global_settings:",
+        "  severity_threshold: MEDIUM",
+        "  suppressions:",
+        "    # === GuardDog false positive in this repository's own tests (symbol-scoped) ===",
+        "    # GuardDog's heuristics read source text, so test code that writes a fake",
+        "    # credentials file matches them. Scoped to the one test function GuardDog",
+        "    # reports the hit in, so a real finding elsewhere in the file is still reported",
+        "    # and the entry keeps covering the write when edits move the lines. The test",
+        "    # file writes creds.env twice, in two test functions; GuardDog 3.2.0 drops a",
+        "    # match whose code snippet is the same as one it already reported, so it",
+        "    # reports only the first, whose enclosing function this entry names.",
+        "    - rule_id: \"threat-filesystem-read\"",
+        "      path: \"tests/integration/scanners/test_trivy_real_binary.py\"",
+        "      symbol: test_the_scanned_repos_secret_config_cannot_disable_rules",
+        "      reason: >-",
+        "        False positive. The line writes a creds.env holding a fake AWS key id and",
+        "        secret, generated per run with secrets.choice, into the test's temporary",
+        "        fixture tree so trivy's secret scanner has something to find. Nothing reads",
+        "        a real credentials file.",
+        "    # === Product code: pinned to the lines the rules report ===",
+        "    - rule_id: SECRET-SECRET-KEYWORD",
+        "      path: automated_security_helper/utils/redacted_model.py",
+        "      line_start: 298",
+        "      line_end: 299",
+        "      reason: >-",
+        "        False positive. These lines map two pydantic type names to the JSON type each",
+        "        one is shown as. No value is held.",
+        "    - rule_id: SECRET-SECRET-KEYWORD",
+        "      path: automated_security_helper/utils/scanner_tool_types.py",
+        "      line_start: 38",
+        "      line_end: 38",
+        "      reason: >-",
+        "        False positive. The constant names the secrets tool category; it is a label,",
+        "        not a credential.",
+        "    - rule_id: SECRET-SECRET-KEYWORD",
+        "      path: automated_security_helper/utils/scanner_names.py",
+        "      line_start: 136",
+        "      line_end: 136",
+        "      reason: >-",
+        "        False positive. The table entry maps the detect-secrets scanner to the secrets",
+        "        tool category.",
+        "    # === Test code and its support files: one entry per rule and file ===",
+        "    # The tests build made-up credentials, fixed temporary paths, wildcard addresses and",
+        "    # shell calls on purpose, to check that ASH hides, refuses or confines them. Each",
+        "    # entry below names one rule and one file, never a directory: the policy in",
+        "    # tests/unit/config/test_no_directory_glob_secret_suppressions.py is that a new file",
+        "    # which trips a rule is reported, not excused by an entry written for another file.",
+        "    # The reasons describe the pattern instead of quoting a line, because a quoted line",
+        "    # would make this file trip the same rules. Sorted by rule, then path.",
+        "    - rule_id: B102",
+        "      path: tests/unit/characterization/test_harness_confinement.py",
+        "      reason: \"Test code. exec of source text the test itself holds, in the test's own namespace.\"",
+        "    - rule_id: B102",
+        "      path: tests/unit/cli/test_scan_messages_tell_the_truth.py",
+        "      reason: \"Test code. exec of source text the test itself holds, in the test's own namespace.\"",
+        "    - rule_id: B103",
+        "      path: tests/unit/cli/mcp/test_source_delivery_deletes_read_only_scratch.py",
+        "      reason: \"Test code. The test sets file modes on files and directories it creates, to check how ASH reads, removes or refuses them.\"",
+        "    - rule_id: B103",
+        "      path: tests/unit/cli/mcp/test_source_delivery_scratch_that_resists_deletion.py",
+        "      reason: \"Test code. The test sets file modes on files and directories it creates, to check how ASH reads, removes or refuses them.\"",
+        "    - rule_id: B103",
+        "      path: tests/unit/config/test_a_checkout_boundary_needs_a_git_shaped_marker.py",
+        "      reason: \"Test code. The test sets file modes on files and directories it creates, to check how ASH reads, removes or refuses them.\"",
+        "    - rule_id: B103",
+        "      path: tests/unit/config/test_add_suppression.py",
+        "      reason: \"Test code. The test sets file modes on files and directories it creates, to check how ASH reads, removes or refuses them.\""
+      ],
+      "source": ".ash.yaml:1-75",
+      "value": {
+        "ash_plugin_modules": [],
+        "external_reports_to_include": [],
+        "fail_on_findings": true,
+        "global_settings": {
+          "severity_threshold": "MEDIUM",
+          "suppressions": [
+            {
+              "path": "tests/integration/scanners/test_trivy_real_binary.py",
+              "reason": "False positive. The line writes a creds.env holding a fake AWS key id and secret, generated per run with secrets.choice, into the test's temporary fixture tree so trivy's secret scanner has something to find. Nothing reads a real credentials file.",
+              "rule_id": "threat-filesystem-read",
+              "symbol": "test_the_scanned_repos_secret_config_cannot_disable_rules"
+            },
+            {
+              "line_end": 299,
+              "line_start": 298,
+              "path": "automated_security_helper/utils/redacted_model.py",
+              "reason": "False positive. These lines map two pydantic type names to the JSON type each one is shown as. No value is held.",
+              "rule_id": "SECRET-SECRET-KEYWORD"
+            },
+            {
+              "line_end": 38,
+              "line_start": 38,
+              "path": "automated_security_helper/utils/scanner_tool_types.py",
+              "reason": "False positive. The constant names the secrets tool category; it is a label, not a credential.",
+              "rule_id": "SECRET-SECRET-KEYWORD"
+            },
+            {
+              "line_end": 136,
+              "line_start": 136,
+              "path": "automated_security_helper/utils/scanner_names.py",
+              "reason": "False positive. The table entry maps the detect-secrets scanner to the secrets tool category.",
+              "rule_id": "SECRET-SECRET-KEYWORD"
+            },
+            {
+              "path": "tests/unit/characterization/test_harness_confinement.py",
+              "reason": "Test code. exec of source text the test itself holds, in the test's own namespace.",
+              "rule_id": "B102"
+            },
+            {
+              "path": "tests/unit/cli/test_scan_messages_tell_the_truth.py",
+              "reason": "Test code. exec of source text the test itself holds, in the test's own namespace.",
+              "rule_id": "B102"
+            },
+            {
+              "path": "tests/unit/cli/mcp/test_source_delivery_deletes_read_only_scratch.py",
+              "reason": "Test code. The test sets file modes on files and directories it creates, to check how ASH reads, removes or refuses them.",
+              "rule_id": "B103"
+            },
+            {
+              "path": "tests/unit/cli/mcp/test_source_delivery_scratch_that_resists_deletion.py",
+              "reason": "Test code. The test sets file modes on files and directories it creates, to check how ASH reads, removes or refuses them.",
+              "rule_id": "B103"
+            },
+            {
+              "path": "tests/unit/config/test_a_checkout_boundary_needs_a_git_shaped_marker.py",
+              "reason": "Test code. The test sets file modes on files and directories it creates, to check how ASH reads, removes or refuses them.",
+              "rule_id": "B103"
+            },
+            {
+              "path": "tests/unit/config/test_add_suppression.py",
+              "reason": "Test code. The test sets file modes on files and directories it creates, to check how ASH reads, removes or refuses them.",
+              "rule_id": "B103"
+            }
+          ]
+        },
+        "project_name": "automated-security-helper"
+      }
+    }
+  ],
+  "format": "yaml-oracle/1",
+  "notes": "Copies of the configuration blocks the documentation marks as ASH configuration, and the first 75 lines of the repository's own .ash.yaml, taken from the commit this corpus was written at. source names where each came from. The copies are frozen: a later change to the documentation does not change them."
+}
