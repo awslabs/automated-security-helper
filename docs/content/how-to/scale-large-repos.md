@@ -342,8 +342,8 @@ What sharding does not do:
 
 - It does not split files. Each shard scans the whole tree.
 - It does not balance by run time.
-- It does not combine with workspace scans: `ash scan --workspace` takes no `--shard-index`
-  or `--shard-count`, and the scan exits 5. It is not available over MCP.
+- It does not combine with workspace scans: `ash scan --workspace` with `--shard-index` or
+  `--shard-count` exits 5. It is not available over MCP.
 - `ash merge` does not remove duplicate findings that two scanners report for the same
   problem, and keeps the software bill of materials of one shard only.
 
@@ -459,10 +459,9 @@ Codes 4 and 5 are not part of that ranking: ASH gives them when it refuses the w
 before any project runs. Exit code 4 means the workspace itself is wrong: the workspace file
 or policy file cannot be used, a project is missing, or the projects need different plugin
 modules or incompatible scanner versions. The deprecated `--workspace` option and
-`--source-dir` together also exit 4; `ash scan --workspace` takes no `--source-dir`, so it
-exits 5 instead. Exit code 5 is a usage error, such as an option that `ash scan --workspace`
-does not take, or an `--only-scanners` list that names no scanner or that
-`--exclude-scanners` cancels:
+`--source-dir` together also exit 4. Exit code 5 is a usage error, such as an option that
+`ash scan --workspace` does not take, or an `--only-scanners` list that names no scanner or
+that `--exclude-scanners` cancels:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
