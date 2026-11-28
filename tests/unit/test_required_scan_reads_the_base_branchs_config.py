@@ -63,6 +63,7 @@ What it does not cover
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -998,6 +999,167 @@ class TestToolConfigFilesComeFromTheBaseCommit:
             )
             == BASE_BANDIT
         )
+
+
+# --------------------------------------------------------------------------- TOML
+
+TOML_CONFIG_PATH = ".ashrc.toml"
+TOML_CONFIG = (
+    'project_name = "toml-parsers"\n'
+    "[scanners.bandit.options]\n"
+    'config_file = ".ash/bandit.yaml"\n'
+)
+
+#: What a `uv run ... python -I -` of the tool-config step runs in place of
+#: `python -I -`. It makes importable only the TOML parsers named in
+#: TOML_PARSERS_INSTALLED, then runs the step's own program, read from stdin. An
+#: importable parser is a stand-in that appends its name to TOML_PARSERS_LOG and
+#: parses with the real tomllib (tomli, on a Python that has no tomllib); any other
+#: raises ModuleNotFoundError, as an interpreter without the package does. So which
+#: Python runs the test, and what its environment holds, does not matter.
+TOML_PARSERS_BOOTSTRAP = """\
+import os
+import sys
+import types
+
+try:
+    import tomllib as parser
+except ModuleNotFoundError:
+    import tomli as parser
+
+PARSERS = ("tomllib", "tomli", "toml")
+installed = os.environ["TOML_PARSERS_INSTALLED"].split()
+log = os.environ["TOML_PARSERS_LOG"]
+
+
+def stand_in(name):
+    module = types.ModuleType(name)
+
+    def loads(text, *args, **kwargs):
+        with open(log, "a", encoding="utf-8") as handle:
+            print(name, file=handle)
+        return parser.loads(text, *args, **kwargs)
+
+    module.loads = loads
+    return module
+
+
+class Missing:
+    def find_spec(self, name, path=None, target=None):
+        if name in PARSERS and name not in installed:
+            raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+
+
+for name in PARSERS:
+    sys.modules.pop(name, None)
+    if name in installed:
+        sys.modules[name] = stand_in(name)
+sys.meta_path.insert(0, Missing())
+
+sys.argv[:] = ["-"]
+exec(compile(sys.stdin.buffer.read(), "<stdin>", "exec"), {"__name__": "__main__"})
+"""
+
+
+def _only_these_toml_parsers(
+    repo: Repository, root: Path, installed: tuple[str, ...]
+) -> Path:
+    """Make the tool-config step import only `installed` of tomllib, tomli and toml.
+
+    The step's `uv run ... python` goes to a copy of the shim that Repository puts
+    first on PATH, whose python runs TOML_PARSERS_BOOTSTRAP before the step's
+    program. Returns the file each parser appends its name to when it parses.
+    """
+    shim_dir = root / "toml-parsers"
+    shim_dir.mkdir()
+    bootstrap = shim_dir / "bootstrap.py"
+    bootstrap.write_text(TOML_PARSERS_BOOTSTRAP, encoding="utf-8")
+    log = shim_dir / "parsed-by.log"
+    log.write_text("", encoding="utf-8")
+    shim = shim_dir / "uv"
+    shim.write_text(
+        "#!/bin/sh\n"
+        'while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do shift; done\n'
+        '[ "$#" -gt 0 ] && shift\n'
+        '[ "$1" = "python" ] && shift\n'
+        f'exec "{sys.executable}" -I "{bootstrap}" "$@"\n',
+        encoding="utf-8",
+    )
+    shim.chmod(0o755)
+    repo.uv_env["PATH"] = os.pathsep.join([str(shim_dir), repo.uv_env["PATH"]])
+    repo.uv_env["TOML_PARSERS_INSTALLED"] = " ".join(installed)
+    repo.uv_env["TOML_PARSERS_LOG"] = str(log)
+    return log
+
+
+@pytest.mark.integration
+class TestATomlConfigIsReadWithTheFirstParserThatImports:
+    """The step reads a TOML config with tomllib, else tomli, else toml.
+
+    tomllib is standard library from Python 3.11, and the workflow's `python-version`
+    input accepts 3.10. There the environment `uv run --with` builds holds the
+    parsers the installed ASH requires: toml up to v3.7.1; from v3.8.0 tomli, below
+    3.11, with toml only in the development group, which `--with` does not install.
+    So a scan that installs v3.8.0 on 3.10 (by `ash-version`, or by calling the
+    workflow at that tag) has tomli and no toml, and one that installs v3.7.1 or
+    earlier has toml and no tomli.
+
+    Each case makes only the named parsers importable (TOML_PARSERS_BOOTSTRAP), so
+    the Python that runs the test does not matter. Before the step tried tomli,
+    "tomli only" failed with "No module named 'toml'" and "tomli and toml" read
+    with toml; the other cases are controls that pass before the fix.
+
+    With none of them importable the step refuses in its own words, on one `::error::`
+    line that names all three, not with the last import error.
+    """
+
+    def _repo(self, tmp_path):
+        return Repository(
+            tmp_path / "repo",
+            base_files={TOML_CONFIG_PATH: TOML_CONFIG, ".ash/bandit.yaml": BASE_BANDIT},
+        )
+
+    @pytest.mark.parametrize(
+        "installed,parsed_by",
+        [
+            pytest.param(("tomllib", "tomli", "toml"), "tomllib", id="all three"),
+            pytest.param(("tomli", "toml"), "tomli", id="tomli and toml"),
+            pytest.param(("tomli",), "tomli", id="tomli only"),
+            pytest.param(("toml",), "toml", id="toml only"),
+        ],
+    )
+    def test_the_config_is_read_with_the_first_parser_that_imports(
+        self, tmp_path, installed, parsed_by
+    ):
+        repo = self._repo(tmp_path)
+        log = _only_these_toml_parsers(repo, tmp_path, installed)
+        context = _pull_request(repo.base_sha, fork=False)
+        inputs = {**_required_inputs(context), "config": TOML_CONFIG_PATH}
+        run, steps = _run_config_ref_steps_or_fail(repo, context, inputs)
+        assert log.read_text(encoding="utf-8").split() == [parsed_by], run.describe()
+        written = Path(steps["config-ref-files"]["outputs"]["path"])
+        rewritten = yaml.safe_load(written.read_text(encoding="utf-8"))
+        assert rewritten["project_name"] == "toml-parsers", rewritten
+        tool_config = Path(rewritten["scanners"]["bandit"]["options"]["config_file"])
+        assert tool_config.read_text(encoding="utf-8") == BASE_BANDIT
+
+    def test_with_no_parser_importable_the_step_refuses_and_names_all_three(
+        self, tmp_path
+    ):
+        repo = self._repo(tmp_path)
+        _only_these_toml_parsers(repo, tmp_path, ())
+        context = _pull_request(repo.base_sha, fork=False)
+        inputs = {**_required_inputs(context), "config": TOML_CONFIG_PATH}
+        run, steps = _run_config_ref_step(repo, context, inputs)
+        assert steps.get("config-ref-files", {}).get("outcome") == "failure", steps
+        (refusal,) = [
+            line
+            for line in run.proc.stdout.splitlines()
+            if line.startswith("::error::")
+        ]
+        for parser in ("tomllib", "tomli", "toml"):
+            assert re.search(rf"\b{parser}\b", refusal), (parser, refusal)
+        assert run.proc.stderr == "", run.describe()
 
 
 @pytest.mark.unit
