@@ -83,12 +83,14 @@ from typing import (
     Sequence,
     Tuple,
     Union,
+    cast,
 )
 
 from automated_security_helper.config.ash_config import (
     ENV_REFERENCE_PATTERN,
     EXPLICIT_ENV_TAG,
     config_env_var_is_interpolatable,
+    list_made_of,
     reduced_plugin_name,
     resolve_env_references,
 )
@@ -153,6 +155,35 @@ class EnvironmentReference:
     length: Optional[int] = None
     #: Where in ``path`` the index of that list entry sits; set with ``length``.
     index_at: Optional[int] = None
+    #: For a relative path the load anchored at its file's directory: the text
+    #: the anchoring made of it, normalized (a ``..`` or ``./`` folded, so the
+    #: text holds neither ``resolved`` nor ``resolved`` after a path prefix) or
+    #: kept whole, and the directory it was anchored at, or ``<value>`` when
+    #: that directory's path came from the environment
+    #: (``ResolvedConfigDocument.environment_paths``), recorded at the anchoring
+    #: (``with_anchored_forms``). A view shows such a text as the directory and
+    #: the reference. None when the anchoring left the value as it was. Not
+    #: compared.
+    anchored: Optional[Tuple[str, str]] = dataclass_field(default=None, compare=False)
+    #: Set where a document of the chain merged after this reference's file
+    #: writes its place (config_sources._mark_written_over): the configuration
+    #: holds that document's value there, whatever it is, so no view, record or
+    #: session copy describes the place by this reference. It stays one of the
+    #: chain's reads, so redaction still masks its value. Not compared.
+    written_over: bool = dataclass_field(default=False, compare=False)
+    #: A display-only entry for a literal relative path that a file whose own
+    #: path came from the environment wrote, and the anchoring took from that
+    #: file's directory (``anchored_literals``). Nothing was read from the
+    #: environment at its place, so ``value`` is empty: ``written`` is the text a
+    #: view shows (the directory as ``<value>`` and the path as the file wrote
+    #: it), and ``resolved`` and ``anchored[0]`` are the anchored text. It is in
+    #: ``ResolvedConfigDocument.displayed_environment_references`` only, never
+    #: in ``environment_references``, so no session copy reads one as a
+    #: reference. A view shows the path by ``written`` (``_Index._string``), the
+    #: record writes it so (``config_validator.literal_rewrites``), the anchored
+    #: text is a redaction value, and a session copy refuses a profile that holds
+    #: it (``refuse_a_literal_path_held``).
+    literal: bool = False
 
     def moved_to_unknown_list(
         self, path: Tuple[PathSegment, ...]
@@ -468,6 +499,17 @@ def _exact_path(path: Iterable[PathSegment]) -> Tuple[PathSegment, ...]:
     )
 
 
+def _case_kept_path(path: Iterable[PathSegment]) -> Tuple[PathSegment, ...]:
+    """``path`` with ``-`` and ``_`` folded in its keys, the case kept, and its
+    list indices and unknown index as they are: the names the display walk
+    reads a reference into when a mapping holds two keys that differ only in
+    case (``_Index._references_at``), which ``_exact_path`` would run together."""
+    return tuple(
+        segment.replace("-", "_") if isinstance(segment, str) else segment
+        for segment in path
+    )
+
+
 def _bare(written: str) -> str:
     """The reference alone, ``${VAR}`` or ``${VAR:default}``, from ``written``
     (``_reference_match``); the text without its tag when it is none."""
@@ -503,17 +545,177 @@ def _anchored(text: str, reference: EnvironmentReference) -> bool:
     return prefix.endswith(("/", os.sep))
 
 
-def _recorded_string(text: str, candidates: Sequence[EnvironmentReference]) -> str:
+def holds_reference(text: str, reference: EnvironmentReference) -> bool:
+    """Whether ``text`` is the entry ``reference`` wrote: what it resolved to,
+    that after a path prefix the load put on it (``_anchored``), or the text the
+    anchoring made of it (``EnvironmentReference.anchored``)."""
+    return _anchored(text, reference) or (
+        reference.anchored is not None and text == reference.anchored[0]
+    )
+
+
+def with_anchored_forms(
+    references: Sequence[EnvironmentReference], document: Any, base_dir: str
+) -> List[EnvironmentReference]:
+    """``references``, one file's, each with the text the anchoring made of its
+    value recorded (``EnvironmentReference.anchored``) where ``document``, the
+    document after that file's relative paths were anchored at ``base_dir`` (its
+    own, or the one its patch made), holds a string at the reference's place
+    other than what the reference resolved to: the anchoring made a path of it,
+    normalized or kept whole behind the directory. Every other reference, keys
+    included, is returned as it is, so ``anchored`` stays None where the
+    anchoring left the value as it was."""
+    found: List[EnvironmentReference] = []
+    for reference in references:
+        node = _node_at(document, reference.path)
+        if reference.key or not isinstance(node, str) or node == reference.resolved:
+            found.append(reference)
+        else:
+            found.append(replace(reference, anchored=(str(node), base_dir)))
+    return found
+
+
+#: The scheme of a ``file://`` entry, which the anchoring puts the directory
+#: after (``operator_paths._anchored_file_entry``).
+_FILE_SCHEME = "file://"
+
+
+def _literal_shown(written: str, shown_dir: str) -> str:
+    """``written``, a relative path a file wrote, as a view shows it: after
+    ``shown_dir``, the directory the anchoring took it from, and for a
+    ``file://`` entry after the scheme."""
+    if written.startswith(_FILE_SCHEME):
+        return _FILE_SCHEME + os.path.join(shown_dir, "") + written[len(_FILE_SCHEME) :]
+    return os.path.join(shown_dir, "") + written
+
+
+def anchored_literals(
+    written: Any,
+    anchored: Any,
+    *,
+    skip: Collection[Tuple[PathSegment, ...]],
+    shown_dir: str,
+    resolved_as_written: bool = False,
+    path: Tuple[PathSegment, ...] = (),
+) -> List[EnvironmentReference]:
+    """A display-only entry (``EnvironmentReference.literal``) for each string of
+    ``written`` that ``anchored``, the same document after its relative paths were
+    anchored, holds as another string, and that is no place of ``skip`` (the
+    places the file read from the environment, whose references record their own
+    anchored text).
+
+    ``written`` is a file's document, or the value of one of its ``patch``
+    operations, as the file wrote it; ``anchored`` the same after the
+    anchoring. The entry is shown after ``shown_dir`` (``_literal_shown``), and
+    for a list entry it records the length of the innermost list and where its
+    index is, as ``environment_references`` does. With ``resolved_as_written``,
+    for a value of an operation, ``resolved`` is the text the operation wrote
+    and ``anchored`` is left to ``with_anchored_forms``, which records the anchored
+    text where the operation puts it (``config_sources._placed_through_patch``).
+    ``path`` is where ``written`` sits, for the recursion.
+    """
+    found: List[EnvironmentReference] = []
+    if isinstance(written, dict) and isinstance(anchored, dict):
+        for key, value in written.items():
+            if key in anchored:
+                found += anchored_literals(
+                    value,
+                    anchored[key],
+                    skip=skip,
+                    shown_dir=shown_dir,
+                    resolved_as_written=resolved_as_written,
+                    path=(*path, str(key)),
+                )
+    elif (
+        isinstance(written, list)
+        and isinstance(anchored, list)
+        and len(written) == len(anchored)
+    ):
+        for index, (item, anchored_item) in enumerate(zip(written, anchored)):
+            for entry in anchored_literals(
+                item,
+                anchored_item,
+                skip=skip,
+                shown_dir=shown_dir,
+                resolved_as_written=resolved_as_written,
+                path=(*path, index),
+            ):
+                # The innermost list the entry was written in gives its length.
+                if entry.length is None:
+                    entry = replace(entry, length=len(written), index_at=len(path))
+                found.append(entry)
+    elif (
+        isinstance(written, str)
+        and isinstance(anchored, str)
+        and written != anchored
+        and path not in skip
+    ):
+        found.append(
+            EnvironmentReference(
+                path=path,
+                written=_literal_shown(written, shown_dir),
+                resolved=written if resolved_as_written else anchored,
+                value="",
+                anchored=None if resolved_as_written else (anchored, shown_dir),
+                literal=True,
+            )
+        )
+    return found
+
+
+def _node_at(document: Any, path: Sequence[PathSegment]) -> Any:
+    """The value at ``path`` in ``document``, or None when the place is gone."""
+    node = document
+    for segment in path:
+        if not isinstance(node, (dict, list)):
+            return None
+        try:
+            node = cast(Any, node)[segment]
+        except (TypeError, KeyError, IndexError):
+            return None
+    return node
+
+
+def _a_respelling_of(
+    reference: EnvironmentReference,
+    text: str,
+    respelled: Optional[Callable[[Tuple[PathSegment, ...], Any, str], bool]],
+) -> bool:
+    """Whether ``text`` is what the configuration's own model makes of
+    ``reference``'s text at its place (``respelled``, built by
+    ``config_validator.respelled_from``): a field that respells what it reads.
+
+    Never for a display-only literal, a reference whose position is unknown, or
+    the text the anchoring made of a relative path, which no validator writes and
+    the anchored searches show."""
+    return (
+        respelled is not None
+        and not reference.literal
+        and not reference.position_unknown
+        and not (reference.anchored is not None and text == reference.anchored[0])
+        and respelled(tuple(reference.path), reference.resolved, text)
+    )
+
+
+def _recorded_string(
+    text: str,
+    candidates: Sequence[EnvironmentReference],
+    respelled: Optional[Callable[[Tuple[PathSegment, ...], Any, str], bool]] = None,
+) -> str:
     """``text`` as the file wrote it, where ``candidates`` are the references that
     apply at its position (``_Index.pending``).
 
-    A string equal to what a candidate resolved to is the reference; one that ends
-    with it has the reference in its place; any other string has the value of each
-    candidate replaced by it. A neighboring entry's reference is not a candidate,
-    since it does not write this entry.
+    A string equal to what a candidate resolved to is the reference, and so is one
+    the configuration's own model makes of a candidate's text (``respelled``); one
+    that ends with it has the reference in its place; any other string has the
+    value of each candidate replaced by it. A neighboring entry's reference is not
+    a candidate, since it does not write this entry.
     """
     for reference in candidates:
         if text == reference.resolved:
+            return reference.written
+    for reference in candidates:
+        if _a_respelling_of(reference, text, respelled):
             return reference.written
     for reference in candidates:
         if _ends_with_resolved(text, reference.resolved):
@@ -619,9 +821,13 @@ class EnvironmentValueInPath(RuntimeError):
     written for a session could not hold it as the reference.
 
     Raised by ``record_environment_references(..., whole_only=True)`` where a
-    string is a path the load anchored on the value (``_anchored``) and not the
-    value itself: written as it is, the copy would hold the value. The message
-    names the key path and the variable, never the value.
+    string is a path the load anchored on the value (``_anchored``), or the text
+    the anchoring made of one (a ``..`` or ``./`` folded out of it,
+    ``EnvironmentReference.anchored``), and not the value itself: written as it
+    is, the copy would hold the value. It is also raised where a list the field
+    made of one reference's text holds an entry a later step appended beside it,
+    which written as names would be the value. The message names the key path
+    and the variable, never the value.
     """
 
     def __init__(self, key_path: str, variable: str) -> None:
@@ -632,6 +838,28 @@ class EnvironmentValueInPath(RuntimeError):
         )
         self.key_path = key_path
         self.variable = variable
+
+
+class EnvironmentDirectoryInPath(EnvironmentValueInPath):
+    """A relative path a file whose own path the environment chose wrote itself
+    holds that file's directory, which is part of the value, so a copy written for
+    a session could not hold the path. The message names the key path, never the
+    directory.
+
+    Raised by ``refuse_a_literal_path_held``. It is an ``EnvironmentValueInPath``
+    with no variable of its own, so every caller that answers that refusal
+    answers this one the same way."""
+
+    def __init__(self, key_path: str) -> None:
+        RuntimeError.__init__(
+            self,
+            f"This profile can't be written to a session: at {key_path}, the "
+            "path is taken from the directory of a config file whose own path "
+            "was read from the environment, and that directory is part of the "
+            "value. Write the path as an absolute path in that file.",
+        )
+        self.key_path = key_path
+        self.variable = ""
 
 
 def _renamed_keys(
@@ -666,16 +894,28 @@ class _Index:
         mark: Optional[Callable[[str], Any]] = None,
         whole_only: bool = False,
         exact_indices: bool = False,
+        list_as_reference: bool = False,
+        respelled: Optional[Callable[[Tuple[PathSegment, ...], Any, str], bool]] = None,
     ) -> None:
         self.values: Dict[Tuple[PathSegment, ...], List[EnvironmentReference]] = {}
         self.keys: Dict[Tuple[PathSegment, ...], List[EnvironmentReference]] = {}
         self.mark = mark
         self.whole_only = whole_only
         self.exact_indices = exact_indices
+        self.list_as_reference = list_as_reference
+        #: Whether a string is what the configuration's own model makes of a
+        #: reference's text at its place (``config_validator.respelled_from``),
+        #: for a field that respells what it reads; None where the walk is not
+        #: given the configuration.
+        self.respelled = respelled
         #: The data's strings by exact position, and its lists' lengths (``scan``).
         self.strings: Dict[Tuple[PathSegment, ...], str] = {}
         self.lengths: Dict[Tuple[PathSegment, ...], int] = {}
         for reference in references:
+            if whole_only and reference.written_over:
+                # A session copy writes what the configuration holds: a later
+                # document's value is written as that document wrote it.
+                continue
             target = self.keys if reference.key else self.values
             target.setdefault(_normal_path(reference.path, exact_indices), []).append(
                 reference
@@ -699,16 +939,16 @@ class _Index:
         """Whether the entry the file wrote ``reference`` at no longer holds it.
 
         True when the list is not the length the file wrote (defaults put before
-        the entry, a patch) and the entry at the same index is neither the value
-        nor a path the load anchored on it (``_anchored``). A list of the same
-        length whose entry changed is an entry the load or an override changed,
-        not one that moved.
+        the entry, a patch) and the entry at the same index is neither the value,
+        nor a path the load anchored on it, nor the text the anchoring made of it
+        (``holds_reference``). A list of the same length whose entry changed is
+        an entry the load or an override changed, not one that moved.
         """
         if reference.length is None or reference.index_at is None:
             return False
         exact = _exact_path(reference.path)
         text = self.strings.get(exact)
-        if text is not None and _anchored(text, reference):
+        if text is not None and holds_reference(text, reference):
             return False
         return self.lengths.get(exact[: reference.index_at]) != reference.length
 
@@ -728,8 +968,9 @@ class _Index:
         from. Only when the entry at a reference's own index no longer carries its
         value (the list was lengthened or patched) is the reference read at the
         other indices, and then only into a string of the shape the load gives
-        its entry (``_anchored``): another entry that merely contains the text
-        is not that entry.
+        its entry (``holds_reference``: what it resolved to, that after a path
+        prefix, or the text the anchoring made of it): another entry that merely
+        contains the text is not that entry.
 
         A reference whose list index says nothing about where its entry is
         (``EnvironmentReference.position_unknown``: the append of a ``patch``
@@ -742,49 +983,223 @@ class _Index:
             r
             for r in references
             if (
-                _anchored(text, r)
+                holds_reference(text, r)
                 if r.position_unknown or self._moved(r)
                 else _exact_path(r.path) == exact
             )
         ]
+
+    def _references_at(
+        self,
+        table: Dict[Tuple[PathSegment, ...], List[EnvironmentReference]],
+        path: Tuple[PathSegment, ...],
+        pinned: Tuple[Tuple[int, str], ...],
+    ) -> Sequence[EnvironmentReference]:
+        """The references of ``table`` at ``path``, narrowed by ``pinned``: the
+        (depth, key) pairs of the mappings the walk went through that hold two
+        keys with one normal form (``AWS_Region`` and ``aws_region``). A
+        reference is read into one of those keys' values only when its own path
+        names that key, ``-`` and ``_`` folded and the case kept; with no such
+        pair the lookup is the case-insensitive one."""
+        found = table.get(path, ())
+        if not pinned or not found:
+            return found
+
+        def names(reference: EnvironmentReference, depth: int, key: str) -> bool:
+            segment = reference.path[depth] if len(reference.path) > depth else None
+            return isinstance(segment, str) and segment.replace("-", "_") == key
+
+        return [
+            reference
+            for reference in found
+            if all(names(reference, depth, key) for depth, key in pinned)
+        ]
+
+    def _list_made_from(
+        self,
+        item: Any,
+        path: Tuple[PathSegment, ...],
+        exact: Tuple[PathSegment, ...],
+        pinned: Tuple[Tuple[int, str], ...],
+    ) -> Optional[Tuple[EnvironmentReference, int]]:
+        """The reference a file wrote at the place of a list itself, which resolved
+        to one string, and how many of the list's first entries the field made of
+        that string (``ash_config.list_made_of``). None in an unmarked record, for
+        a list the file wrote as a list (its references sit at its entries), and
+        for a list that does not start with those entries (a later file's list, a
+        replacing override's), which is walked as written. A copy written to be
+        loaded again (``whole_only``) finds it too: it writes the reference
+        itself, which loads back as the list."""
+        if self.mark is None:
+            return None
+        entries = list(item)
+        for reference in self._references_at(self.values, path, pinned):
+            if (
+                reference.key
+                or reference.literal
+                or not isinstance(reference.resolved, str)
+            ):
+                continue
+            if _exact_path(reference.path) != exact:
+                continue
+            count = list_made_of(reference.resolved, entries)
+            if count:
+                return reference, count
+        return None
 
     def record(
         self,
         item: Any,
         path: Tuple[PathSegment, ...],
         exact: Optional[Tuple[PathSegment, ...]] = None,
+        pinned: Tuple[Tuple[int, str], ...] = (),
     ) -> Any:
         exact = path if exact is None else exact
         if isinstance(item, dict):
-            renamed = _renamed_keys(item, self.keys.get(path, ()))
+            renamed = _renamed_keys(item, self._references_at(self.keys, path, pinned))
+            normals: Dict[Any, int] = {}
+            for key in item:
+                normal = _normal(key if isinstance(key, str) else str(key))
+                normals[normal] = normals.get(normal, 0) + 1
             result: Dict[Any, Any] = {}
             for key, value in item.items():
                 spelled = key if isinstance(key, str) else str(key)
+                below = pinned
+                if normals[_normal(spelled)] > 1:
+                    below = (*pinned, (len(path), spelled.replace("-", "_")))
                 recorded = self.record(
-                    value, (*path, _normal(spelled)), (*exact, _normal(spelled))
+                    value,
+                    (*path, _normal(spelled)),
+                    (*exact, _normal(spelled)),
+                    below,
                 )
                 if key in renamed:
                     key = self._whole(renamed[key])
+                else:
+                    key = self._unreplaced(key)
                 result[key] = recorded
             return result
         if isinstance(item, (list, tuple)):
+            made = self._list_made_from(item, path, exact, pinned)
+            if made is not None:
+                whole, count = made
+                if self.whole_only:
+                    if count < len(item):
+                        # A copy cannot hold entries a later step appended
+                        # beside the reference: written as names, they would
+                        # be the value.
+                        raise EnvironmentValueInPath(
+                            self._key_path(exact),
+                            referenced_name(whole.written) or "?",
+                        )
+                    # The reference itself, which loads back as the list.
+                    return self._whole(whole)
+                if self.list_as_reference:
+                    # Written to be loaded again (`ash config get`): the
+                    # reference once, which loads back as the entries it made,
+                    # with each entry a later step appended after it.
+                    tail = "".join(f",{entry}" for entry in list(item)[count:])
+                    return self._whole(replace(whole, written=whole.written + tail))
+                # A view of a list the load made of one reference's text
+                # (``output_formats`` splits "sarif,html" into names): each entry
+                # the text made is part of the value and is shown as the
+                # reference, and no such entry is shown in clear. An entry a
+                # later step appended (an appending ``--config-overrides``) is
+                # walked as any entry is.
+                return type(item)(
+                    [self._whole(whole) for _ in range(count)]
+                    + [
+                        self.record(
+                            value,
+                            (*path, index if self.exact_indices else _ANY_INDEX),
+                            (*exact, index),
+                            pinned,
+                        )
+                        for index, value in enumerate(item)
+                        if index >= count
+                    ]
+                )
             return type(item)(
                 self.record(
                     value,
                     (*path, index if self.exact_indices else _ANY_INDEX),
                     (*exact, index),
+                    pinned,
                 )
                 for index, value in enumerate(item)
             )
+        if isinstance(item, (set, frozenset)):
+            # A set has no positions: each member is read as an entry whose
+            # position is unknown (``EnvironmentReference.position_unknown``),
+            # by the shape the reference resolved to, and the set keeps its type.
+            return type(item)(
+                self._member(value, path, exact, pinned) for value in item
+            )
         if isinstance(item, str):
-            here = self.values.get(path)
-            if here:
-                # A whole string is read against the same references as a longer
-                # one: a plain entry equal to the value, beside the reference's
-                # own entry, is the file's own text and stays as written.
-                candidates = self.pending(exact, here, item)
-                return self._string(item, candidates, exact)
+            return self._read_string(item, path, exact, pinned)
         return item
+
+    def _read_string(
+        self,
+        text: Any,
+        path: Tuple[PathSegment, ...],
+        exact: Tuple[PathSegment, ...],
+        pinned: Tuple[Tuple[int, str], ...],
+    ) -> Any:
+        """The string ``text`` at ``path``, read against the references there.
+
+        A whole string is read against the same references as a longer one: a
+        plain entry equal to the value, beside the reference's own entry, is the
+        file's own text and stays as written. With ``mark`` (a view, not
+        ``whole_only``) a string that carries the loader's mark and that no
+        candidate resolved to as a whole is shown as the reference its own mark
+        carries, with no part replaced: a part replacement makes a plain string
+        of it, and the rest of the value it read would be shown."""
+        here = self._references_at(self.values, path, pinned)
+        if not here:
+            return self._unreplaced(text)
+        candidates = self.pending(exact, list(here), text)
+        if (
+            self.mark is not None
+            and not self.whole_only
+            and getattr(text, "from_environment", False)
+            and not any(text == reference.resolved for reference in candidates)
+        ):
+            return self.mark(text.shown)
+        return self._unreplaced(self._string(text, candidates, exact))
+
+    def _member(
+        self,
+        member: Any,
+        path: Tuple[PathSegment, ...],
+        exact: Tuple[PathSegment, ...],
+        pinned: Tuple[Tuple[int, str], ...] = (),
+    ) -> Any:
+        """One member of a set at ``path``: read against the references at an
+        unknown position there (the entry's own shape), and shown as the
+        reference its mark carries when none replaced it."""
+        if not isinstance(member, str):
+            return member
+        return self._read_string(
+            member, (*path, _ANY_INDEX), (*exact, _ANY_INDEX), pinned
+        )
+
+    def _unreplaced(self, text: Any) -> Any:
+        """``text``, a string or a mapping key the walk left as it was, shown as
+        the reference its own mark carries when it still carries the loader's
+        mark (``EnvResolvedScalar.from_environment``): a value read from the
+        environment that no reference replaced, whole or in part, is never shown.
+        Only for a view (``mark`` given); text without the mark, and text the
+        walk replaced (a plain string by then), is returned as it is. Not for a
+        file written to be loaded again (``whole_only``), whose writer refuses a
+        value left as text by its own check."""
+        if (
+            self.mark is not None
+            and not self.whole_only
+            and getattr(text, "from_environment", False)
+        ):
+            return self.mark(text.shown)
+        return text
 
     def fill(
         self,
@@ -844,19 +1259,48 @@ class _Index:
         exact: Tuple[PathSegment, ...] = (),
     ) -> Any:
         if self.mark is None:
-            return _recorded_string(text, candidates)
+            return _recorded_string(text, candidates, self.respelled)
+        for reference in candidates:
+            if (
+                reference.literal
+                and reference.anchored is not None
+                and text == reference.anchored[0]
+            ):
+                # A literal relative path of a file whose own path the
+                # environment chose: nothing was read at its place, so it is
+                # shown as the file wrote it after the shown directory, and
+                # not as a reference.
+                return reference.written
+        # A literal entry names no value, and an empty value is part of every
+        # string, so the searches below never read one.
+        candidates = [reference for reference in candidates if not reference.literal]
         for reference in candidates:
             if text == reference.resolved:
                 return self._whole(reference)
+        for reference in candidates:
+            if _a_respelling_of(reference, text, self.respelled):
+                # What the configuration's own model makes of the reference's
+                # text is the reference, as an exact match is. Before the
+                # whole-only branch: a session copy writes the reference, and
+                # never the respelled text.
+                return self._whole(reference)
         if self.whole_only:
             for reference in candidates:
-                if _anchored(text, reference):
+                if holds_reference(text, reference):
                     # Written as the text, the copy would hold the value.
                     raise EnvironmentValueInPath(
                         self._key_path(exact),
                         referenced_name(reference.written) or "?",
                     )
             return text
+        for reference in candidates:
+            if reference.anchored is not None and text == reference.anchored[0]:
+                # A relative path the load anchored, normalized or kept whole, is
+                # shown as its file's directory and the reference. The text the
+                # anchoring made of it need not hold the value's text (a folded
+                # ``..``, a path separator a platform rewrote), so it is matched
+                # as a whole and not searched for the value.
+                return os.path.join(reference.anchored[1], "") + self._whole(reference)
         for reference in candidates:
             if reference.value in text:
                 # The value's part alone takes the reference alone, as the
@@ -877,6 +1321,8 @@ def record_environment_references(
     whole_only: bool = False,
     *,
     exact_indices: bool = False,
+    list_as_reference: bool = False,
+    respelled: Optional[Callable[[Tuple[PathSegment, ...], Any, str], bool]] = None,
 ) -> Any:
     """``data``, a dump of a configuration, with what ``references`` read written
     as the file wrote it; see "Where".
@@ -891,14 +1337,189 @@ def record_environment_references(
     and at no other entry of that list, for a view of a configuration as its
     files hold it (the MCP get_config tool): an entry beside it with the same
     text is shown as it is. Without it, a reference matches every entry of its
-    list, so it follows an entry a patch moves. A copy: ``data`` itself is not
-    changed.
+    list, so it follows an entry a patch moves. ``list_as_reference``, for a view
+    written to be loaded again (``ash config get``): a list the load made of one
+    reference's text is written as that reference once, with each entry a later
+    step appended after it, so the text loads back as the list. ``respelled``, a
+    test ``config_validator.respelled_from`` builds for the configuration the data
+    was dumped from, also describes by its reference a place whose text that
+    configuration's model makes of the reference's text (a field that respells
+    what it reads, as unused-suppressions' ``output_format`` lowercases it), as on
+    an exact match. A copy: ``data`` itself is not changed.
+
+    A set or frozenset is walked too, and keeps its type: a set has no
+    positions, so each member is an entry whose position is unknown and is read
+    against the references at the set's place by the shape they resolved to.
+    A file's own record holds no reference for a set member (the loader pairs
+    mappings and lists only); ``references_to_marked_values`` makes one for each
+    member the loader marked, under the built-in reporters' destination options
+    and, with ``sets_only``, in the whole dump of a configuration, which
+    ``resolve_config.load_config_file_for_run`` walks at the end of every load.
+
+    With ``mark`` (a view; not ``whole_only``), a string, a mapping key or a set member that still
+    carries the loader's mark after the walk (``EnvResolvedScalar``: no
+    reference replaced it, whole or in part) is shown as ``mark(x.shown)``, the
+    reference its own mark carries: a value no reference describes is never
+    shown in clear. It changes nothing where a reference replaced the value, and
+    nothing in text the loader did not mark.
     """
-    if not references:
+    if not references and mark is None:
         return data
-    index = _Index(references, mark, whole_only, exact_indices)
+    index = _Index(
+        references,
+        mark,
+        whole_only,
+        exact_indices,
+        list_as_reference,
+        respelled=respelled,
+    )
     index.scan(data, _exact_path(at))
     return index.record(data, _normal_path(at, exact_indices), _exact_path(at))
+
+
+def refuse_a_literal_path_held(
+    data: Any,
+    literals: Sequence[EnvironmentReference],
+    references: Sequence[EnvironmentReference] = (),
+) -> None:
+    """Raise EnvironmentDirectoryInPath where ``data``, a dump written to be
+    loaded again, holds the text the anchoring made of one of ``literals``
+    (``EnvironmentReference.literal``), wherever it sits: a patch can move an
+    entry, and a value a client wrote over the place is not that text.
+
+    ``references`` name the keys read from the environment, which the key path
+    shows as ``<key>`` (``_Index._key_path``). Entries of ``literals`` that are
+    not literals are left out. A string, a path, and the members of a mapping, a
+    list, a tuple or a set are looked at; a mapping's keys are not."""
+    texts = {
+        literal.anchored[0] if literal.anchored is not None else literal.resolved
+        for literal in literals
+        if literal.literal
+    }
+    texts.discard("")
+    if not texts:
+        return
+    index = _Index(references)
+
+    def walk(node: Any, place: Tuple[PathSegment, ...]) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                spelled = key if isinstance(key, str) else str(key)
+                walk(value, (*place, _normal(spelled)))
+        elif isinstance(node, (list, tuple)):
+            for position, value in enumerate(node):
+                walk(value, (*place, position))
+        elif isinstance(node, (set, frozenset)):
+            for member in node:
+                walk(member, (*place, _ANY_INDEX))
+        else:
+            text = os.fspath(node) if isinstance(node, os.PathLike) else node
+            if isinstance(text, str) and text in texts:
+                raise EnvironmentDirectoryInPath(index._key_path(place))
+
+    walk(data, ())
+
+
+def _marked(text: Any) -> bool:
+    """Whether ``text`` is a string the loader read from the environment."""
+    return isinstance(text, str) and bool(getattr(text, "from_environment", False))
+
+
+def references_to_marked_values(
+    data: Any,
+    at: Sequence[PathSegment],
+    described: Iterable[EnvironmentReference] = (),
+    *,
+    sets_only: bool = False,
+) -> List[EnvironmentReference]:
+    """A reference for each string and mapping key of ``data`` that carries the
+    loader's mark (``EnvResolvedScalar.from_environment``) and that none of
+    ``described`` already describes at its exact place.
+
+    ``data`` is the value of the option at ``at`` (a path of keys) in a python-mode
+    dump of a configuration, which holds the loader's marked strings as they
+    are. A load that copies a value from one place of the configuration to
+    another (the reporter confinement and the settle) copies the mark with it,
+    while the reference the file wrote stays at the place it wrote it: the copy
+    is described from the value's own mark instead. Mapping keys and values, list
+    and tuple entries, and set and frozenset members are walked.
+
+    With ``sets_only``, only the set and frozenset members are described, and
+    the walk goes through every mapping, list and tuple to reach them: for the
+    whole dump of a configuration (``at`` empty). The loader's own record pairs
+    mappings and lists only (``environment_references``), so a set member any
+    file read has no reference of its own, whichever option holds it.
+    ``resolve_config.load_config_file_for_run`` makes this walk, through
+    ``resolve_config._take_destination_references``, at the end of every load,
+    and the confinement steps make it again after they have run: a member the
+    first walk described is one of ``described`` the second time, at the same
+    place (the unknown index ends its path, and a set member has no other), so
+    the second walk makes no reference for it.
+
+    Each reference is shaped as ``environment_references`` shapes the one the
+    loader makes for the same text at that place: ``written`` is the text the
+    mark shows (``${VAR}`` or ``${VAR}tail``), ``resolved`` the string, ``value``
+    the part the variable gave, ``key`` for a mapping key (its path is the
+    mapping's), and for a list entry the ``length`` and ``index_at`` of the
+    innermost list. A set member has no position: its path ends in the unknown
+    index, so a walk reads the reference into the member by its shape at any
+    position (``EnvironmentReference.position_unknown``).
+
+    ``described`` are the references already at hand. A marked value or key is
+    described when one of them is at its place and resolved to it as a whole:
+    the place is compared with ``-`` and ``_`` folded in its keys and the case
+    kept (``_case_kept_path``), a list index kept, so two keys that differ only
+    in case are two places, as the display walk reads them. A string that a
+    reference describes only in part is not described. The marks never leave
+    this module in clear: a reference holds ``value``, as every one does, and
+    is held in memory only.
+    """
+    from automated_security_helper.config.config_validator import _rewrite_for
+
+    known = {
+        (_case_kept_path(reference.path), reference.key, reference.resolved)
+        for reference in described
+    }
+    found: List[EnvironmentReference] = []
+
+    def make(
+        path: Tuple[PathSegment, ...],
+        text: Any,
+        key: bool,
+        innermost: Optional[Tuple[int, int]],
+    ) -> None:
+        resolved = str(text)
+        if (_case_kept_path(path), key, resolved) in known:
+            return
+        written = str(text.shown)
+        part = _rewrite_for("key" if key else "value", path, written, resolved)
+        length, index_at = (None, None) if innermost is None or key else innermost
+        reference = EnvironmentReference(
+            path, written, resolved, part.environment_part, key, None, length, index_at
+        )
+        known.add((_case_kept_path(path), key, resolved))
+        found.append(reference)
+
+    def walk(
+        node: Any, path: Tuple[PathSegment, ...], innermost: Optional[Tuple[int, int]]
+    ) -> None:
+        if isinstance(node, dict):
+            for name, value in node.items():
+                if _marked(name) and not sets_only:
+                    make(path, name, True, innermost)
+                walk(value, (*path, str(name)), innermost)
+        elif isinstance(node, (list, tuple)):
+            for index, value in enumerate(node):
+                walk(value, (*path, index), (len(node), len(path)))
+        elif isinstance(node, (set, frozenset)):
+            for member in node:
+                if _marked(member):
+                    make((*path, _ANY_INDEX), member, False, None)
+        elif _marked(node) and not sets_only:
+            make(path, node, False, innermost)
+
+    walk(data, tuple(at), None)
+    return found
 
 
 def setting_names(

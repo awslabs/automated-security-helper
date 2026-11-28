@@ -1557,6 +1557,9 @@ class TestEveryReaderFiltersExpiredEntries:
             ),
             "handle_suppression_expiration_check",
         ),
+        # Builds the written-form record of the config's full lists, which the
+        # lines look matched entries up in by id; it applies no entry.
+        ("utils/sarif_utils.py", "_written_entry_records"),
     }
 
     @staticmethod

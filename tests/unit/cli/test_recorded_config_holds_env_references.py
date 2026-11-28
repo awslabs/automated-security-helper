@@ -21,12 +21,18 @@ it (exit 3, naming the field and the reference) unless the operator supplies it.
 Also covered: a reference whose variable is unset records the default the file
 wrote, or null; an environment value equal to another field's value leaves that
 field alone; a relative path the load anchored has only its environment part
-replaced; a ``patch`` value, a base's value and a TOML value are recorded as
-written; and the other writers of a resolved config (MCP ``get_config``,
-``ash config get``, and the profile file the MCP server writes for a session)
-hold the reference, while the config they load back still reads the value; and
-``ash config update`` refuses a file with references rather than rewrite each
-with its value.
+replaced, and one it folded a ``..`` or ``./`` out of is recorded as its
+directory and the reference, the directory being ``<value>`` where the file's
+own path came from a variable; a list the load made of one reference's text is
+recorded as that reference, and so is a value its field's own validation respells
+(a reporter's ``output_format``, lowercased), whatever spelling the variable
+holds; a ``patch`` value, a base's value and a TOML value
+are recorded as written; and the other writers of a resolved config (MCP
+``get_config``, ``ash config get``, and the profile file the MCP server writes
+for a session) hold the reference, while the config they load back still reads
+the value, except that a session copy refuses a profile whose relative path the
+load folded, or that a base a variable chose writes itself; and ``ash config
+update`` refuses a file with references rather than rewrite each with its value.
 
 The positive controls: the scan's in-run report, rendered from the live
 config, holds the canary, so the scan did read the values; and each recorded
@@ -918,3 +924,1033 @@ def test_a_bedrock_model_read_from_the_environment_is_logged_as_its_reference(
     client = reporter._make_model_client(object())
     assert client._model_id == CANARY
     assert client._model_label == "${ASH_PROBE_CANARY}"
+
+
+# ---------------------------------------------------------------------------
+# A set member a file read from the environment
+# ---------------------------------------------------------------------------
+
+# The loader's own pairing walks mappings and lists, so a set member a file read
+# from the environment has no reference, no rewrite and no redaction value of its
+# own. Every load a run makes (load_config_file_for_run) describes it, so each
+# writer that starts from such a configuration holds the reference and never the
+# value. These cells guard:
+#   - the load cell: the configuration's values hold the value, and the record of
+#     its JSON-mode dump, the form every writer starts from, holds the reference
+#     as a list of one entry and not the value.
+#   - the session cell: a registered profile's copy, written by
+#     materialize_session_config, holds the reference and not the value.
+#   - the client's copy cell: the profile is the base a client's patch applies
+#     to, and the copy written after an op elsewhere holds the reference too.
+SET_MEMBER = "operator-set-member-read-from-the-environment"
+SET_REFERENCE = "${ASH_TEST_SET_MEMBER}"
+SET_PROFILE = (
+    "project_name: set-profile\n"
+    "global_settings:\n"
+    "  mcp:\n"
+    "    runtime_overrides:\n"
+    "      enabled: true\n"
+    "      allowed_paths:\n"
+    "        - /project_name\n"
+    "      denied_paths: []\n"
+    "reporters:\n"
+    "  aws-security-hub:\n"
+    "    options:\n"
+    "      custom_labels: !!set\n"
+    "        ? ${ASH_TEST_SET_MEMBER}\n"
+)
+
+
+def _a_profile_with_a_set(tmp_path: Path, probe_env) -> Path:
+    probe_env.setenv("ASH_TEST_SET_MEMBER", SET_MEMBER)
+    probe_env.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "mcp-workspaces"))
+    probe_env.setenv("ASH_MCP_TRANSPORT", "stdio")
+    return _operator_config(tmp_path, SET_PROFILE, "set.ash.yaml")
+
+
+def _security_hub_options(document: dict) -> dict:
+    return document["reporters"]["aws-security-hub"]["options"]
+
+
+def test_a_set_member_a_load_read_is_recorded_as_its_reference(tmp_path, probe_env):
+    """The load of a file that writes ``custom_labels`` as a set with one member
+    read from a variable: the configuration's values hold the value, so every
+    message of a run redacts it, and the record of its JSON-mode dump holds the
+    reference. The dump is read first (the control): it holds the value, so only
+    a rewrite the load made puts the reference in its place."""
+    from automated_security_helper.config.config_validator import record_of_config
+    from automated_security_helper.config.config_writer import user_config_data
+    from automated_security_helper.config.resolve_config import (
+        load_config_file_for_run,
+    )
+
+    profile = _a_profile_with_a_set(tmp_path, probe_env)
+
+    _document, config = load_config_file_for_run(profile)
+
+    assert SET_MEMBER in config._environment_values, config._environment_values
+    dumped = user_config_data(config)
+    assert _security_hub_options(dumped)["custom_labels"] == [SET_MEMBER]
+    recorded = record_of_config(config, dumped)
+    assert _security_hub_options(recorded)["custom_labels"] == [SET_REFERENCE]
+    assert SET_MEMBER not in json.dumps(recorded)
+
+
+def test_a_registered_profiles_set_member_is_written_to_the_session_copy_by_its_reference(
+    tmp_path, probe_env
+):
+    """The copy the MCP server writes into a session's sandbox for a registered
+    profile whose file reads a set member from the environment holds the
+    reference, and the text holds the value nowhere."""
+    from automated_security_helper.cli.mcp import profile_registry
+
+    profile = _a_profile_with_a_set(tmp_path, probe_env)
+    registry = profile_registry.register_profiles([f"sets={profile}"])
+
+    written = Path(
+        profile_registry.materialize_session_config(
+            "session-set", registry["sets"].config
+        )
+    )
+
+    text = written.read_text(encoding="utf-8")
+    assert SET_MEMBER not in text, text
+    assert SET_REFERENCE in text, text
+
+
+def test_a_patched_copy_of_a_profile_with_a_set_member_holds_its_reference(
+    tmp_path, probe_env
+):
+    """The base a client's patch applies to is loaded as a run loads a file. An
+    op elsewhere (the project's name) leaves the set alone, and the client's copy
+    written from the patched configuration holds the reference, not the value."""
+    from automated_security_helper.cli.mcp import profile_registry
+    from automated_security_helper.config.runtime_patch import apply_runtime_patch
+
+    profile = _a_profile_with_a_set(tmp_path, probe_env)
+    base = profile_registry.register_profiles([f"sets={profile}"])["sets"].config
+
+    patched = apply_runtime_patch(
+        base,
+        [{"op": "replace", "path": "/project_name", "value": "patched"}],
+        allowlist=base.global_settings.mcp.runtime_overrides,
+    )
+    written = Path(
+        profile_registry.materialize_session_config(
+            "session-set", patched, client_patched=True
+        )
+    )
+
+    text = written.read_text(encoding="utf-8")
+    assert patched.project_name == "patched"
+    assert SET_MEMBER not in text, text
+    assert SET_REFERENCE in text, text
+
+
+# ---------------------------------------------------------------------------
+# A later document of the chain writes a place a base read from the environment
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "held",
+    [
+        pytest.param("prod-7c1e", id="inside"),
+        pytest.param("other-7c1e", id="control"),
+    ],
+)
+def test_a_bases_reference_under_a_later_files_literal_is_not_recorded(
+    tmp_path, probe_env, held
+):
+    """A base reads ``project_name`` from a variable and the file extending it
+    writes ``acme-prod-7c1e``. The scan runs with the later file's text, so its
+    record holds that text and no reference of the base: whatever the variable
+    holds (``inside``: its value is part of the later text; ``control``: it is
+    not), the record is the same."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    probe_env.setenv("ASH_PROBE_PN", held)
+    _operator_config(tmp_path, "project_name: ${ASH_PROBE_PN}\n", "base.yaml")
+    path = _operator_config(
+        tmp_path, "extends: base.yaml\nproject_name: acme-prod-7c1e\n"
+    )
+
+    config = resolve_config(config_path=path, source_dir=tmp_path / "tree")
+
+    # The control: the scan holds the later file's text.
+    assert config.project_name == "acme-prod-7c1e"
+    assert _recorded(config)["project_name"] == "acme-prod-7c1e"
+
+
+@pytest.mark.parametrize(
+    "held",
+    [
+        pytest.param("prod", id="inside"),
+        pytest.param("team-prod", id="equal"),
+        pytest.param("other-4e1a", id="control"),
+    ],
+)
+@pytest.mark.parametrize(
+    "section, base_key, later_key, option",
+    [
+        pytest.param("scanners", "my-scanner", "MyScanner", "ruleset", id="scanner"),
+        pytest.param("reporters", "s3", "S3Reporter", "bucket_name", id="reporter"),
+    ],
+)
+def test_a_bases_reference_under_a_respelled_plugin_section_is_not_recorded(
+    tmp_path, probe_env, section, base_key, later_key, option, held
+):
+    """A base reads a plugin section's option from a variable, and the file
+    extending it writes ``team-prod`` under another spelling of the same
+    undeclared section (``my-scanner`` and ``MyScanner``, ``s3`` and
+    ``S3Reporter``), which the merge joins under the later file's spelling. The
+    scan runs with the later file's text, so the record and the payload hold it
+    as written and no reference of the base, whatever the variable holds
+    (``inside``: its value is part of the later text; ``equal``: it is that text;
+    ``control``: it is neither)."""
+    from automated_security_helper.config.resolve_config import resolve_config
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+    probe_env.setenv("ASH_PROBE_RULE", held)
+    _operator_config(
+        tmp_path,
+        f"{section}:\n  {base_key}:\n    options:\n"
+        f"      {option}: ${{ASH_PROBE_RULE}}\n",
+        "base.yaml",
+    )
+    path = _operator_config(
+        tmp_path,
+        f"extends: base.yaml\n{section}:\n  {later_key}:\n    options:\n"
+        f"      {option}: team-prod\n",
+    )
+
+    config = resolve_config(config_path=path, source_dir=tmp_path / "tree")
+
+    recorded = _recorded(config)
+    payload = AshAggregatedResults(ash_config=config).to_simple_dict()["ash_config"]
+    for dump in (recorded, payload):
+        assert dump[section][later_key]["options"][option] == "team-prod", dump
+        assert "${ASH_PROBE_RULE}" not in json.dumps(dump, default=str), dump
+
+
+@pytest.mark.parametrize(
+    "held",
+    [
+        pytest.param("prod-7c1e", id="inside"),
+        pytest.param("other-7c1e", id="control"),
+    ],
+)
+def test_a_replacing_override_of_a_value_read_from_the_environment_is_recorded_as_the_override(
+    tmp_path, probe_env, held
+):
+    """A replacing ``--config-overrides`` sets ``project_name`` over a file that
+    reads it from a variable. The scan runs with the override's text, so the
+    record holds it and no reference of the file, whatever the variable holds."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    probe_env.setenv("ASH_PROBE_PN", held)
+    path = _operator_config(tmp_path, "project_name: ${ASH_PROBE_PN}\n")
+
+    config = resolve_config(
+        config_path=path,
+        source_dir=tmp_path / "tree",
+        config_overrides=["project_name=acme-prod-7c1e"],
+    )
+
+    # The control: the scan holds the override's text.
+    assert config.project_name == "acme-prod-7c1e"
+    assert _recorded(config)["project_name"] == "acme-prod-7c1e"
+
+
+@pytest.mark.parametrize(
+    "held",
+    [
+        pytest.param("acme-prod-7c1e", id="equal"),
+        pytest.param("other-7c1e", id="control"),
+    ],
+)
+def test_a_profiles_literal_over_its_bases_reference_is_written_to_a_session_as_the_literal(
+    tmp_path, probe_env, held
+):
+    """A registered profile extends a base that reads ``project_name`` from a
+    variable and writes ``acme-prod-7c1e`` itself. The session copy writes that
+    text as the profile wrote it, and not as the base's reference, even where the
+    variable holds that very text (``equal``)."""
+    from automated_security_helper.cli.mcp import profile_registry
+
+    probe_env.setenv("ASH_PROBE_PN", held)
+    probe_env.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "mcp-workspaces"))
+    probe_env.setenv("ASH_MCP_TRANSPORT", "stdio")
+    _operator_config(tmp_path, "project_name: ${ASH_PROBE_PN}\n", "base.yaml")
+    profile = _operator_config(
+        tmp_path,
+        "extends: base.yaml\nproject_name: acme-prod-7c1e\n",
+        "profile.ash.yaml",
+    )
+    registry = profile_registry.register_profiles([f"probe={profile}"])
+
+    written = Path(
+        profile_registry.materialize_session_config(
+            "session-literal", registry["probe"].config, client_patched=False
+        )
+    )
+
+    text = written.read_text(encoding="utf-8")
+    assert _as_written(text)["project_name"] == "acme-prod-7c1e", text
+
+
+# ---------------------------------------------------------------------------
+# What the load reshaped: a relative path it folded a ".." or "./" out of, and a
+# list it made of one string
+# ---------------------------------------------------------------------------
+
+RELATIVE_CONFIG = (
+    "scanners:\n  bandit:\n    options:\n      config_file: ${ASH_PROBE_RELATIVE}\n"
+)
+
+#: A relative path a variable gives, and a piece of it that no record, payload or
+#: session copy may hold. The load takes the path from its file's directory and
+#: folds a ``..`` or a ``./`` out of it (``parent-dir``, ``dot-dir``), so the text
+#: the config holds no longer contains the text the variable gave; ``kept-whole``
+#: keeps that text after the directory.
+_RELATIVE_PATHS = pytest.mark.parametrize(
+    "held, canary",
+    [
+        pytest.param("../shared-6d0a/x-6d0a.yaml", "shared-6d0a", id="parent-dir"),
+        pytest.param("./conf-8e2b/x.yaml", "conf-8e2b", id="dot-dir"),
+        pytest.param("conf-1f4c/x.yaml", "conf-1f4c", id="kept-whole"),
+    ],
+)
+
+
+def _formats(config) -> List[str]:
+    """The names ``output_formats`` holds."""
+    return [getattr(entry, "value", entry) for entry in config.output_formats]
+
+
+def _in_a_session_workspace(tmp_path: Path, probe_env) -> None:
+    """The environment a session copy is written under, as the cells above set it."""
+    probe_env.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "mcp-workspaces"))
+    probe_env.setenv("ASH_MCP_TRANSPORT", "stdio")
+
+
+def _files_holding(root: Path, text: str) -> List[str]:
+    """The files under ``root`` whose bytes hold ``text``."""
+    if not root.exists():
+        return []
+    return [
+        str(path)
+        for path in root.rglob("*")
+        if path.is_file() and text.encode("utf-8") in path.read_bytes()
+    ]
+
+
+@_RELATIVE_PATHS
+def test_a_relative_path_the_anchoring_folded_is_recorded_as_its_directory_and_the_reference(
+    tmp_path, probe_env, held, canary
+):
+    """The load takes a relative path from its file's directory and folds a ``..``
+    or a ``./`` out of it (``parent-dir``, ``dot-dir``), so the text the config
+    holds no longer contains the text the variable gave. The record in the results
+    file and the body an off-host reporter sends (to_simple_dict) hold that
+    directory and the reference, as they do for a path the anchoring kept whole
+    (``kept-whole``), and no text the variable gave."""
+    from automated_security_helper.config.resolve_config import resolve_config
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+    probe_env.setenv("ASH_PROBE_RELATIVE", held)
+    path = _operator_config(tmp_path, RELATIVE_CONFIG)
+
+    config = resolve_config(config_path=path, source_dir=tmp_path / "tree")
+
+    # The control: the load took the path from the file's directory.
+    assert os.path.isabs(str(config.scanners.bandit.options.config_file))
+    expected = (
+        os.path.join(os.path.realpath(tmp_path / "op"), "") + "${ASH_PROBE_RELATIVE}"
+    )
+    recorded = _recorded(config)
+    assert recorded["scanners"]["bandit"]["options"]["config_file"] == expected
+    assert canary not in json.dumps(recorded)
+    body = AshAggregatedResults(ash_config=config).to_simple_dict()
+    options = body["ash_config"]["scanners"]["bandit"]["options"]
+    assert options["config_file"] == expected
+    assert canary not in json.dumps(body, default=str)
+
+
+def test_a_list_the_load_made_of_one_reference_is_recorded_as_the_reference(
+    tmp_path, probe_env
+):
+    """``output_formats: ${VAR}`` holding ``sarif,html`` loads as two entries. The
+    record holds the reference alone in their place: read back with nothing
+    resolved, it is one entry the field refuses (listed as unreadable, so ``ash
+    merge`` and ``ash report`` take the field from their operator), where the two
+    names would be the value."""
+    from automated_security_helper.config.recorded_config import unreadable_references
+    from automated_security_helper.config.resolve_config import resolve_config
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+    probe_env.setenv("ASH_PROBE_FMT", "sarif,html")
+    path = _operator_config(tmp_path, "output_formats: ${ASH_PROBE_FMT}\n")
+
+    config = resolve_config(config_path=path, source_dir=tmp_path / "tree")
+
+    # The control: the field made two names of the variable's text.
+    assert _formats(config) == ["sarif", "html"]
+    results = AshAggregatedResults(ash_config=config)
+    assert _recorded(config)["output_formats"] == ["${ASH_PROBE_FMT}"]
+    assert results.to_simple_dict()["ash_config"]["output_formats"] == [
+        "${ASH_PROBE_FMT}"
+    ]
+    read_back = AshAggregatedResults.model_validate_json(
+        results.model_dump_json(by_alias=True)
+    )
+    assert unreadable_references(read_back.ash_config) == [
+        ("output_formats", "${ASH_PROBE_FMT}")
+    ]
+
+
+def test_a_list_an_extending_file_wrote_over_a_bases_reference_is_recorded_as_written(
+    tmp_path, probe_env
+):
+    """A base reads ``output_formats`` from a variable that holds ``sarif``, and
+    the file extending it writes the list ``[sarif, html]`` itself. The scan runs
+    with that list, so the record holds it as written: the base's reference is not
+    put in its place, though its text made the first entry."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    probe_env.setenv("ASH_PROBE_FMT", "sarif")
+    _operator_config(tmp_path, "output_formats: ${ASH_PROBE_FMT}\n", "base.yaml")
+    path = _operator_config(
+        tmp_path, "extends: base.yaml\noutput_formats: [sarif, html]\n"
+    )
+
+    config = resolve_config(config_path=path, source_dir=tmp_path / "tree")
+
+    # The control: the scan holds the later file's list.
+    assert _formats(config) == ["sarif", "html"]
+    assert _recorded(config)["output_formats"] == ["sarif", "html"]
+
+
+def test_a_list_an_appending_override_extended_is_recorded_as_the_reference_and_the_added_entry(
+    tmp_path, probe_env
+):
+    """An appending ``--config-overrides`` adds ``markdown`` to the list the load
+    made of one reference's text. The record holds the reference where that text
+    made its entries, and the added entry after it."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    probe_env.setenv("ASH_PROBE_FMT", "sarif,html")
+    path = _operator_config(tmp_path, "output_formats: ${ASH_PROBE_FMT}\n")
+
+    config = resolve_config(
+        config_path=path,
+        source_dir=tmp_path / "tree",
+        config_overrides=["output_formats+=[markdown]"],
+    )
+
+    # The control: the scan holds the entries the text made and the one added.
+    assert _formats(config) == ["sarif", "html", "markdown"]
+    assert _recorded(config)["output_formats"] == ["${ASH_PROBE_FMT}", "markdown"]
+
+
+@pytest.mark.parametrize("client_patched", [False, True], ids=["operator", "client"])
+@_RELATIVE_PATHS
+def test_a_profile_whose_relative_path_the_anchoring_folded_is_not_written_to_a_session(
+    tmp_path, probe_env, held, canary, client_patched
+):
+    """A registered profile reads a relative path from a variable, and the load
+    folds a ``..`` or a ``./`` out of it (``parent-dir``, ``dot-dir``). Written as
+    the path it now is, a session copy would hold the value, and written as the
+    reference, the reference would resolve against the copy's directory, so the
+    profile is refused for both copies, naming the variable and not its value.
+    ``kept-whole``, which the anchoring keeps after its directory, is refused the
+    same way."""
+    from automated_security_helper.cli.mcp import profile_registry
+    from automated_security_helper.config.environment_record import (
+        EnvironmentValueInPath,
+    )
+
+    probe_env.setenv("ASH_PROBE_RELATIVE", held)
+    _in_a_session_workspace(tmp_path, probe_env)
+    profile = _operator_config(tmp_path, RELATIVE_CONFIG, "profile.ash.yaml")
+    config = profile_registry.register_profiles([f"probe={profile}"])["probe"].config
+    # The control: the load took the path from the profile's directory.
+    assert os.path.isabs(str(config.scanners.bandit.options.config_file))
+
+    with pytest.raises(EnvironmentValueInPath) as raised:
+        profile_registry.materialize_session_config(
+            "session-folded", config, client_patched=client_patched
+        )
+
+    assert raised.value.variable == "ASH_PROBE_RELATIVE"
+    assert raised.value.key_path == "scanners.bandit.options.config_file"
+    assert canary not in str(raised.value)
+    assert _files_holding(tmp_path / "mcp-workspaces", canary) == []
+
+
+@_RELATIVE_PATHS
+def test_select_profile_refuses_a_profile_whose_relative_path_the_anchoring_folded(
+    tmp_path, probe_env, held, canary
+):
+    """The tool a client calls answers the refusal in the shape it answers every
+    profile it cannot write to a session: a failed answer under the one error type
+    a client branches on, naming no value."""
+    from automated_security_helper.cli.mcp import profile_registry
+    from automated_security_helper.cli.mcp_tools import mcp_select_profile
+
+    probe_env.setenv("ASH_PROBE_RELATIVE", held)
+    _in_a_session_workspace(tmp_path, probe_env)
+    probe_env.setenv("ASH_MCP_ALLOWED_ROOTS", str(tmp_path))
+    probe_env.delenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", raising=False)
+    profile_registry.clear_profile_registry()
+    profile_registry.clear_all_session_state()
+    try:
+        profile = _operator_config(tmp_path, RELATIVE_CONFIG, "profile.ash.yaml")
+        profile_registry.set_profile_registry(
+            profile_registry.register_profiles([f"probe={profile}"])
+        )
+
+        result = mcp_select_profile("probe", session_id="session-folded")
+
+        assert result["success"] is False, result
+        assert result["error_type"] == "environment_value_in_longer_string", result
+        assert canary not in json.dumps(result)
+        assert _files_holding(tmp_path / "mcp-workspaces", canary) == []
+    finally:
+        profile_registry.clear_profile_registry()
+        profile_registry.clear_all_session_state()
+
+
+@pytest.mark.parametrize("client_patched", [False, True], ids=["operator", "client"])
+def test_a_profile_whose_chosen_base_writes_a_relative_path_is_not_written_to_a_session(
+    tmp_path, probe_env, client_patched
+):
+    """A registered profile extends a base that a variable names, and the base
+    writes checkov's ``config_file`` itself as a relative path. The load takes that
+    path from the base's directory, which holds what the variable gave, so a
+    session copy that held it would hold part of the value, and written as the
+    text the base wrote it would resolve against the copy's directory. The profile
+    is refused for both copies, naming the key path and not the directory."""
+    from automated_security_helper.cli.mcp import profile_registry
+    from automated_security_helper.config.environment_record import (
+        EnvironmentValueInPath,
+    )
+
+    probe_env.setenv("ASH_PROBE_TEAM_BASE", "teams-4c7e/base.yaml")
+    _in_a_session_workspace(tmp_path, probe_env)
+    profile = _operator_config(
+        tmp_path, "extends: ${ASH_PROBE_TEAM_BASE}\n", "profile.ash.yaml"
+    )
+    base = tmp_path / "op" / "teams-4c7e" / "base.yaml"
+    base.parent.mkdir()
+    base.write_text(
+        "scanners:\n  checkov:\n    options:\n      config_file: lit-5e2b/checkov.yaml\n",
+        encoding="utf-8",
+    )
+    config = profile_registry.register_profiles([f"probe={profile}"])["probe"].config
+    # The control: the load took the path from the base's directory.
+    shown = str(config.scanners.checkov.options.config_file)
+    assert os.path.isabs(shown)
+    assert "teams-4c7e" in shown
+
+    with pytest.raises(EnvironmentValueInPath) as raised:
+        profile_registry.materialize_session_config(
+            "session-chosen", config, client_patched=client_patched
+        )
+
+    assert raised.value.key_path == "scanners.checkov.options.config_file"
+    assert "teams-4c7e" not in str(raised.value)
+    assert _files_holding(tmp_path / "mcp-workspaces", "teams-4c7e") == []
+
+
+@pytest.mark.parametrize(
+    "client_patched, as_written",
+    [
+        pytest.param(False, "!ENV ${ASH_PROBE_FMT}", id="operator"),
+        pytest.param(True, "${ASH_PROBE_FMT}", id="client"),
+    ],
+)
+def test_a_profile_list_made_of_one_reference_is_written_to_a_session_as_the_reference(
+    tmp_path, probe_env, client_patched, as_written
+):
+    """A registered profile reads ``output_formats`` from a variable that holds
+    ``sarif,html``. Each session copy holds the reference where the text made two
+    entries: the operator's copy tagged ``!ENV``, which a scan reads from the
+    environment when it loads the copy and gets the list from, and the client's
+    copy as text, which a scan fills from the operator's copy. Written as the
+    names instead, the copy would hold the value."""
+    from automated_security_helper.cli.mcp import profile_registry
+    from automated_security_helper.config.resolve_config import _load_single_config_file
+
+    probe_env.setenv("ASH_PROBE_FMT", "sarif,html")
+    _in_a_session_workspace(tmp_path, probe_env)
+    profile = _operator_config(
+        tmp_path, "output_formats: ${ASH_PROBE_FMT}\n", "profile.ash.yaml"
+    )
+    config = profile_registry.register_profiles([f"probe={profile}"])["probe"].config
+    # The control: the load made two names of the variable's text.
+    assert _formats(config) == ["sarif", "html"]
+
+    written = Path(
+        profile_registry.materialize_session_config(
+            "session-fmt", config, client_patched=client_patched
+        )
+    )
+
+    text = written.read_text(encoding="utf-8")
+    assert _as_written(text)["output_formats"] == as_written, text
+    if not client_patched:
+        # A scan reads the reference from the environment as it loads the copy.
+        assert _formats(_load_single_config_file(written)) == ["sarif", "html"]
+
+
+def test_a_profile_list_of_one_reference_entry_is_written_to_a_session_as_that_entry(
+    tmp_path, probe_env
+):
+    """The control: a profile that writes the list itself, with a reference as its
+    one entry, has the copy write the list with that entry as the reference. The
+    reference stands where its file wrote it, not at the list. The list is
+    written in block form: in a flow sequence the ``{`` of ``${`` opens a mapping
+    and the file does not parse."""
+    from automated_security_helper.cli.mcp import profile_registry
+
+    probe_env.setenv("ASH_PROBE_FMT", "sarif")
+    _in_a_session_workspace(tmp_path, probe_env)
+    profile = _operator_config(
+        tmp_path, "output_formats:\n  - ${ASH_PROBE_FMT}\n", "profile.ash.yaml"
+    )
+    config = profile_registry.register_profiles([f"probe={profile}"])["probe"].config
+
+    written = Path(profile_registry.materialize_session_config("session-entry", config))
+
+    text = written.read_text(encoding="utf-8")
+    assert _as_written(text)["output_formats"] == ["!ENV ${ASH_PROBE_FMT}"], text
+
+
+def test_a_profiles_list_over_its_bases_reference_is_written_to_a_session_as_the_list(
+    tmp_path, probe_env
+):
+    """The control: a profile extends a base that reads ``output_formats`` from a
+    variable that holds ``sarif`` and writes the list ``[sarif, html]`` itself. The
+    copy writes the list the profile wrote, and not the base's reference."""
+    from automated_security_helper.cli.mcp import profile_registry
+
+    probe_env.setenv("ASH_PROBE_FMT", "sarif")
+    _in_a_session_workspace(tmp_path, probe_env)
+    _operator_config(tmp_path, "output_formats: ${ASH_PROBE_FMT}\n", "base.yaml")
+    profile = _operator_config(
+        tmp_path,
+        "extends: base.yaml\noutput_formats: [sarif, html]\n",
+        "profile.ash.yaml",
+    )
+    config = profile_registry.register_profiles([f"probe={profile}"])["probe"].config
+
+    written = Path(profile_registry.materialize_session_config("session-list", config))
+
+    text = written.read_text(encoding="utf-8")
+    assert _as_written(text)["output_formats"] == ["sarif", "html"], text
+
+
+# ---------------------------------------------------------------------------
+# A checkout's config that the operator's file gave a path it read from a variable
+# ---------------------------------------------------------------------------
+
+
+def _a_checkout_under_the_operators_config(
+    tmp_path: Path, probe_env, operators_text: str
+) -> Tuple[Path, Path]:
+    """The operator's file holds ``operators_text``, and ASH_CONFIG names it.
+    ``tree/.ash.yaml`` sets nothing of it, so its config is given the operator's
+    values for the options the operator decides. Returns the operator's file and
+    the checkout's."""
+    operator = _operator_config(tmp_path, operators_text)
+    own = tmp_path / "tree" / ".ash.yaml"
+    own.write_text("project_name: tree-own-3c8e\n", encoding="utf-8")
+    probe_env.setenv("ASH_CONFIG", str(operator))
+    return operator, own
+
+
+def _a_checkout_given_the_operators_path(
+    tmp_path: Path, probe_env, held: str
+) -> Tuple[Path, Path]:
+    """The operator's file reads bandit's ``config_file`` from a variable that
+    holds ``held``, and ASH_CONFIG names it. ``tree/.ash.yaml`` sets no path, so
+    its config is given the operator's for that option. Returns the operator's
+    file and the checkout's."""
+    probe_env.setenv("ASH_PROBE_RELATIVE", held)
+    return _a_checkout_under_the_operators_config(tmp_path, probe_env, RELATIVE_CONFIG)
+
+
+def test_ash_config_get_shows_a_relative_path_the_trusted_base_gives_by_its_reference(
+    tmp_path, probe_env
+):
+    """The file in the scanned tree sets no ``config_file``, and the operator's
+    file, which ASH_CONFIG names, reads it from a variable. The load gives the
+    tree's config the operator's path, so ``ash config get`` prints the operator's
+    directory and the reference, as it does for the operator's own file, and none
+    of the text the variable held."""
+    _, own = _a_checkout_given_the_operators_path(
+        tmp_path, probe_env, os.path.join("cfg-7a3d", "bandit.yaml")
+    )
+
+    result = CliRunner().invoke(
+        app,
+        ["config", "get", str(own), "--source-dir", str(tmp_path / "tree")],
+        env={"COLUMNS": "300"},
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "cfg-7a3d" not in result.output
+    assert "${ASH_PROBE_RELATIVE}" in result.output
+
+
+@pytest.mark.parametrize(
+    "held",
+    [
+        pytest.param(os.path.join("cfg-7a3d", "bandit.yaml"), id="kept-whole"),
+        pytest.param("./cfg-7a3d/bandit.yaml", id="dot-dir"),
+    ],
+)
+def test_a_relative_path_the_trusted_base_gives_a_checkouts_config_is_recorded_as_written(
+    tmp_path, probe_env, held
+):
+    """The record of the tree's config holds the operator's directory and the
+    reference where the operator's file read the path: for a path the anchoring
+    kept whole and for one it folded a ``./`` out of."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    operator, own = _a_checkout_given_the_operators_path(tmp_path, probe_env, held)
+
+    config = resolve_config(config_path=own, source_dir=tmp_path / "tree")
+
+    directory = operator.parent.resolve()
+    # The control: the load gave the tree's config the operator's path.
+    assert (
+        Path(str(config.scanners.bandit.options.config_file))
+        == directory / "cfg-7a3d" / "bandit.yaml"
+    )
+    recorded = _recorded(config)
+    assert (
+        recorded["scanners"]["bandit"]["options"]["config_file"]
+        == f"{directory}{os.sep}${{ASH_PROBE_RELATIVE}}"
+    )
+    assert "cfg-7a3d" not in json.dumps(recorded)
+
+
+# ---------------------------------------------------------------------------
+# A checkout's config that the operator's file gave a tool version, or a choice
+# in a plugin's section, it read from a variable
+# ---------------------------------------------------------------------------
+
+
+def _operators_tool_version(section: str) -> str:
+    """The operator's file, which reads ``tool_version`` of ``scanners.<section>``
+    from a variable."""
+    return (
+        f"scanners:\n  {section}:\n    options:\n"
+        "      tool_version: ${ASH_PROBE_TOOL_RANGE}\n"
+    )
+
+
+@pytest.mark.parametrize("section", ["bandit", "ferret-scan"])
+def test_ash_config_get_shows_a_tool_version_the_trusted_base_gives_by_its_reference(
+    tmp_path, probe_env, section
+):
+    """The file in the scanned tree sets no ``tool_version``, and the operator's
+    file, which ASH_CONFIG names, reads it from a variable: for a built-in section
+    (``bandit``) and for a plugin's (``ferret-scan``). The load gives the tree's
+    config the operator's value, so ``ash config get`` prints the reference, and
+    none of the specifier set the variable held."""
+    probe_env.setenv("ASH_PROBE_TOOL_RANGE", ">=1.7.8,<1.7.97")
+    _, own = _a_checkout_under_the_operators_config(
+        tmp_path, probe_env, _operators_tool_version(section)
+    )
+
+    result = CliRunner().invoke(
+        app,
+        ["config", "get", str(own), "--source-dir", str(tmp_path / "tree")],
+        env={"COLUMNS": "300"},
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "1.7.97" not in result.output
+    assert "${ASH_PROBE_TOOL_RANGE}" in result.output
+
+
+def test_a_tool_version_the_trusted_base_gives_a_checkouts_config_is_recorded_as_written(
+    tmp_path, probe_env
+):
+    """The record of the tree's config holds the operator's reference where the
+    operator's file read ``tool_version``, and none of the specifier set the
+    variable held."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    probe_env.setenv("ASH_PROBE_TOOL_RANGE", ">=1.7.8,<1.7.97")
+    _, own = _a_checkout_under_the_operators_config(
+        tmp_path, probe_env, _operators_tool_version("bandit")
+    )
+
+    config = resolve_config(config_path=own, source_dir=tmp_path / "tree")
+
+    # The control: the load gave the tree's config the operator's value.
+    assert config.scanners.bandit.options.tool_version == ">=1.7.8,<1.7.97"
+    recorded = _recorded(config)
+    assert (
+        recorded["scanners"]["bandit"]["options"]["tool_version"]
+        == "${ASH_PROBE_TOOL_RANGE}"
+    )
+    assert "1.7.97" not in json.dumps(recorded)
+
+
+def test_ash_config_get_shows_a_choice_the_trusted_base_gives_a_plugin_section_by_its_reference(
+    tmp_path, probe_env
+):
+    """The operator's file reads ferret-scan's ``use_default_config`` from a
+    variable, and the file in the scanned tree writes nothing for ferret-scan. The
+    load makes the tree's config a ferret-scan section that holds the operator's
+    value, so ``ash config get`` prints the reference, where the dump of a
+    plugin's section has no mark to show it by."""
+    probe_env.setenv("ASH_PROBE_FERRET_DEFAULT", "false")
+    _, own = _a_checkout_under_the_operators_config(
+        tmp_path,
+        probe_env,
+        "scanners:\n  ferret-scan:\n    options:\n"
+        "      use_default_config: ${ASH_PROBE_FERRET_DEFAULT}\n",
+    )
+
+    result = CliRunner().invoke(
+        app,
+        ["config", "get", str(own), "--source-dir", str(tmp_path / "tree")],
+        env={"COLUMNS": "300"},
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "${ASH_PROBE_FERRET_DEFAULT}" in result.output
+
+
+# ---------------------------------------------------------------------------
+# A relative path in a base that a variable chose
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "held",
+    [
+        pytest.param("./cfg-7a3d/bandit.yaml", id="dot-dir"),
+        pytest.param(os.path.join("cfg-7a3d", "bandit.yaml"), id="kept-whole"),
+    ],
+)
+def test_a_relative_path_from_a_variable_in_a_base_a_variable_chose_is_recorded_without_its_directory(
+    tmp_path, probe_env, held
+):
+    """The operator's file extends a base that a variable names. The base reads
+    bandit's ``config_file`` from another variable, and writes checkov's
+    ``config_file`` itself as a relative path. The directory the load takes either
+    path from holds what the first variable gave, so the record and the body an
+    off-host reporter sends hold ``<value>`` and the reference for the first path
+    and ``<value>`` and the path as the base wrote it for the second, for a path
+    the anchoring folded a ``./`` out of (``dot-dir``) and for one it kept whole
+    (``kept-whole``), and none of either variable's text or the base's directory."""
+    from automated_security_helper.config.resolve_config import resolve_config
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+    probe_env.setenv("ASH_PROBE_RELATIVE", held)
+    probe_env.setenv("ASH_PROBE_TEAM_BASE", "teams-4c7e/base.yaml")
+    path = _operator_config(tmp_path, "extends: ${ASH_PROBE_TEAM_BASE}\n")
+    base = tmp_path / "op" / "teams-4c7e" / "base.yaml"
+    base.parent.mkdir()
+    base.write_text(
+        RELATIVE_CONFIG
+        + "  checkov:\n    options:\n      config_file: lit-5e2b/checkov.yaml\n",
+        encoding="utf-8",
+    )
+
+    config = resolve_config(config_path=path, source_dir=tmp_path / "tree")
+
+    # The control: the load took each path from the base's directory.
+    directory = (tmp_path / "op" / "teams-4c7e").resolve()
+    assert (
+        Path(str(config.scanners.bandit.options.config_file))
+        == directory / "cfg-7a3d" / "bandit.yaml"
+    )
+    assert (
+        Path(str(config.scanners.checkov.options.config_file))
+        == directory / "lit-5e2b" / "checkov.yaml"
+    )
+    recorded = _recorded(config)
+    assert recorded["scanners"]["bandit"]["options"]["config_file"] == (
+        os.path.join("<value>", "") + "${ASH_PROBE_RELATIVE}"
+    )
+    assert recorded["scanners"]["checkov"]["options"]["config_file"] == (
+        os.path.join("<value>", "") + "lit-5e2b/checkov.yaml"
+    )
+    body = AshAggregatedResults(ash_config=config).to_simple_dict()
+    for dumped in (json.dumps(recorded), json.dumps(body, default=str)):
+        assert "teams-4c7e" not in dumped
+        assert "cfg-7a3d" not in dumped
+
+
+# ---------------------------------------------------------------------------
+# A value the field's own validation respells
+# ---------------------------------------------------------------------------
+
+#: The unused-suppressions reporter's ``output_format`` lowercases the text it
+#: reads, so a value of ``Markdown`` (``respelled``) is held as ``markdown``,
+#: which is neither the variable's text nor holds it. ``markdown``
+#: (``as-held-control``) is held as it was written.
+FORMAT_CONFIG = (
+    "reporters:\n"
+    "  unused-suppressions:\n"
+    "    options:\n"
+    "      output_format: ${ASH_PROBE_FORMAT}\n"
+)
+
+_RESPELLED = pytest.mark.parametrize(
+    "held",
+    [
+        pytest.param("Markdown", id="respelled"),
+        pytest.param("markdown", id="as-held-control"),
+    ],
+)
+
+
+def _unused_options(document: dict) -> dict:
+    reporters = document["reporters"]
+    section = reporters.get("unused-suppressions") or reporters["unused_suppressions"]
+    return section["options"]
+
+
+@_RESPELLED
+def test_a_value_its_field_respells_is_recorded_as_written(tmp_path, probe_env, held):
+    """The field lowercases the text the variable gave, so the configuration holds
+    ``markdown`` whatever spelling the variable has. The record in the results file
+    and the body an off-host reporter sends hold the reference there, as they do
+    where the field holds the text as it was (``as-held-control``), so neither
+    changes with how the variable spells its value."""
+    from automated_security_helper.config.resolve_config import resolve_config
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+    probe_env.setenv("ASH_PROBE_FORMAT", held)
+    path = _operator_config(tmp_path, FORMAT_CONFIG)
+
+    config = resolve_config(config_path=path, source_dir=tmp_path / "tree")
+
+    # The control: the field holds the lowercase text for both spellings.
+    assert config.reporters.unused_suppressions.options.output_format == "markdown"
+    assert _unused_options(_recorded(config))["output_format"] == (
+        "${ASH_PROBE_FORMAT}"
+    )
+    body = AshAggregatedResults(ash_config=config).to_simple_dict()["ash_config"]
+    assert _unused_options(body)["output_format"] == "${ASH_PROBE_FORMAT}"
+
+
+@_RESPELLED
+def test_ash_config_get_shows_a_respelled_value_by_its_reference(
+    tmp_path, probe_env, held
+):
+    """``ash config get`` prints the reference where the field holds the text the
+    variable gave in another spelling, as it does where it holds it as it was
+    (``as-held-control``), and it loads back as the same setting."""
+    probe_env.setenv("ASH_PROBE_FORMAT", held)
+    path = _operator_config(tmp_path, FORMAT_CONFIG)
+
+    result = CliRunner().invoke(
+        app, ["config", "get", str(path)], env={"COLUMNS": "300"}
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "output_format: ${ASH_PROBE_FORMAT}" in " ".join(result.output.split())
+
+
+@_RESPELLED
+def test_a_profile_copy_writes_a_respelled_value_by_its_reference_and_loads_back(
+    tmp_path, probe_env, held
+):
+    """A registered profile reads ``output_format`` from a variable, and the field
+    lowercases it. The operator's session copy holds the reference tagged ``!ENV``
+    where the configuration holds the lowercase text, as it does where the field
+    holds the text as it was (``as-held-control``), and a scan that loads the copy
+    reads the variable again and gets the same setting."""
+    from automated_security_helper.cli.mcp import profile_registry
+    from automated_security_helper.config.resolve_config import _load_single_config_file
+
+    probe_env.setenv("ASH_PROBE_FORMAT", held)
+    _in_a_session_workspace(tmp_path, probe_env)
+    profile = _operator_config(tmp_path, FORMAT_CONFIG, "profile.ash.yaml")
+    registry = profile_registry.register_profiles([f"fmt={profile}"])
+
+    written = Path(
+        profile_registry.materialize_session_config(
+            "session-format", registry["fmt"].config
+        )
+    )
+
+    text = written.read_text(encoding="utf-8")
+    assert _unused_options(_as_written(text))["output_format"] == (
+        "!ENV ${ASH_PROBE_FORMAT}"
+    )
+    # The scan still uses the value: the copy reads it when it is loaded.
+    loaded = _load_single_config_file(written)
+    assert loaded.reporters.unused_suppressions.options.output_format == "markdown"
+
+
+@_RESPELLED
+def test_a_patched_profile_copy_writes_a_respelled_value_by_its_reference(
+    tmp_path, probe_env, held
+):
+    """The copy a client patched goes in client-config/, where !ENV is not
+    resolved. It holds the reference as text where the field lowercased the text
+    the variable gave, as it does where the field holds the text as it was
+    (``as-held-control``), and the scan fills the value from the operator's copy."""
+    from automated_security_helper.cli.mcp import profile_registry
+    from automated_security_helper.cli.mcp_tools import mcp_select_profile
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    probe_env.setenv("ASH_PROBE_FORMAT", held)
+    _in_a_session_workspace(tmp_path, probe_env)
+    probe_env.setenv("ASH_MCP_ALLOWED_ROOTS", str(tmp_path))
+    probe_env.delenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", raising=False)
+    profile_registry.clear_profile_registry()
+    profile_registry.clear_all_session_state()
+    try:
+        profile = _operator_config(
+            tmp_path,
+            PATCHABLE_PROFILE
+            + "  unused-suppressions:\n"
+            + "    options:\n"
+            + "      output_format: ${ASH_PROBE_FORMAT}\n",
+            "patch.ash.yaml",
+        )
+        profile_registry.set_profile_registry(
+            profile_registry.register_profiles([f"patchable={profile}"])
+        )
+
+        result = mcp_select_profile(
+            "patchable",
+            patch_ops=[{"op": "replace", "path": "/project_name", "value": "patched"}],
+            session_id="session-format",
+        )
+
+        assert result["success"] is True, result
+        client_copy = Path(
+            profile_registry.resolve_session_config_path("session-format")
+        )
+        trusted = Path(
+            profile_registry.resolve_session_trusted_config_path("session-format")
+        )
+        client_text = client_copy.read_text(encoding="utf-8")
+        assert _unused_options(_as_written(client_text))["output_format"] == (
+            "${ASH_PROBE_FORMAT}"
+        )
+        config = resolve_config(
+            config_path=client_copy,
+            source_dir=tmp_path / "tree",
+            trusted_config_path=trusted,
+            untrusted_config=True,
+        )
+        # The scan uses the value, and the client's own change.
+        assert config.project_name == "patched"
+        assert config.reporters.unused_suppressions.options.output_format == "markdown"
+    finally:
+        profile_registry.clear_profile_registry()
+        profile_registry.clear_all_session_state()

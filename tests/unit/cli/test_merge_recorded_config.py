@@ -14,7 +14,9 @@ tree, and ``--config-overrides``; for the off-host reporters' ``enabled`` and
 destinations, only the defaults and ``--config-overrides``, since the shards do
 not record which tree was scanned and ``--config`` may be that tree's own file.
 The settings the verdict reads still come from the shards, and shards that
-disagree on one are refused.
+disagree on one are refused. A value the confinement copies from an operator's
+``--config`` that the file read from the environment is recorded in the merged
+results as the reference the file wrote (``TestTheOperatorsReferences``).
 
 Shards are written by ``AshAggregatedResults.save_model``, the scan's own writer,
 and carry the config ``resolve_config`` returns for a config file outside any
@@ -810,6 +812,81 @@ class TestOverridesApplyOverTheRecordedConfig:
         assert result.exit_code == 3, (result.output, result.exception)
         assert "Invalid configuration" in result.output
         assert not (harness.output_dir / RESULTS_FILE_NAME).exists()
+
+
+def _merged_under_the_operators_config(
+    harness: _Harness, operators_text: str
+) -> Tuple[str, Dict[str, Any]]:
+    """Merge shards that record no setting under the ``--config`` that holds
+    *operators_text*, a file outside the working directory's tree.
+
+    Returns the merged results file's text and the config it records."""
+    operator = harness.tmp_path / "operator" / "ash.yaml"
+    operator.parent.mkdir(exist_ok=True)
+    operator.write_text(operators_text, encoding="utf-8")
+    shard_paths = harness.write_shards({"project_name": "test-merge"})
+
+    result = harness.merge(shard_paths, "--config", str(operator))
+
+    _assert_merged(result, harness)
+    text = (harness.output_dir / RESULTS_FILE_NAME).read_text("utf-8")
+    return text, json.loads(text)["ash_config"]
+
+
+@pytest.mark.unit
+class TestTheOperatorsReferences:
+    """What the confinement copies from the operator's ``--config`` is recorded as
+    that file wrote it, as a scan records the same copy."""
+
+    @pytest.mark.parametrize("kind", ["tool-version", "sandbox-grant"])
+    def test_a_value_the_operators_config_reads_is_recorded_as_its_reference_in_the_merged_results(
+        self, harness, kind
+    ):
+        """The operator's file reads a value from a variable, and the shards record
+        none. The confinement gives the merged config the operator's value, so the
+        merged results hold the operator's reference there and none of the text
+        the variable held: for a tool version, and for a sandbox grant."""
+        if kind == "tool-version":
+            held = ">=1.7.8,<1.7.97"
+            operators_text = (
+                "scanners:\n  bandit:\n    options:\n"
+                "      tool_version: ${ASH_TEST_MERGE_VALUE}\n"
+            )
+            place: Tuple[Any, ...] = ("scanners", "bandit", "options", "tool_version")
+            canary = "1.7.97"
+        else:
+            grant = harness.tmp_path / "operator-grant-7d2e"
+            grant.mkdir()
+            held = str(grant.resolve())
+            operators_text = (
+                "sandbox:\n  extra_read_paths:\n    - ${ASH_TEST_MERGE_VALUE}\n"
+            )
+            place = ("sandbox", "extra_read_paths", 0)
+            canary = "operator-grant-7d2e"
+        harness.monkeypatch.setenv("ASH_TEST_MERGE_VALUE", held)
+
+        text, recorded = _merged_under_the_operators_config(harness, operators_text)
+
+        node: Any = recorded
+        for step in place:
+            node = node[step]
+        assert node == "${ASH_TEST_MERGE_VALUE}", node
+        assert canary not in text
+
+    def test_a_literal_tool_version_of_the_operators_config_is_recorded_as_written_in_the_merged_results(
+        self, harness
+    ):
+        """The control: where the operator's file writes the specifier set itself,
+        there is no reference to record, and the merged results hold that set."""
+        _, recorded = _merged_under_the_operators_config(
+            harness,
+            "scanners:\n  bandit:\n    options:\n"
+            "      tool_version: '>=1.7.8,<1.7.96'\n",
+        )
+
+        assert recorded["scanners"]["bandit"]["options"]["tool_version"] == (
+            ">=1.7.8,<1.7.96"
+        )
 
 
 def _write_each(harness: _Harness, models, documents) -> List[Path]:

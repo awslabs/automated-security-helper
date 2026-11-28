@@ -79,6 +79,7 @@ from automated_security_helper.config.config_sources import (
 from automated_security_helper.config.config_validator import (
     ConfigCheck,
     describe_validation_error,
+    respelled_from,
 )
 from automated_security_helper.config.environment_record import (
     ENVIRONMENT_VALUE_SHOWN,
@@ -1336,6 +1337,14 @@ def get(
                     # reload as a reference) while a string that only looks
                     # like one is quoted back, as every config writer does.
                     mark=_as_reference,
+                    # A list the load made of one reference's text is written
+                    # as the reference once: it loads back as that list, where
+                    # one reference per entry loads the whole text into each.
+                    list_as_reference=True,
+                    # A value the field's own validation respelled (a reporter's
+                    # output_format lowercases what it reads) is written as the
+                    # reference too: it loads back as the same setting.
+                    respelled=respelled_from(resolved),
                 ),
                 Dumper=_AsWrittenYamlDumper,
                 default_flow_style=False,

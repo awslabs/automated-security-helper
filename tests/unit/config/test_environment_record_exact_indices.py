@@ -8,6 +8,12 @@ list, so it follows an entry a patch moves. A view of a configuration loaded
 from its files has each reference at the index its file wrote, and with
 ``exact_indices`` it marks that entry alone: an entry beside it that holds the
 same text is shown as it is.
+
+A list the field made of one reference's text (``output_formats: ${VAR}`` holding
+two names) has its reference at the list's own place. A view walks a list that does
+not start with those names as written, and a copy written to be loaded again
+(``whole_only``) writes the reference itself, which loads back as the list, and
+refuses a list that holds an entry past the text's names.
 """
 
 from __future__ import annotations
@@ -16,6 +22,7 @@ import pytest
 
 from automated_security_helper.config.environment_record import (
     EnvironmentReference,
+    EnvironmentValueInPath,
     environment_marker,
     record_environment_references,
 )
@@ -91,3 +98,47 @@ def test_by_default_the_reference_matches_any_index():
         "<from ${ASH_PN}>",
     ]
     assert every, "the default changed"
+
+
+FORMATS = "sarif,html"
+
+
+def _made_of_formats() -> EnvironmentReference:
+    """A file's ``output_formats: ${ASH_PN}``, which read ``FORMATS``: the reference
+    is at the list's own place, and the field made two entries of its text."""
+    return EnvironmentReference(("output_formats",), "${ASH_PN}", FORMATS, FORMATS)
+
+
+def test_a_copy_writes_a_list_made_of_one_reference_as_the_reference():
+    data = {"output_formats": ["sarif", "html"]}
+    shown = record_environment_references(
+        data,
+        [_made_of_formats()],
+        mark=lambda text: f"!ENV {text}",
+        whole_only=True,
+    )
+    assert shown["output_formats"] == "!ENV ${ASH_PN}", shown
+
+
+def test_a_copy_refuses_a_list_that_holds_an_entry_past_the_references_text():
+    """Written as names, the entry a later step appended would be the value."""
+    data = {"output_formats": ["sarif", "html", "markdown"]}
+    with pytest.raises(EnvironmentValueInPath) as raised:
+        record_environment_references(
+            data,
+            [_made_of_formats()],
+            mark=lambda text: f"!ENV {text}",
+            whole_only=True,
+        )
+    assert raised.value.variable == "ASH_PN"
+    assert raised.value.key_path == "output_formats"
+
+
+def test_a_view_walks_a_list_that_does_not_start_with_the_references_text():
+    """A later file's list, or a replacing override's, is not what the reference
+    made: it is shown as it was written."""
+    data = {"output_formats": ["markdown"]}
+    shown = record_environment_references(
+        data, [_made_of_formats()], mark=environment_marker
+    )
+    assert shown["output_formats"] == ["markdown"], shown

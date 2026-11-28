@@ -218,9 +218,22 @@ def _refuse_a_value_left_as_text(data: Any, ash_config: AshConfig) -> None:
                 ash_config, dumped, rewrite.path, rewrite.resolved, leaf
             )
         else:
-            left = leaf == rewrite.resolved or bool(
-                rewrite.environment_part
-                and rewrite.environment_part in _without_references(leaf, rewrite)
+            # The text the anchoring made of a relative path counts too: with a
+            # mark, record_of_config leaves it as it is where it no longer holds
+            # the variable's part, and it is the value as text. So does the
+            # record of a relative path a file whose own path the environment
+            # chose wrote itself: the JSON writer records without a mark, so its
+            # place holds ``<value>/...``, which would load as another path. The
+            # marked YAML writer leaves ``resolved``, which the first test
+            # refuses.
+            left = (
+                leaf == rewrite.resolved
+                or (rewrite.anchored is not None and leaf == rewrite.anchored[0])
+                or (rewrite.literal and leaf == rewrite.written)
+                or bool(
+                    rewrite.environment_part
+                    and rewrite.environment_part in _without_references(leaf, rewrite)
+                )
             )
         if left:
             raise RuntimeError(

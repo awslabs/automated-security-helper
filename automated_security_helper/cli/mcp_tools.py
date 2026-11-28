@@ -68,7 +68,6 @@ from automated_security_helper.utils.directory_refusals import output_dir_unmake
 from automated_security_helper.utils.numeric_text import MIN_REDACTED_LENGTH
 from automated_security_helper.utils.error_text import (
     carry_environment_values,
-    config_environment_values,
     error_text,
     log_unexpected_error,
     os_error_without_named_file,
@@ -5171,8 +5170,28 @@ def mcp_get_config(
         apply, so a file the client delivered shows no grants of its own. The reporter options only the operator may set
         (``config/operator_only_options.py``) that a file in a checkout sets are
         shown as a scan of that checkout applies them, ignored:
-        ``<operator only; ignored from this file: VALUE>``. A refused path
-        returns ``success`` False with ``error_type``
+        ``<operator only; ignored from this file: VALUE>``. VALUE shows every
+        literal the client's file wrote exactly as written. A value the file
+        wrote as a reference is the server's, so VALUE is never that value:
+        while the reference resolves to text, it is ``<from ${VAR}>``, built
+        from the variable's name alone, whether the text came from the
+        variable or from its default. A reference resolves to nothing when the
+        text it resolves to (the variable's value when the variable is set,
+        even to blank text, and its default otherwise, ``None`` read as empty),
+        together with any text the file wrote after it, is blank: the place
+        the reference sits then has no value and no reference to show, and
+        VALUE shows ``null`` there, so a list that holds such a reference is
+        shown with ``null`` in its place (a mapping key that resolves to
+        nothing is shown as ``null`` too). So
+        VALUE tells whether that text is blank, never what it is: with an
+        empty, blank or ``None`` default, whether the variable holds text; with
+        any other default, whether the variable is set to blank text. A
+        reference with no default fails the load while its variable is unset.
+        Nothing in the answer depends on whether a literal equals, or
+        contains, a value the server read. The one
+        condition is where a value came from: a place a file of the chain that
+        is not the client's (the operator's, or a base outside every checkout)
+        also writes is shown as ``<withheld>`` whatever it holds. A refused path returns ``success`` False with ``error_type``
         ``config_input_not_permitted``, and a file a client delivered that
         reads from the environment the same with ``config_env_not_resolved``.
         A resolved config whose ``ash_plugin_modules`` a scan of the answered
@@ -5188,7 +5207,13 @@ def mcp_get_config(
         A named file that does not exist, and a named or discovered file that
         cannot be loaded, return ``success`` False with ``error_category``
         ``file_not_found`` or ``invalid_format``; the default config is
-        returned only when no file is named or found.
+        returned only when no file is named or found. A named or discovered
+        file whose load leaves no single record of what its files wrote for
+        the operator-only options (the record the ignored markers above are
+        judged by) is refused instead of shown without that judgment:
+        ``success`` False, ``error_category`` ``unexpected_error``, exit code
+        1, and ``error_type`` the exception's class name
+        (``MCPResourceError``).
     """
 
     # The files the grant check opens stay open until the answer is made.
@@ -5240,6 +5265,7 @@ def _answer_get_config(
         ConfigFileChangedError,
         default_confinement_root,
     )
+    from automated_security_helper.config.config_validator import respelled_from
     from automated_security_helper.config.environment_record import (
         environment_marker,
         record_environment_references,
@@ -5272,16 +5298,28 @@ def _answer_get_config(
     # (AshConfig._displayed_environment_references, the reads the merged
     # document still shows; a read an overlay wrote a literal over marks
     # nothing, since that place's value is the overlay's own), whatever its
-    # length; text elsewhere that equals it is the file's own and is shown. A
-    # list entry is the one at the index the file wrote the reference at: in a
-    # session config, the index the profile's patch moved it to. Any other entry
-    # of that list, one a client added say, is shown as written whatever it holds.
+    # length; text elsewhere that equals it is the file's own and is shown, where
+    # the loader did not mark it: a string, mapping key or set member the loader
+    # marked as read from the environment (EnvResolvedScalar) that no reference
+    # replaced is shown as the reference its own mark carries, never as the
+    # value. A list entry is the one at the index the file wrote the reference
+    # at: in a session config, the index the profile's patch moved it to. Any
+    # other entry of that list, one a client added say, is shown as written
+    # whatever it holds. A string a field's own validation respelled (a
+    # reporter's output_format lowercases what it reads) is shown as the reference
+    # too, where ``config``'s own model makes that string of the reference's text:
+    # the test is of ``config``, not of ``data``, which is a dump keyed by field
+    # names.
+    # Run it on a dump BEFORE mark_operator_only_options writes its markers, never
+    # on a marked one: it replaces a reference's value inside any string at the
+    # reference's place, a marker included (the two call sites say why).
     def shown_config(config: Any, data: Any) -> Any:
         return record_environment_references(
             data,
             tuple(getattr(config, "_displayed_environment_references", ()) or ()),
             mark=environment_marker,
             exact_indices=True,
+            respelled=respelled_from(config),
         )
 
     # The file the path leads to before it is checked: the read below must open
@@ -5452,16 +5490,6 @@ def _answer_get_config(
             # OSError: a file ASH_CONFIG names that the server cannot read is
             # a config it cannot load, exit 3, not the generic handler's 1.
             return _config_load_failure(exc, None)
-        # The references the marking below shows written-as-reference values
-        # with are this FIRST read's: they keep each reference at a place the
-        # confinement left out of the answer, which is exactly where a marker
-        # has a value to show. The scan-confined read below rewrites its own
-        # references when an in-tree chain file's places are dropped, so they
-        # no longer carry those places. mark_operator_only_options reads them
-        # only to match the record's written values -- the first read's --
-        # and never touches ash_plugin_modules, whose display is the
-        # answered document's own.
-        marking_references = tuple(getattr(base, "_environment_references", ()) or ())
         if not raw:
             # The answer IS the scan's own resolution: resolve_config's
             # no-file branch reads the ASH_CONFIG chain exactly as a scan of
@@ -5471,9 +5499,7 @@ def _answer_get_config(
             # included, is the one such a scan applies. Splicing single
             # sections out of this read into the read above showed the
             # unconfined read's values everywhere the splice did not reach.
-            # The marking below uses the first read's references (see
-            # marking_references above), not this resolution's. The
-            # operator-only record stays `settings`, which
+            # The operator-only record stays `settings`, which
             # read the same documents (the shared caches above) under the
             # same confine identity (scan_repository_settings, which
             # repository_settings_for_root applies). no_discovery:
@@ -5531,13 +5557,18 @@ def _answer_get_config(
                     ),
                     None,
                 )
-        return shown_config(
-            base,
-            mark_operator_only_options(
-                base.model_dump(),
-                settings,
-                marking_references,
-            ),
+        # The display walk runs on the dump first, and the markers are written
+        # into what it returns, as on the named-file path below: the walk
+        # replaces a reference's value inside any string at the reference's
+        # place, so it never runs over a marker. The markers are built from the
+        # record (settings), never from the dump: a literal the client's file
+        # wrote is shown as written, a value it wrote as a reference is shown by
+        # the reference (one that resolved to nothing as null: the record holds
+        # None there), and a place a file that is not the client's also writes
+        # is withheld.
+        return mark_operator_only_options(
+            shown_config(base, base.model_dump()),
+            settings,
         )
 
     if raw:
@@ -5836,7 +5867,6 @@ def _answer_get_config(
             plugin_module_refusal_message(exc, **_MCP_PLUGIN_MODULE_CLOSINGS),
             path,
         )
-    shown = resolved.model_dump()
     # The reporter options only the operator may set are shown as a scan of the
     # file's own repository applies them: ignored. A file outside every checkout
     # is an operator's, and a scan that names it applies them. The selected
@@ -5846,8 +5876,42 @@ def _answer_get_config(
     # The record is the resolution's own (repository_out): the chain is not
     # resolved again, so a chain file that changed on disk since the read
     # cannot raise past the structured refusals above or put a second read's
-    # values in the answer.
+    # values in the answer. The load appends exactly one record before it reads
+    # the chain. Any other count means the record the marking below is judged
+    # by is not the one this read made, and an answer shown without that
+    # judgment would print an option a scan of the file's checkout ignores as if
+    # it applied, so the answer is refused, as an internal failure of the
+    # server and not of the file. The message names no path and no value; the
+    # count goes to the log.
+    if len(chain_repository) != 1:
+        _logger.warning(
+            f"get_config was refused: the load recorded {len(chain_repository)} "
+            "sets of settings for the operator-only options, where it records one."
+        )
+        return with_exit_code(
+            create_error_response(
+                MCPResourceError(
+                    "The configuration was loaded, but the load did not leave the "
+                    "one record of what its files wrote for the operator-only "
+                    "options, so the answer is refused instead of shown without "
+                    "that judgment.",
+                    context={"error_category": ErrorCategory.UNEXPECTED_ERROR.value},
+                ),
+                "get_config",
+            ),
+            REFUSED_INTERNAL_EXIT_CODE,
+        )
     [written] = chain_repository
+    # The display walk runs on the dump first, and the markers below are written
+    # into what it returns. The walk replaces a reference's value inside any
+    # string at the reference's place, and an option the load settled holds the
+    # trusted base's references at that exact place (_take_confined_references):
+    # the operator's own ASH_CONFIG file, outside every checkout, can read such an
+    # option from the environment while the named file writes it too. A walk
+    # after the marking would edit a marker's text. The markers are built from
+    # the record (written) alone, never from the dump, so nothing after the
+    # marking touches one.
+    shown = shown_config(resolved, resolved.model_dump())
     # Marked when no chain file is inside the scanned trees -- judged against
     # the trees the resolution confined with (RepositorySettings.trees), with
     # the same fail-closed walk, so an undecided name counts as the trees' here
@@ -5869,88 +5933,22 @@ def _answer_get_config(
         # chain file is inside the scanned trees here (the guard above), so
         # the resolution confined each checkout file of the chain exactly as
         # the dropped re-read did.
-        # The resolution's references: an option the chain read from the
-        # environment is marked by the reference it was written as, never by
-        # its value. The confinement rewrite (_take_confined_references) drops
-        # the references at the places it settled, a chain file in another
-        # checkout included, so a marker for an environment-read option may
-        # find no reference and would fall back to the value the server's
-        # environment gave. Such a marker is not written: the option stays as
-        # the load left it, absent or at the configuration's own value.
-        shown = _without_environment_read_markers(
-            shown,
-            mark_operator_only_options(
-                shown,
-                written,
-                tuple(getattr(resolved, "_environment_references", ()) or ()),
-            ),
-            config_environment_values(resolved),
-        )
-    return shown_config(resolved, shown)
-
-
-_OPERATOR_ONLY_MARKER_HEAD = "<operator only; ignored from this file: "
-
-
-def _without_environment_read_markers(
-    before: Dict[str, Any],
-    marked: Dict[str, Any],
-    environment_values: Tuple[str, ...],
-) -> Dict[str, Any]:
-    """*marked*, with each operator-only marker that would print a value the
-    configuration read from the environment put back to what *before* held.
-
-    ``mark_operator_only_options`` shows an environment-read value as the
-    reference the file wrote only when a reference still sits at the place;
-    otherwise it shows the value itself, as JSON. The references at a settled
-    place are the ones the confinement rewrite drops, so for a chain file in
-    another checkout the fallback is reached, and the value is one the server's
-    environment gave. A marker whose text is that fallback for any of
-    *environment_values* (the configuration's own record of what its chain read,
-    every read included) is withdrawn: the option is left as *before* has it,
-    absent where the load left it out, or at the value the configuration holds
-    there. A literal that happens to equal an environment value is withheld
-    too, which errs toward showing less. *marked* is changed in place and
-    returned.
-    """
-    import json as _json
-
-    from automated_security_helper.utils.terminal_text import shown_on_one_line
-
-    fallbacks = {
-        f"{_OPERATOR_ONLY_MARKER_HEAD}{shown_on_one_line(_json.dumps(value))}>"
-        for value in environment_values
-        if isinstance(value, str)
-    }
-    if not fallbacks:
-        return marked
-    for kind in ("reporters", "scanners"):
-        sections = marked.get(kind)
-        if not isinstance(sections, dict):
-            continue
-        before_sections = before.get(kind)
-        before_sections = before_sections if isinstance(before_sections, dict) else {}
-        for key, section in sections.items():
-            options = section.get("options") if isinstance(section, dict) else None
-            if not isinstance(options, dict):
-                continue
-            before_section = before_sections.get(key)
-            before_options = (
-                before_section.get("options")
-                if isinstance(before_section, dict)
-                else None
-            )
-            before_options = before_options if isinstance(before_options, dict) else {}
-            for option, text in list(options.items()):
-                if not isinstance(text, str) or text not in fallbacks:
-                    continue
-                if before_options.get(option) == text:
-                    continue
-                if option in before_options:
-                    options[option] = before_options[option]
-                else:
-                    options.pop(option)
-    return marked
+        # An option the chain read from the environment is marked by the
+        # reference it was written as, never by its value: the loader's mark on
+        # the record's value (``EnvResolvedScalar.variable``) names the
+        # variable, so both routes show the same ``<from ${VAR}>`` whether the
+        # text came from the variable or from its default, and the option stays
+        # marked: the client reads that the file set an option a scan ignores.
+        # A reference that resolved to nothing leaves None in the record, which
+        # carries no loader mark, so it is shown as null (_marker_value gives
+        # the rule). Every literal the client's file wrote is shown as written,
+        # whatever it equals or contains: how a literal is shown never depends
+        # on a value the server read.
+        # A place a chain file that is not the client's also writes, or that
+        # the client's file wrote beside such a file, is withheld whatever its
+        # value is (RepositorySettings.withheld).
+        shown = mark_operator_only_options(shown, written)
+    return shown
 
 
 def _config_problem(field: str, message: str, kind: str) -> Dict[str, Any]:

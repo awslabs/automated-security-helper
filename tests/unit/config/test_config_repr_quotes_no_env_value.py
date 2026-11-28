@@ -104,3 +104,38 @@ def test_a_rich_traceback_with_locals_shows_no_environment_value(config):
     console = Console(file=StringIO(), width=200, force_terminal=False)
     console.print(rendered)
     _shows_no_value(console.file.getvalue())
+
+
+@pytest.mark.parametrize(
+    "held",
+    [
+        pytest.param("Markdown", id="respelled"),
+        pytest.param("markdown", id="as-held-control"),
+    ],
+)
+def test_the_configs_repr_shows_a_respelled_value_by_its_reference(
+    tmp_path, monkeypatch, held
+):
+    """The unused-suppressions reporter's ``output_format`` lowercases the text it
+    reads, so ``Markdown`` is held as ``markdown``, which is neither the variable's
+    text nor holds it. The repr shows the reference there, as it does where the
+    field holds the text as it was (``as-held-control``), so a debug line does not
+    change with how the variable spells its value."""
+    monkeypatch.setenv("ASH_ZR_FORMAT", held)
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    path = tmp_path / ".ash.yaml"
+    path.write_text(
+        "reporters:\n"
+        "  unused-suppressions:\n"
+        "    options:\n"
+        "      output_format: ${ASH_ZR_FORMAT}\n",
+        encoding="utf-8",
+    )
+    _, loaded = resolve_config_module.load_config_file_for_run(path)
+    # The control: the field holds the lowercase text for both spellings.
+    assert loaded.reporters.unused_suppressions.options.output_format == "markdown"
+
+    args = dict(loaded.__repr_args__())
+
+    shown = args["reporters"]["unused-suppressions"]["options"]["output_format"]
+    assert shown == "${ASH_ZR_FORMAT}", shown

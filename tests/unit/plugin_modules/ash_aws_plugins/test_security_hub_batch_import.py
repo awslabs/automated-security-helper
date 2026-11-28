@@ -39,7 +39,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar, Literal, Tuple
 from unittest.mock import MagicMock, patch
 
 import botocore.exceptions
@@ -49,7 +49,12 @@ from botocore.validate import ParamValidator
 from pydantic import ValidationError
 from typer.testing import CliRunner
 
+from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.base.reporter_plugin import (
+    ReporterPluginBase,
+    ReporterPluginConfigBase,
+)
 from automated_security_helper.cli.main import app
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.enums import ScannerStatus
@@ -3588,6 +3593,719 @@ def test_a_trusted_reference_is_not_recorded_where_the_scope_is_kept(
         assert options["findings_scope"] == _SCOPE_FROM_THE_ENVIRONMENT, options
 
 
+# A destination value the load copied in is recorded and shown by the reference
+# the operator's file wrote, and an in-tree reference at a place the confinement
+# replaced is dropped from the record as well as from the display:
+#   - the scope cell: findings_scope is a destination option the operator's
+#     file reads, copied into the section, so the copy carries its reference.
+#   - the region cell: the repository's reference at aws_region describes a
+#     value the confinement replaced, though its value ("test") is inside the
+#     operator's literal ("eu-test-7"), so neither view reads it into that text.
+#   - the spelling cell: the same, where the repository's file spells the
+#     section another way than the key the merge kept it under.
+@pytest.mark.unit
+def test_a_destination_scope_the_operator_read_is_recorded_and_shown_by_its_reference(
+    tmp_path, monkeypatch
+):
+    """ASH_CONFIG's file, outside the tree, reads findings_scope from a
+    variable. The repository's file writes only the archive flag. The scope is
+    the operator's, copied into the section by the reporter confinement, so the
+    record of the configuration and what `ash config get` shows hold the
+    reference the operator's file wrote, and the value is in neither."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    monkeypatch.setenv("ASH_TEST_SH_SCOPE", _SCOPE_FROM_THE_ENVIRONMENT)
+    monkeypatch.setenv(
+        "ASH_CONFIG", str(_operator_file(tmp_path, "${ASH_TEST_SH_SCOPE}"))
+    )
+    checkout = _checkout_with_config(
+        tmp_path,
+        "reporters:\n"
+        "  aws-security-hub:\n"
+        "    options:\n"
+        "      archive_resolved_findings: false\n",
+    )
+
+    config = resolve_config(source_dir=checkout)
+
+    section = config.get_plugin_config(
+        plugin_type="reporter", plugin_name="aws-security-hub"
+    )
+    assert section["options"]["findings_scope"] == _SCOPE_FROM_THE_ENVIRONMENT
+    for view in _recorded_and_shown(config):
+        options = view["reporters"]["aws-security-hub"]["options"]
+        assert options["findings_scope"] == "${ASH_TEST_SH_SCOPE}", options
+        assert _SCOPE_FROM_THE_ENVIRONMENT not in json.dumps(view)
+
+
+# The loader's own record has no reference for a set member the operator's file
+# read from the environment, so the load describes it from the loader's mark, and
+# the results file and `ash config get` dump a set as a list of plain strings,
+# so nothing in them carries the mark. These cells guard that such a member is
+# recorded and shown by the reference the file wrote, and that the value is in
+# no log line either:
+#   - the destination cell: findings_scope is a destination option, copied into
+#     the section by the reporter confinement, once with a checkout that writes
+#     only the archive flag and once with a checkout that holds no config file,
+#     where nothing is confined and resolve_config returns before any
+#     confinement.
+#   - the other-option cells: a set under an option that is no destination at
+#     all, on a load with no file inside the tree: the checkout is an empty
+#     directory, and the named file sits outside it.
+_SET_LABEL = "operator-label-read-from-the-environment"
+_DEBUG_LINE = "Found config for reporter plugin aws-security-hub"
+
+
+def _the_sections_debug_lines(config: AshConfig, caplog) -> list[str]:
+    """The DEBUG lines a lookup of the Security Hub section logs, as read back."""
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG, logger=ASH_LOGGER.name):
+        config.get_plugin_config(plugin_type="reporter", plugin_name="aws-security-hub")
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if _DEBUG_LINE in record.getMessage()
+    ]
+
+
+@pytest.mark.parametrize(
+    "checkout_holds",
+    ["only-the-archive-flag", "no-config-file"],
+)
+@pytest.mark.unit
+def test_a_set_member_the_operator_read_is_recorded_shown_and_logged_by_its_reference(
+    tmp_path, monkeypatch, caplog, checkout_holds
+):
+    """ASH_CONFIG's file, outside the tree, writes findings_scope as a set whose
+    one member is read from a variable, and the repository's file writes only
+    the archive flag, or the checkout holds no config file at all. The record of
+    the configuration and what `ash config get` shows hold the reference as the
+    operator's file wrote it, in a list of one entry, the value is in neither,
+    and the DEBUG line a lookup of the section logs does not hold it. The line is
+    read back first (the control): it is logged, so its absence of the value
+    means the value was redacted."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    monkeypatch.setenv("ASH_TEST_SH_SCOPE", _SCOPE_FROM_THE_ENVIRONMENT)
+    operator = tmp_path / "operator" / "ash.yaml"
+    operator.parent.mkdir()
+    operator.write_text(
+        "reporters:\n"
+        "  aws-security-hub:\n"
+        "    options:\n"
+        "      findings_scope: !!set\n"
+        "        ? ${ASH_TEST_SH_SCOPE}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ASH_CONFIG", str(operator))
+    if checkout_holds == "no-config-file":
+        checkout = tmp_path / "checkout"
+        checkout.mkdir()
+    else:
+        checkout = _checkout_with_config(
+            tmp_path,
+            "reporters:\n  aws-security-hub:\n    options:\n      archive_resolved_findings: false\n",
+        )
+
+    config = resolve_config(source_dir=checkout)
+
+    for view in _recorded_and_shown(config):
+        options = view["reporters"]["aws-security-hub"]["options"]
+        assert options["findings_scope"] == ["${ASH_TEST_SH_SCOPE}"], options
+        assert _SCOPE_FROM_THE_ENVIRONMENT not in json.dumps(view)
+    lines = _the_sections_debug_lines(config, caplog)
+    assert lines, "the lookup logged no line for the section"
+    assert [line for line in lines if _SCOPE_FROM_THE_ENVIRONMENT in line] == []
+
+
+def _operator_file_with_a_label_set(tmp_path: Path) -> Path:
+    operator = tmp_path / "operator" / "ash.yaml"
+    operator.parent.mkdir()
+    operator.write_text(
+        "reporters:\n"
+        "  aws-security-hub:\n"
+        "    options:\n"
+        "      custom_labels: !!set\n"
+        "        ? ${ASH_TEST_SH_LABEL}\n",
+        encoding="utf-8",
+    )
+    return operator
+
+
+def _no_label_in_either_view_or_log(config: AshConfig, caplog) -> None:
+    for view in _recorded_and_shown(config):
+        options = view["reporters"]["aws-security-hub"]["options"]
+        assert options["custom_labels"] == ["${ASH_TEST_SH_LABEL}"], options
+        assert _SET_LABEL not in json.dumps(view)
+    lines = _the_sections_debug_lines(config, caplog)
+    assert lines, "the lookup logged no line for the section"
+    assert [line for line in lines if _SET_LABEL in line] == []
+
+
+@pytest.mark.unit
+def test_a_set_member_under_an_option_that_is_no_destination_is_recorded_and_shown_by_its_reference(
+    tmp_path, monkeypatch, caplog
+):
+    """ASH_CONFIG's file, outside the tree, writes an option of its own under the
+    reporter's options, ``custom_labels``, as a set whose one member is read from
+    a variable, and the checkout is an empty directory with no config file. No
+    file is inside the tree, so resolve_config returns before any confinement.
+    The loader's own record holds no reference for the member, and the load of
+    the file describes it from its mark. The record of the configuration and what
+    `ash config get` shows hold the reference in a list of one entry, the value
+    is in neither, and the DEBUG line of the section's lookup, which is logged,
+    does not hold it."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    monkeypatch.setenv("ASH_TEST_SH_LABEL", _SET_LABEL)
+    monkeypatch.setenv("ASH_CONFIG", str(_operator_file_with_a_label_set(tmp_path)))
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+
+    config = resolve_config(source_dir=checkout)
+
+    _no_label_in_either_view_or_log(config, caplog)
+
+
+@pytest.mark.unit
+def test_a_set_member_in_a_file_named_outside_the_tree_is_recorded_and_shown_by_its_reference(
+    tmp_path, monkeypatch, caplog
+):
+    """The same set, read from a file the caller names with ``config_path`` that
+    sits outside the checkout, with ASH_CONFIG unset: the selected chain is wholly
+    the operator's, and resolve_config returns before any confinement here too."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    monkeypatch.setenv("ASH_TEST_SH_LABEL", _SET_LABEL)
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    named = _operator_file_with_a_label_set(tmp_path)
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+
+    config = resolve_config(config_path=named, source_dir=checkout)
+
+    _no_label_in_either_view_or_log(config, caplog)
+
+
+# A set member a file inside the checkout read from the environment is described
+# when that file loads, before any confinement runs. These cells guard what that
+# early description must not do:
+#   - the replaced cell: the S3 reporter's bucket_name, a destination option the
+#     reporter confinement replaces with the operator's that is no operator-only
+#     option, is written by the checkout as a set with one member read from a
+#     variable and by the operator's file as a set with a literal member equal to
+#     the value. The description at that member names a value the configuration no
+#     longer holds, and left in place it would be read into the operator's
+#     literal. Both views hold the literal as written, and no reference.
+#   - the once cell: custom_labels, an option no confinement replaces, written by
+#     the checkout as a set with one member read from a variable. The step that
+#     describes set members runs at the end of the load and again after the
+#     confinement, and the member still has one reference, one displayed
+#     reference and one rewrite, with its value among those redacted once.
+@pytest.mark.unit
+def test_a_set_the_repository_read_is_replaced_by_the_operators_literal_without_a_reference(
+    tmp_path, monkeypatch
+):
+    """The checkout's file writes the S3 reporter's bucket_name as a set whose one
+    member is read from a variable. The operator's file, outside the tree, writes
+    it as a set whose one member is a literal equal to what the variable gave. The
+    configuration holds the operator's set, and neither the record nor `ash
+    config get` holds a reference at it: a reference there would turn the
+    operator's literal into the checkout's reference, and the record would tell
+    whether an operator's literal equals a value the repository's file read."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    monkeypatch.setenv("ASH_TEST_S3_BUCKET_NAME", _SCOPE_FROM_THE_ENVIRONMENT)
+    operator = tmp_path / "operator" / "ash.yaml"
+    operator.parent.mkdir()
+    operator.write_text(
+        "reporters:\n"
+        "  s3:\n"
+        "    options:\n"
+        "      bucket_name: !!set\n"
+        f"        ? {_SCOPE_FROM_THE_ENVIRONMENT}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ASH_CONFIG", str(operator))
+    checkout = _checkout_with_config(
+        tmp_path,
+        "reporters:\n"
+        "  s3:\n"
+        "    options:\n"
+        "      bucket_name: !!set\n"
+        "        ? ${ASH_TEST_S3_BUCKET_NAME}\n",
+    )
+
+    config = resolve_config(source_dir=checkout)
+
+    # The control: the reporter's section holds the operator's set.
+    section = config.get_plugin_config(plugin_type="reporter", plugin_name="s3")
+    assert set(section["options"]["bucket_name"]) == {_SCOPE_FROM_THE_ENVIRONMENT}
+    for view in _recorded_and_shown(config):
+        options = view["reporters"]["s3"]["options"]
+        assert options["bucket_name"] == [_SCOPE_FROM_THE_ENVIRONMENT], options
+        assert "${ASH_TEST_S3_BUCKET_NAME}" not in json.dumps(view)
+
+
+@pytest.mark.unit
+def test_a_set_member_the_checkout_read_is_described_once_after_the_confinement(
+    tmp_path, monkeypatch
+):
+    """The checkout's file writes custom_labels as a set whose one member is read
+    from a variable. The load describes the member, and the step runs again once
+    the confinement has run: the second run finds the member described at its
+    place and adds nothing, so the configuration holds one reference, one
+    displayed reference and one rewrite for it, and its value once among the
+    values it redacts."""
+    from automated_security_helper.config.environment_record import UNKNOWN_INDEX
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    monkeypatch.setenv("ASH_TEST_SH_LABEL", _SET_LABEL)
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    checkout = _checkout_with_config(
+        tmp_path,
+        "reporters:\n"
+        "  aws-security-hub:\n"
+        "    options:\n"
+        "      custom_labels: !!set\n"
+        "        ? ${ASH_TEST_SH_LABEL}\n",
+    )
+
+    config = resolve_config(source_dir=checkout)
+
+    def at_the_set(items):
+        return [
+            item
+            for item in items
+            if item.path
+            and item.path[-1] is UNKNOWN_INDEX
+            and item.resolved == _SET_LABEL
+        ]
+
+    # The control: the member is described, in the record and in the view.
+    for view in _recorded_and_shown(config):
+        options = view["reporters"]["aws-security-hub"]["options"]
+        assert options["custom_labels"] == ["${ASH_TEST_SH_LABEL}"], options
+    assert len(at_the_set(config._environment_references)) == 1
+    assert len(at_the_set(config._displayed_environment_references)) == 1
+    assert len(at_the_set(config._written_references)) == 1
+    assert config._environment_values.count(_SET_LABEL) == 1
+
+
+@pytest.mark.unit
+def test_the_repositorys_reference_inside_the_operators_region_is_not_recorded(
+    tmp_path, monkeypatch
+):
+    """ASH_CONFIG's file holds a literal aws_region, and the repository's file
+    reads its own from a variable whose value ("test") is inside the operator's
+    text. The confinement replaces the repository's region with the operator's,
+    so the repository's reference describes a value the configuration no longer
+    holds: the record and what `ash config get` shows read the operator's
+    literal whole."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    monkeypatch.setenv("ASH_TEST_SH_REGION", "test")
+    operator = tmp_path / "operator" / "ash.yaml"
+    operator.parent.mkdir()
+    operator.write_text(
+        "reporters:\n  aws-security-hub:\n    options:\n      aws_region: eu-test-7\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ASH_CONFIG", str(operator))
+    checkout = _checkout_with_config(
+        tmp_path,
+        "reporters:\n"
+        "  aws-security-hub:\n"
+        "    options:\n"
+        "      aws_region: ${ASH_TEST_SH_REGION}\n",
+    )
+
+    config = resolve_config(source_dir=checkout)
+
+    for view in _recorded_and_shown(config):
+        options = view["reporters"]["aws-security-hub"]["options"]
+        assert options["aws_region"] == "eu-test-7", options
+
+
+@pytest.mark.unit
+def test_a_base_files_reference_under_another_spelling_of_the_section_is_not_recorded(
+    tmp_path, monkeypatch
+):
+    """ASH_CONFIG's file holds a literal aws_region. The checkout's .ash.yaml
+    spells the reporter ``AwsSecurityHub`` and reads its region from a variable
+    whose value ("test") is inside the operator's text. A child file one
+    directory above extends it (a base must sit inside the extending file's
+    directory) and spells the reporter ``aws-security-hub``, so the merge joins
+    both under the child's spelling while the base's reference keeps its own.
+    The confinement replaces the region with the operator's, and the base's
+    reference describes a value the configuration no longer holds under either
+    spelling: the record and what `ash config get` shows read the operator's
+    literal whole."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    monkeypatch.setenv("ASH_TEST_SH_REGION", "test")
+    operator = tmp_path / "operator" / "ash.yaml"
+    operator.parent.mkdir()
+    operator.write_text(
+        "reporters:\n  aws-security-hub:\n    options:\n      aws_region: eu-test-7\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ASH_CONFIG", str(operator))
+    checkout = _checkout_with_config(
+        tmp_path / "ops",
+        "reporters:\n"
+        "  AwsSecurityHub:\n"
+        "    options:\n"
+        "      aws_region: ${ASH_TEST_SH_REGION}\n",
+    )
+    child = tmp_path / "ops" / "child.yaml"
+    child.write_text(
+        "extends: checkout/.ash.yaml\n"
+        "reporters:\n"
+        "  aws-security-hub:\n"
+        "    enabled: false\n",
+        encoding="utf-8",
+    )
+
+    config = resolve_config(config_path=child, source_dir=checkout)
+
+    for view in _recorded_and_shown(config):
+        options = view["reporters"]["aws-security-hub"]["options"]
+        assert options["aws_region"] == "eu-test-7", options
+
+
+# A value the operator's file read from the environment is described wherever the
+# confinement put it, and no answer depends on whether the repository's file read
+# the same variable or a different one:
+#   - the case cell: the repository reads the operator's variable at
+#     ``AWS_Region``, a key of its own beside ``aws_region``, and the operator's
+#     value at ``aws_region`` still gets its own reference.
+#   - the reference cells: the repository's reference at ``aws_region`` is dropped
+#     whether its variable holds the operator's value or another, so neither view
+#     tells which; the operator's reference is what both views hold.
+#   - the plugin cells: the options a loaded reporter declares are confined after
+#     the load, and the operator's value copied there is described as well.
+@pytest.mark.unit
+def test_a_case_variant_of_a_destination_leaves_the_operators_value_described(
+    tmp_path, monkeypatch
+):
+    """ASH_CONFIG's file, outside the tree, reads aws_region from a variable. The
+    checkout's file reads the same variable at ``AWS_Region``, a key that differs
+    from the option in case only, so the confinement leaves it beside the
+    operator's ``aws_region``. Each key is described by the reference written at
+    it: both views hold the reference at both keys, and the value is in neither."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    monkeypatch.setenv("ASH_TEST_SH_OPERATOR_REGION", "xx-test-9")
+    operator = tmp_path / "operator" / "ash.yaml"
+    operator.parent.mkdir()
+    operator.write_text(
+        "reporters:\n"
+        "  aws-security-hub:\n"
+        "    options:\n"
+        "      aws_region: ${ASH_TEST_SH_OPERATOR_REGION}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ASH_CONFIG", str(operator))
+    checkout = _checkout_with_config(
+        tmp_path,
+        "reporters:\n"
+        "  aws-security-hub:\n"
+        "    options:\n"
+        "      AWS_Region: ${ASH_TEST_SH_OPERATOR_REGION}\n",
+    )
+
+    config = resolve_config(source_dir=checkout)
+
+    for view in _recorded_and_shown(config):
+        options = view["reporters"]["aws-security-hub"]["options"]
+        assert options["aws_region"] == "${ASH_TEST_SH_OPERATOR_REGION}", options
+        assert options["AWS_Region"] == "${ASH_TEST_SH_OPERATOR_REGION}", options
+        assert "xx-test-9" not in json.dumps(view)
+
+
+@pytest.mark.parametrize(
+    "repository_region",
+    ["xx-test-9", "checkout-region-1"],
+    ids=["a-variable-equal-to-the-operators-value", "a-different-value"],
+)
+@pytest.mark.unit
+def test_the_repositorys_reference_at_a_destination_is_dropped_whatever_it_resolved_to(
+    tmp_path, monkeypatch, repository_region
+):
+    """ASH_CONFIG's file, outside the tree, reads aws_region from one variable,
+    and the checkout's file reads its own from another, which holds the
+    operator's value or a different one. The confinement puts the operator's
+    value at the option either way. Both views hold the operator's reference
+    there and not the checkout's, and neither value: a file's author cannot learn
+    from the answer whether the variable they named holds the operator's value."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    monkeypatch.setenv("ASH_TEST_SH_OPERATOR_REGION", "xx-test-9")
+    monkeypatch.setenv("ASH_TEST_SH_REPO_REGION", repository_region)
+    operator = tmp_path / "operator" / "ash.yaml"
+    operator.parent.mkdir()
+    operator.write_text(
+        "reporters:\n"
+        "  aws-security-hub:\n"
+        "    options:\n"
+        "      aws_region: ${ASH_TEST_SH_OPERATOR_REGION}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ASH_CONFIG", str(operator))
+    checkout = _checkout_with_config(
+        tmp_path,
+        "reporters:\n"
+        "  aws-security-hub:\n"
+        "    options:\n"
+        "      aws_region: ${ASH_TEST_SH_REPO_REGION}\n",
+    )
+
+    config = resolve_config(source_dir=checkout)
+
+    # The control: the reporter's section holds the operator's value.
+    section = config.get_plugin_config(
+        plugin_type="reporter", plugin_name="aws-security-hub"
+    )
+    assert section["options"]["aws_region"] == "xx-test-9"
+    for view in _recorded_and_shown(config):
+        options = view["reporters"]["aws-security-hub"]["options"]
+        assert options["aws_region"] == "${ASH_TEST_SH_OPERATOR_REGION}", options
+        dumped = json.dumps(view)
+        assert "${ASH_TEST_SH_REPO_REGION}" not in dumped
+        assert "xx-test-9" not in dumped
+        assert repository_region not in dumped
+
+
+_PLUGIN_ENDPOINT = "plugin-endpoint-read-from-the-environment"
+
+
+class _EndpointOptions(ReporterOptionsBase):
+    endpoint: str = "default-endpoint"
+
+
+class _EndpointConfig(ReporterPluginConfigBase):
+    name: Literal["endpoint-reporter"] = "endpoint-reporter"
+    options: _EndpointOptions = _EndpointOptions()
+
+
+class _EndpointReporter(ReporterPluginBase[_EndpointConfig]):
+    destination_options: ClassVar[Tuple[str, ...]] = ("endpoint",)
+
+    def report(self, model):
+        return None
+
+
+_REPOSITORY_ENDPOINTS = {
+    "a-literal": (
+        "reporters:\n  endpoint-reporter:\n    options:\n      endpoint: repo-endpoint\n"
+    ),
+    "a-reference-to-the-operators-value": (
+        "reporters:\n"
+        "  endpoint-reporter:\n"
+        "    options:\n"
+        "      endpoint: ${ASH_TEST_REPO_ENDPOINT}\n"
+    ),
+    "a-section-with-no-endpoint": (
+        "reporters:\n  endpoint-reporter:\n    enabled: true\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("repository", list(_REPOSITORY_ENDPOINTS))
+@pytest.mark.unit
+def test_a_declared_destination_the_operator_read_is_recorded_and_shown_by_its_reference(
+    tmp_path, monkeypatch, repository
+):
+    """A loaded reporter declares ``endpoint`` as a destination option, which only
+    ``confine_declared_reporter_destinations`` can confine, after the load. The
+    operator's file, outside the tree, reads it from a variable; the checkout
+    writes a literal, a reference to a variable that holds the operator's value,
+    or a section with no endpoint. The option holds the operator's value in every
+    case, and both views hold the operator's reference there: the record of the
+    configuration is written from it, so a copy no rewrite describes would put
+    the value in the results file."""
+    from automated_security_helper.config.reporter_trust import (
+        confine_declared_reporter_destinations,
+    )
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    monkeypatch.setenv("ASH_TEST_PLUGIN_ENDPOINT", _PLUGIN_ENDPOINT)
+    monkeypatch.setenv("ASH_TEST_REPO_ENDPOINT", _PLUGIN_ENDPOINT)
+    operator = tmp_path / "operator" / "ash.yaml"
+    operator.parent.mkdir()
+    operator.write_text(
+        "reporters:\n"
+        "  endpoint-reporter:\n"
+        "    options:\n"
+        "      endpoint: ${ASH_TEST_PLUGIN_ENDPOINT}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ASH_CONFIG", str(operator))
+    checkout = _checkout_with_config(tmp_path, _REPOSITORY_ENDPOINTS[repository])
+
+    config = resolve_config(source_dir=checkout)
+    confine_declared_reporter_destinations(config, [_EndpointReporter])
+
+    # The control: the option holds the value the operator's variable gave.
+    section = config.model_dump()["reporters"]["endpoint-reporter"]
+    assert section["options"]["endpoint"] == _PLUGIN_ENDPOINT
+    for view in _recorded_and_shown(config):
+        options = view["reporters"]["endpoint-reporter"]["options"]
+        assert options["endpoint"] == "${ASH_TEST_PLUGIN_ENDPOINT}", options
+        dumped = json.dumps(view)
+        assert _PLUGIN_ENDPOINT not in dumped
+        assert "${ASH_TEST_REPO_ENDPOINT}" not in dumped
+        assert "repo-endpoint" not in dumped
+
+
+class _WholeSectionReporter(ReporterPluginBase[_EndpointConfig]):
+    """Off-host, and it declares no destination options: nothing says which of
+    its options name where it sends, so the whole section is the operator's."""
+
+    sends_off_host: ClassVar[bool] = True
+
+    def report(self, model):
+        return None
+
+
+_OVERRIDE_ENDPOINT = "endpoint-the-operator-gave-by-override"
+_OTHER_ENDPOINT = "text-another-variable-holds-elsewhere"
+
+
+@pytest.mark.parametrize(
+    "variable_holds",
+    [_OVERRIDE_ENDPOINT, _OTHER_ENDPOINT],
+    ids=["a-variable-equal-to-the-overrides-text", "a-different-text"],
+)
+@pytest.mark.unit
+def test_the_repositorys_reference_in_a_replaced_whole_section_is_dropped_whatever_it_resolved_to(
+    tmp_path, monkeypatch, variable_holds
+):
+    """``ash report`` and ``ash merge`` hold a named config file, outside every
+    tree, to the repository's rules, and give an off-host reporter that declares
+    no destination options the section the overrides set, as a whole. The file
+    reads ``endpoint`` from a variable; an override gives the option a text of
+    its own, and the variable holds that same text or another. The section the
+    reporter is built from holds the override's text either way, and both views
+    hold exactly that text: no reference of the file's is left at the option,
+    whether or not its variable holds the override's text, so the answer to a
+    file that names a variable does not depend on what the variable holds."""
+    from automated_security_helper.config.reporter_trust import (
+        confine_declared_reporter_destinations,
+        confine_off_host_reporters_to_overrides,
+    )
+    from automated_security_helper.config.resolve_config import resolve_config
+    from automated_security_helper.config.untrusted_source import REPORT_CONFIG_FILE
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    monkeypatch.setenv("ASH_TEST_REPO_ENDPOINT", variable_holds)
+    named = tmp_path / "named" / "ash.yaml"
+    named.parent.mkdir()
+    named.write_text(
+        "reporters:\n"
+        "  endpoint-reporter:\n"
+        "    options:\n"
+        "      endpoint: ${ASH_TEST_REPO_ENDPOINT}\n",
+        encoding="utf-8",
+    )
+    collector = tmp_path / "collector"
+    collector.mkdir()
+    overrides = [f"reporters.endpoint-reporter.options.endpoint={_OVERRIDE_ENDPOINT}"]
+
+    # The two calls ``ash report`` makes, in its order: the first marks the
+    # config and holds the named file to the overrides, the second runs once the
+    # plugin modules are loaded and gives the reporter the overrides' section.
+    config = resolve_config(
+        config_path=named,
+        config_overrides=overrides,
+        fallback_to_default=False,
+        source_dir=collector,
+    )
+    confine_off_host_reporters_to_overrides(
+        config, [named], overrides, REPORT_CONFIG_FILE
+    )
+    confine_declared_reporter_destinations(
+        config, [_WholeSectionReporter], source=REPORT_CONFIG_FILE
+    )
+
+    # The control: the option holds the override's text.
+    section = config.model_dump()["reporters"]["endpoint-reporter"]
+    assert section["options"]["endpoint"] == _OVERRIDE_ENDPOINT
+    for view in _recorded_and_shown(config):
+        options = view["reporters"]["endpoint-reporter"]["options"]
+        assert options["endpoint"] == _OVERRIDE_ENDPOINT, options
+        dumped = json.dumps(view)
+        assert "${ASH_TEST_REPO_ENDPOINT}" not in dumped
+        if variable_holds != _OVERRIDE_ENDPOINT:
+            assert variable_holds not in dumped
+
+
+@pytest.mark.unit
+def test_the_declared_step_changes_nothing_when_it_runs_again(tmp_path, monkeypatch):
+    """``confine_declared_reporter_destinations`` runs the step that describes
+    the values the confinement copied for every reporter it is given, the
+    built-in ones included, which ``resolve_config`` described already. The
+    operator's file reads a plugin reporter's endpoint and the built-in
+    reporter's region from variables, and the checkout's file reads both from
+    others. After one call, a second one with the same classes leaves the
+    configuration's references, its displayed references, its rewrites and its
+    values read from the environment as they were, in order."""
+    from automated_security_helper.config.reporter_trust import (
+        confine_declared_reporter_destinations,
+    )
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    monkeypatch.setenv("ASH_TEST_PLUGIN_ENDPOINT", _PLUGIN_ENDPOINT)
+    monkeypatch.setenv("ASH_TEST_REPO_ENDPOINT", _PLUGIN_ENDPOINT)
+    monkeypatch.setenv("ASH_TEST_SH_OPERATOR_REGION", "xx-test-9")
+    monkeypatch.setenv("ASH_TEST_SH_REPO_REGION", "checkout-region-1")
+    operator = tmp_path / "operator" / "ash.yaml"
+    operator.parent.mkdir()
+    operator.write_text(
+        "reporters:\n"
+        "  endpoint-reporter:\n"
+        "    options:\n"
+        "      endpoint: ${ASH_TEST_PLUGIN_ENDPOINT}\n"
+        "  aws-security-hub:\n"
+        "    options:\n"
+        "      aws_region: ${ASH_TEST_SH_OPERATOR_REGION}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ASH_CONFIG", str(operator))
+    checkout = _checkout_with_config(
+        tmp_path,
+        "reporters:\n"
+        "  endpoint-reporter:\n"
+        "    options:\n"
+        "      endpoint: ${ASH_TEST_REPO_ENDPOINT}\n"
+        "  aws-security-hub:\n"
+        "    options:\n"
+        "      aws_region: ${ASH_TEST_SH_REPO_REGION}\n",
+    )
+    reporters = [_EndpointReporter, SecurityHubReporter]
+    lists = (
+        "_environment_references",
+        "_displayed_environment_references",
+        "_written_references",
+        "_environment_values",
+    )
+
+    config = resolve_config(source_dir=checkout)
+    confine_declared_reporter_destinations(config, reporters)
+    once = {name: list(getattr(config, name)) for name in lists}
+
+    # The control: each list holds something to compare.
+    for name in lists:
+        assert once[name], name
+    confine_declared_reporter_destinations(config, reporters)
+
+    for name in lists:
+        assert list(getattr(config, name)) == once[name], name
+
+
 @pytest.mark.unit
 def test_confinement_returns_the_options_that_took_the_trusted_base_s_value(
     tmp_path, monkeypatch
@@ -4444,12 +5162,13 @@ def test_get_config_marks_the_operator_only_options_a_repository_file_sets(
     them. A scan of that checkout ignores both, so they are shown marked. The
     file counts as the repository's by the name it was given or by its target,
     and so does a base it extends. A scope the file reads from the
-    environment is shown neither by the value nor by a marker made of it:
-    the option is absent from the answer. The
-    rest of the section (aws_region) is the operator's too and is confined
-    for a file in another checkout, so it is absent rather than shown as
-    applied (docs/content/docs/plugins/aws/security-hub-reporter.md, "Options
-    only the operator sets")."""
+    environment is shown as ignored too, and never by the value: the load
+    drops the reference at the place, but the loader's mark on the value the
+    file read names it, so the marker is `<from ${ASH_TEST_SH_SCOPE}>`. The rest of the section (aws_region) is the
+    operator's too and is confined for a file in another checkout, so it is
+    absent rather than shown as applied
+    (docs/content/docs/plugins/aws/security-hub-reporter.md, "Options only the
+    operator sets")."""
     _not_in_a_checkout(tmp_path)
     repository_options = _REPOSITORY_OPTIONS
     if scope == "from-the-environment":
@@ -4488,11 +5207,14 @@ def test_get_config_marks_the_operator_only_options_a_repository_file_sets(
         )
     else:
         # The confinement settles the place and drops the reference the file
-        # wrote there, so get_config (``_without_environment_read_markers``)
-        # withdraws a marker that would print the server's environment value:
-        # the option is absent, never the value and never a marker made of it.
+        # wrote there, but the file wrote a reference, so the loader's mark on
+        # the value it read shows it: the marker says the file set an option
+        # the scan ignores, by the reference, and holds no part of the server's
+        # environment value.
         assert "victim-from-the-environment" not in json.dumps(result), result
-        assert "findings_scope" not in options, options
+        assert options["findings_scope"] == (
+            "<operator only; ignored from this file: <from ${ASH_TEST_SH_SCOPE}>>"
+        ), options
     assert options["archive_resolved_findings"] == (
         "<operator only; ignored from this file: true>"
     )

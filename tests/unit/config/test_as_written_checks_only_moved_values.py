@@ -421,3 +421,70 @@ def test_a_value_its_reference_does_not_follow_refuses_the_patch(
     # The control: following the reference, the same patch is written.
     followed = _select(environment, LIST, ops)
     assert followed["success"] is True, "the control patch was refused"
+
+
+# A set the profile read from the environment, in an extra plugin's options (a
+# mapping a client may patch). A set has no positions, so the profile's reference
+# is kept at the unknown index of its container, and the record writes it over
+# every entry of the container that equals the value. An op that writes the
+# container makes it the client's text. These cells guard:
+#   - the intact cell: a test op of the set before any op wrote it is answered
+#     alike for the value and for another text, since it reads the profile as
+#     written.
+#   - the replaced cell: a replace of the set with one entry and a test of that
+#     entry are answered alike for the value and for another text, and the
+#     client's copy holds the entry as the client wrote it.
+SET = (
+    "scanners:\n"
+    "  customx:\n"
+    "    enabled: true\n"
+    "    options:\n"
+    "      labels: !!set\n"
+    "        ? ${ASH_TEST_SET_MEMBER}\n"
+) + _allowing(["/scanners/customx/options/labels"], replace_default_denied_paths=True)
+LABELS = "/scanners/customx/options/labels"
+
+
+def test_a_test_of_a_set_read_from_the_environment_reads_the_same_for_any_guess(
+    environment, monkeypatch
+):
+    """The set still holds the profile's reference, so a test op compares a
+    client's entry with the reference the file wrote: the value is refused as
+    another text is, and the refusals are the same text."""
+    monkeypatch.setenv("ASH_TEST_SET_MEMBER", CANARY)
+    answers = {}
+    for guess in (CANARY, OTHER):
+        result = _select(
+            environment, SET, [{"op": "test", "path": LABELS, "value": [guess]}]
+        )
+        refused = result["success"] is False
+        assert refused, "the control: the profile's reference is not the guess"
+        answers[guess] = json.dumps(result, sort_keys=True).replace(guess, "GUESS")
+    # A boolean, so a failure does not print the value.
+    same = answers[CANARY] == answers[OTHER]
+    assert same, "the refusal tells a right guess from a wrong one"
+
+
+def test_a_replace_then_a_test_of_a_set_read_from_the_environment_reads_the_same_for_any_guess(
+    environment, monkeypatch
+):
+    """A replace of the set with one entry makes the set the client's, so a test
+    of that entry is answered alike whether the entry is the value or another
+    text, and the client's copy holds the entry as written and no reference."""
+    monkeypatch.setenv("ASH_TEST_SET_MEMBER", CANARY)
+    answers = {}
+    for guess in (CANARY, OTHER):
+        ops = [
+            {"op": "replace", "path": LABELS, "value": [guess]},
+            {"op": "test", "path": LABELS, "value": [guess]},
+        ]
+        result = _select(environment, SET, ops)
+        applied = result["success"] is True
+        assert applied, "the patch was refused"
+        text = result["path"].read_text(encoding="utf-8")
+        # Booleans, so a failure does not print the value.
+        written = guess in text and "${ASH_TEST_SET_MEMBER}" not in text
+        assert written, "the client's copy does not hold the entry as written"
+        answers[guess] = text.replace(guess, "GUESS")
+    same = answers[CANARY] == answers[OTHER]
+    assert same, "the client's copy tells a right guess from a wrong one"

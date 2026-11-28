@@ -288,8 +288,10 @@ from automated_security_helper.config.environment_record import (
     ENVIRONMENT_VALUE_SHOWN,
     UNKNOWN_INDEX,
     EnvironmentReference,
+    anchored_literals,
     environment_references,
     referenced_name,
+    with_anchored_forms,
     with_environment_values_shown,
     written_without_tag,
 )
@@ -2991,9 +2993,15 @@ class ResolvedConfigDocument:
     #: The references of ``environment_references`` the merged ``data`` still
     #: shows at their places (``_still_describes``): the ones a view of the
     #: merged configuration writes back as the file wrote them (`ash config
-    #: get`, the MCP get_config tool). A base's reference under an overlay's
-    #: literal describes a file of the chain, not the configuration, and is
-    #: left out here; every other consumer reads ``environment_references``.
+    #: get`, the MCP get_config tool). A base's reference under a later
+    #: document's value describes a file of the chain, not the configuration:
+    #: the merge marks it (``EnvironmentReference.written_over``,
+    #: ``_mark_written_over``), whatever that value holds, and it is left out
+    #: here; every other consumer reads ``environment_references``. The display-
+    #: only entries for the literal relative paths of a file whose own path the
+    #: environment chose (``EnvironmentReference.literal``) are only here: the
+    #: record and the redaction values take them from here
+    #: (``config_validator.literal_rewrites``), and no session copy reads one.
     displayed_environment_references: List[EnvironmentReference] = field(
         default_factory=list
     )
@@ -3002,20 +3010,27 @@ class ResolvedConfigDocument:
     environment_paths: FrozenSet[Path] = frozenset()
     #: Every string the files of ``chain`` read from the environment, those of
     #: ``extends`` and ``patch`` included: each reference's resolved string and
-    #: the part the variable gave. Only for a free-text message that names no
-    #: field (``config_validator.redact_values``); a message about a field
-    #: quotes it by its place (``environment_record.with_environment_values_shown``).
+    #: the part the variable gave, and the text the load made of each relative
+    #: path a file whose own path the environment chose wrote itself, whose
+    #: directory holds what the variable gave. Only for a free-text message that
+    #: names no field (``config_validator.redact_values``); a message about a
+    #: field quotes it by its place
+    #: (``environment_record.with_environment_values_shown``).
     environment_values: List[str] = field(default_factory=list)
     #: Where each reference a file of ``chain`` wrote ended up in ``data``, by
     #: ``EnvironmentReference.place_key`` (the file, the path it holds in the
     #: file's own document, value or key, its text): the places of
-    #: ``environment_references`` it is now at, none for one a ``patch`` wrote
-    #: over or that sets no value. For the record of the configuration
+    #: ``environment_references`` it is now at, each with the text the load made
+    #: of a relative path there and the directory it was anchored at
+    #: (``EnvironmentReference.anchored``, None for any other value), none for
+    #: one a ``patch`` wrote over or that sets no value, and none for one a later
+    #: document of the chain wrote over (``EnvironmentReference.written_over``).
+    #: For the record of the configuration
     #: (config_validator.environment_record_read), which reads each file's
     #: references in the file's own terms.
-    reference_places: Dict[Tuple[Any, ...], List[Tuple[Any, ...]]] = field(
-        default_factory=dict
-    )
+    reference_places: Dict[
+        Tuple[Any, ...], List[Tuple[Tuple[Any, ...], Optional[Tuple[str, str]]]]
+    ] = field(default_factory=dict)
     #: What a load that filled the files of ``documents`` from the operator's
     #: profile read in each (``load_config_file``'s ``fill``: the copy of a
     #: profile a client patched holds each value the profile read from the
@@ -3044,12 +3059,37 @@ def _shown_chain_path(path: Path, environment_paths: Collection[Path]) -> str:
 
 
 def _values_of(references: List[EnvironmentReference]) -> List[str]:
-    """``ResolvedConfigDocument.environment_values`` for ``references``."""
+    """``ResolvedConfigDocument.environment_values`` for ``references``.
+
+    The text the load made of a relative path (``EnvironmentReference.anchored``)
+    joins where it no longer contains the variable's part, a ``..`` or ``./``
+    folded out of it: the needles of the resolved string and the part miss it
+    there. A display-only entry (``EnvironmentReference.literal``) is a relative
+    path a file whose own path the environment chose wrote itself: nothing was
+    read at its place, so it has no value, and the text the anchoring made of it,
+    which holds that file's directory, is the one thing it gives."""
     values: List[str] = []
     for reference in references:
+        if reference.literal:
+            anchored_text = (
+                reference.anchored[0]
+                if reference.anchored is not None
+                else reference.resolved
+            )
+            if anchored_text and anchored_text not in values:
+                values.append(anchored_text)
+            continue
         for text in (reference.resolved, reference.value):
             if text and text not in values:
                 values.append(text)
+        anchored = reference.anchored
+        if (
+            anchored is not None
+            and reference.value
+            and reference.value not in anchored[0]
+            and anchored[0] not in values
+        ):
+            values.append(anchored[0])
     return values
 
 
@@ -3098,6 +3138,12 @@ class _ChainState:
     texts: Dict[Path, str] = field(default_factory=dict)
     #: ``ResolvedConfigDocument.environment_references``.
     references: List[EnvironmentReference] = field(default_factory=list)
+    #: The display-only entries for the literal relative paths of the files of
+    #: the chain whose own path the environment chose
+    #: (``EnvironmentReference.literal``). Followed through each file's ``patch``
+    #: as ``references`` are, and left out of every read: only
+    #: ``ResolvedConfigDocument.displayed_environment_references`` holds them.
+    literals: List[EnvironmentReference] = field(default_factory=list)
     #: Every reference a file of the chain read, ``extends`` and ``patch``
     #: included, where it was written: ``ResolvedConfigDocument.environment_values``.
     read: List[EnvironmentReference] = field(default_factory=list)
@@ -4465,9 +4511,17 @@ def _still_describes(document: Any, reference: EnvironmentReference) -> bool:
     its value, is left out of the displayed view
     (``ResolvedConfigDocument.displayed_environment_references``); it stays an
     environment read (``environment_references``), so redaction still masks
-    its value. A value that still contains the environment's part is kept,
-    erring toward keeping.
+    its value. So is a reference a later document of the chain wrote over
+    (``EnvironmentReference.written_over``, marked at each merge by
+    ``_mark_written_over``), whatever that document's value holds: the place
+    shows that document's value, which no variable's value can change. Any
+    other reference is kept only where its place holds exactly the text it
+    resolved to or the text its anchoring recorded (a relative path the load
+    anchored, or where a patch operation's value landed:
+    ``EnvironmentReference.anchored``).
     """
+    if reference.written_over:
+        return False
     node = document
     for segment in reference.path:
         if not isinstance(node, (dict, list)):
@@ -4495,10 +4549,92 @@ def _still_describes(document: Any, reference: EnvironmentReference) -> bool:
                 return False
     if reference.key:
         return isinstance(node, dict) and reference.resolved in node
-    text = node if isinstance(node, str) else str(node)
-    return text == reference.resolved or (
-        bool(reference.value) and reference.value in text
+    if not isinstance(node, str):
+        return False
+    return node == reference.resolved or (
+        reference.anchored is not None and node == reference.anchored[0]
     )
+
+
+def _writes_over(
+    overlay: Any, path: Tuple[Any, ...], model: Optional[type[BaseModel]] = AshConfig
+) -> bool:
+    """Whether merging ``overlay``, a mapping, over a document that holds a value
+    at ``path`` replaces that value (deep_merge): ``overlay`` holds something at
+    ``path``, or a list or a scalar at a place on the way, or a mapping where
+    ``path`` steps into a list.
+
+    A key is matched as the merge matches it: by ``_resolve_dict_key`` and,
+    directly under a plugin segment (``model`` walks beside the document, from the
+    whole configuration down), an undeclared section also by the plugin names the
+    merge joins it by (``plugin_key_lookup_names``: ``my-scanner`` and
+    ``MyScanner`` are one section, kept under the later document's spelling).
+    Never at any other depth, and never for a declared section, which the load
+    folds before the merge. A place the merge kept must stay unmarked, or its
+    reference would lose its rewrite and the record would hold the value.
+    """
+    node = overlay
+    for segment in path:
+        if not isinstance(node, dict) or not isinstance(segment, str):
+            return True
+        settings = _settings_of(model) if model is not None else {}
+        key = _resolve_dict_key(node, segment)
+        if (
+            key not in node
+            and model is not None
+            and issubclass(model, _PluginConfigSegment)
+            and segment not in settings
+        ):
+            # deep_merge joins two spellings of a section the segment does not
+            # declare (my-scanner and MyScanner) under the later document's
+            # spelling: the first such key of the later document whose plugin
+            # names overlap the reference's.
+            names = plugin_key_lookup_names(segment)
+            key = next(
+                (
+                    other
+                    for other in node
+                    if isinstance(other, str)
+                    and other not in settings
+                    and plugin_key_lookup_names(other) & names
+                ),
+                key,
+            )
+        if key not in node:
+            return False
+        setting = settings.get(key)
+        model = setting.model if setting is not None else None
+        node = node[key]
+    return True
+
+
+def _mark_written_over(
+    references: List[EnvironmentReference],
+    literals: List[EnvironmentReference],
+    layers: Sequence[Tuple[int, int, int, int, Any]],
+    own: Any,
+) -> None:
+    """Mark, in place, each value reference of a file's bases that a document
+    merged after its base writes over, and each literal entry
+    (``EnvironmentReference.literal``) the same way. ``layers`` holds, for each
+    base in merge order, the slice of ``references`` and the slice of
+    ``literals`` its subtree read and the document it was merged as; ``own``,
+    the file's own document, is merged last."""
+    for index, (start, end, literal_start, literal_end, _document) in enumerate(layers):
+        later = [layer[-1] for layer in layers[index + 1 :]]
+        later.append(own)
+        for entries, first, last in (
+            (references, start, end),
+            (literals, literal_start, literal_end),
+        ):
+            for position in range(first, last):
+                reference = entries[position]
+                if reference.key or reference.written_over:
+                    continue
+                if any(
+                    _writes_over(document, tuple(reference.path)) for document in later
+                ):
+                    entries[position] = replace(reference, written_over=True)
 
 
 def _split_references(
@@ -4536,6 +4672,48 @@ def _split_references(
         ):
             from_ops.append((index, tuple(reference.path[3:]), reference))
     return own, from_ops
+
+
+def _literal_operations(
+    written_ops: Any, anchored_ops: Any, from_ops: List[_OpReference], shown_dir: str
+) -> List[_OpReference]:
+    """The display-only entries (``EnvironmentReference.literal``) for the literal
+    relative paths the values of a file's ``add`` and ``replace`` operations
+    write, in the shape of ``_split_references``'s ``from_ops`` so that
+    ``_placed_through_patch`` places them where the values land.
+
+    ``written_ops`` are the operations as the file wrote them and
+    ``anchored_ops`` the same after the anchoring; an entry is made where the
+    anchoring changed a string and the file did not read it from the
+    environment (its reference in ``from_ops`` records its own anchored text).
+    Only a file whose own path the environment chose has any
+    (``shown_dir`` is then ``<value>``).
+    """
+    if shown_dir != ENVIRONMENT_VALUE_SHOWN:
+        return []
+    read_places: Dict[int, Set[Tuple[Any, ...]]] = {}
+    for index, inside, reference in from_ops:
+        if not reference.key:
+            read_places.setdefault(index, set()).add(inside)
+    found: List[_OpReference] = []
+    for index, (written_op, anchored_op) in enumerate(zip(written_ops, anchored_ops)):
+        if not (
+            isinstance(written_op, dict)
+            and isinstance(anchored_op, dict)
+            and written_op.get("op") in VALUE_WRITING_OPS
+            and "value" in written_op
+            and "value" in anchored_op
+        ):
+            continue
+        for entry in anchored_literals(
+            written_op["value"],
+            anchored_op["value"],
+            skip=read_places.get(index, set()),
+            shown_dir=shown_dir,
+            resolved_as_written=True,
+        ):
+            found.append((index, tuple(entry.path), entry))
+    return found
 
 
 def _node_at(root: Any, path: Tuple[Any, ...]) -> Any:
@@ -4596,7 +4774,11 @@ def _plant(
     held = container[last]
     if isinstance(held, str) and held in planted:
         return held
-    if held != reference.resolved:
+    # A relative path the load anchored holds the text the anchoring made of it,
+    # which the reference recorded (``with_anchored_forms``): that text exactly.
+    if held != reference.resolved and not (
+        reference.anchored is not None and held == reference.anchored[0]
+    ):
         return None
     container[last] = token
     planted.add(token)
@@ -4610,6 +4792,7 @@ def _placed_through_patch(
     from_ops: List[_OpReference],
     where: str,
     rewritten: Optional[Dict[int, _Rewritten]] = None,
+    anchored_in: Optional[Tuple[Any, str]] = None,
 ) -> List[EnvironmentReference]:
     """The references of a file and of its bases, each at the place its value
     has once the file's ``patch`` (``ops``, which applied to ``document``) has.
@@ -4630,18 +4813,31 @@ def _placed_through_patch(
 
     A reference whose place does not hold what it read (a value the extending
     file wrote over) is kept as it was.
+
+    ``anchored_in`` is the document the file's operations made
+    (``_Patched.document``) and the directory they were anchored at, as a view
+    shows it (``<value>`` for a file whose own path the environment chose). With
+    ``anchored_in``, a reference from an operation's value records the text the
+    anchoring made of it where it lands (``with_anchored_forms``), as the file's
+    own references record theirs before the patch.
+
+    A display-only literal entry (``EnvironmentReference.literal``) is followed
+    like a reference, in ``tracked`` or, for an operation's value, in
+    ``from_ops``, and is returned among the others for the caller to split off.
     """
     shadow = copy.deepcopy(document)
     shadow_ops = copy.deepcopy(ops)
     tokens: Set[str] = set()
-    planted: List[Tuple[EnvironmentReference, Optional[str]]] = []
+    # Each reference, its token (None where its place does not hold it), and
+    # whether it came from an operation's value.
+    planted: List[Tuple[EnvironmentReference, Optional[str], bool]] = []
     for reference in tracked:
         token = _plant(shadow, tuple(reference.path), reference, tokens)
-        planted.append((reference, token))
+        planted.append((reference, token, False))
     for index, inside, reference in from_ops:
         token = _plant(shadow_ops[index], ("value", *inside), reference, tokens)
         if token is not None:
-            planted.append((reference, token))
+            planted.append((reference, token, True))
     if not tokens:
         return list(tracked)
     result: Any = shadow
@@ -4692,13 +4888,19 @@ def _placed_through_patch(
 
     walk(result, ())
     placed: List[EnvironmentReference] = []
-    for reference, token in planted:
+    for reference, token, from_operation in planted:
         if token is None:
             placed.append(reference)
         else:
-            placed.extend(
+            copies = [
                 reference.moved_to_unknown_list(path) for path in found.get(token, ())
-            )
+            ]
+            if from_operation and anchored_in is not None:
+                # The operation's value was anchored where the operations
+                # applied; a tracked reference already holds its own file's
+                # anchored form, which ``moved_to_unknown_list`` keeps.
+                copies = with_anchored_forms(copies, anchored_in[0], anchored_in[1])
+            placed.extend(copies)
     return placed
 
 
@@ -5042,6 +5244,9 @@ def _resolve(
     # its patch can move.
     first = len(state.references)
     state.references.extend(own_references)
+    # The same for the display-only entries of the literal relative paths
+    # (``state.literals``), which this file's own come after.
+    first_literal = len(state.literals)
 
     state.reached(real, named)
     # The file that names a base chose it, so a base is judged by the paths of
@@ -5049,6 +5254,18 @@ def _resolve(
     state.chosen_by(real, above)
     anchor = state.anchor_relative_paths is not None and (
         state.anchor_relative_paths(real) and state.anchor_relative_paths(named)
+    )
+    # The directory a view shows for a relative path this file's anchoring took
+    # from it: the file's own, or ``<value>`` where the path of the file itself
+    # came from the environment (a base an ``extends`` entry read from it chose,
+    # or any base below one), since the directory holds what the variable gave.
+    # The same membership the messages use (``state.shown``); ``ref`` is
+    # ``<value>`` too where the entry was read from the environment and ``real``
+    # is not the path it chose (a link loop that fails early).
+    shown_dir = (
+        ENVIRONMENT_VALUE_SHOWN
+        if real in state.environment_paths or ref == ENVIRONMENT_VALUE_SHOWN
+        else os.fspath(real.parent)
     )
     if anchor:
         # Each operator file's own relative paths are taken from its directory,
@@ -5058,7 +5275,24 @@ def _resolve(
             anchor_relative_paths,
         )
 
+        as_written = data
         data = anchor_relative_paths(data, real.parent)
+        # A relative path the anchoring normalized no longer holds what its
+        # reference resolved to: the reference records the anchored text, so
+        # the displayed view still finds and marks it (_still_describes,
+        # environment_record._Index._string).
+        own_references = with_anchored_forms(own_references, data, shown_dir)
+        state.references[first:] = own_references
+        if shown_dir == ENVIRONMENT_VALUE_SHOWN:
+            # The paths this file wrote itself are anchored too, and a view
+            # that printed the directory would print part of what the variable
+            # gave: each is shown after ``<value>``, as the file wrote it.
+            read_places = {tuple(r.path) for r in own_references if not r.key}
+            state.literals.extend(
+                anchored_literals(
+                    as_written, data, skip=read_places, shown_dir=shown_dir
+                )
+            )
 
     repository_file = state.repository_file
     operator_file = (
@@ -5105,6 +5339,10 @@ def _resolve(
 
             ops = anchor_patch_operations(ops, real.parent)
         merged: Any = {}
+        # For each base, in merge order: the slice of ``state.references`` and
+        # the slice of ``state.literals`` its subtree read, and the document the
+        # merge layered (``_mark_written_over``).
+        layers: List[Tuple[int, int, int, int, Any]] = []
         # Followed only where a confine hook can leave something out.
         unconfined: Any = None if state.confine is None else {}
         for base_ref in refs:
@@ -5126,6 +5364,8 @@ def _resolve(
             # The base as its entry spells it, before any symlink is followed:
             # relative to the resolved file that extends it, as base_path is.
             base_named = _base_named(base_ref, real)
+            start = len(state.references)
+            literal_start = len(state.literals)
             base_document, base_unconfined, base_owned = _resolve(
                 base_path,
                 stack + (real,),
@@ -5154,8 +5394,16 @@ def _resolve(
             # file's own sections are left for the model to fold, so its patch
             # still names them in the spelling it wrote. The unconfined view
             # mirrors a document that was folded and logged just above.
-            merged = deep_merge(
-                merged, fold_document_scanner_aliases(base_document), AshConfig
+            folded = fold_document_scanner_aliases(base_document)
+            merged = deep_merge(merged, folded, AshConfig)
+            layers.append(
+                (
+                    start,
+                    len(state.references),
+                    literal_start,
+                    len(state.literals),
+                    folded,
+                )
             )
             if unconfined is not None:
                 unconfined = deep_merge(
@@ -5169,6 +5417,13 @@ def _resolve(
         merged = deep_merge(merged, own, AshConfig)
         if unconfined is not None:
             unconfined = deep_merge(unconfined, own, AshConfig)
+        # Each base reference a document merged after its base writes over is
+        # marked here, at the merge, against the documents the merge layers: a
+        # patch acts between merges, so a rule taken at the end of the chain
+        # from the files' own documents would misjudge a place a later file's
+        # patch moves a base's value over, or a base's own patch removes what a
+        # deeper base wrote.
+        _mark_written_over(state.references, state.literals, layers, own)
         if owned is not None and operator_file:
             _owned_plugin_keys(own, owned)
         if ops is not None:
@@ -5205,15 +5460,28 @@ def _resolve(
             # Each reference at the place its value has once the patch has
             # applied, which only the patch says. Followed through the
             # operations as written: anchoring changes values only, so they
-            # move each value where the anchored ones moved it.
-            state.references[first:] = _placed_through_patch(
+            # move each value where the anchored ones moved it. The literal
+            # entries of the file and of its bases are followed beside them,
+            # and so are those of the operations' own values (a file whose own
+            # path the environment chose).
+            literal_ops = _literal_operations(written_ops, ops, from_ops, shown_dir)
+            placed = _placed_through_patch(
                 merged,
                 written_ops,
-                state.references[first:],
-                from_ops,
+                [*state.references[first:], *state.literals[first_literal:]],
+                [*from_ops, *literal_ops],
                 where=state.shown(real),
                 rewritten=patched.rewritten,
+                anchored_in=(patched.document, shown_dir) if anchor else None,
             )
+            state.references[first:] = [r for r in placed if not r.literal]
+            # Where an operation's value landed, its entry holds the anchored
+            # text there (``with_anchored_forms``): that is the text it describes.
+            state.literals[first_literal:] = [
+                replace(r, resolved=r.anchored[0])
+                for r in placed
+                if r.literal and r.anchored is not None
+            ]
             merged = patched.document
             unconfined = patched.unconfined
     except ASHConfigSourceError:
@@ -5412,11 +5680,17 @@ def resolve_config_document(
         # raise, so the error leaves with a frame that holds no value.
         del state, blind_for
         raise blind from None
-    places: Dict[Tuple[Any, ...], List[Tuple[Any, ...]]] = {
-        reference.place_key: [] for reference in state.read
-    }
+    places: Dict[
+        Tuple[Any, ...], List[Tuple[Tuple[Any, ...], Optional[Tuple[str, str]]]]
+    ] = {reference.place_key: [] for reference in state.read}
     for reference in state.references:
-        places.setdefault(reference.place_key, []).append(tuple(reference.path))
+        if reference.written_over:
+            # A later document of the chain wrote this place: the configuration
+            # holds that document's value, which the record keeps as it is.
+            continue
+        places.setdefault(reference.place_key, []).append(
+            (tuple(reference.path), reference.anchored)
+        )
     return ResolvedConfigDocument(
         data=data,
         chain=state.order,
@@ -5428,14 +5702,21 @@ def resolve_config_document(
         # The merge decided each place; a reference the merged document no
         # longer shows (a base's, under an overlay's literal or an overlay's
         # own reference) describes a file of the chain, not the configuration,
-        # and is left out of the displayed view (_still_describes).
+        # and is left out of the displayed view (_still_describes). The literal
+        # entries of a file whose own path the environment chose join it: they
+        # are read by no other consumer.
         displayed_environment_references=[
             reference
-            for reference in state.references
+            for reference in [*state.references, *state.literals]
             if _still_describes(data, reference)
         ],
         environment_paths=frozenset(state.environment_paths),
-        environment_values=_values_of(state.read),
+        # The references carry the anchored form; the reads do not. So do the
+        # literal entries, whose directory is part of the value that chose their
+        # file.
+        environment_values=_values_of(
+            [*state.read, *state.references, *state.literals]
+        ),
         reference_places=places,
     )
 

@@ -812,19 +812,27 @@ SHOWN_IGNORE_PATH_FIELDS = ("path", "reason", "expires")
 
 
 def recorded_ignore_paths(
-    config: Any, entries: Sequence[Any], at: Sequence[str]
+    config: Any,
+    entries: Sequence[Any],
+    at: Sequence[str],
+    fields: Sequence[str] = SHOWN_IGNORE_PATH_FIELDS,
 ) -> Dict[int, Dict[str, Any]]:
     """Each of ``entries``, the ignore paths at ``at`` in ``config`` (its global
     ``ignore_paths``, or a scanner option that takes the same entries), keyed by
     its ``id()``, as a dict of its shown fields (``SHOWN_IGNORE_PATH_FIELDS``) in
     which each field the config file read from the environment is the reference
-    as the file wrote it, as ``recorded_suppressions`` gives a suppression's."""
+    as the file wrote it, as ``recorded_suppressions`` gives a suppression's.
+
+    ``fields`` names the fields shown when a list's entries carry one the
+    default does not: an exclusion (``global_settings.exclusions``) is quoted
+    by its ``rule_id`` too, so its caller passes ``("rule_id",
+    *SHOWN_IGNORE_PATH_FIELDS)``. Keep ``expires`` among them: the record reads
+    the ``expiration`` alias through it (``_expiry_under_both_spellings``)."""
     entries = list(entries or [])
     if not entries:
         return {}
     shown: List[Dict[str, Any]] = [
-        {name: getattr(entry, name, None) for name in SHOWN_IGNORE_PATH_FIELDS}
-        for entry in entries
+        {name: getattr(entry, name, None) for name in fields} for entry in entries
     ]
     references = getattr(config, "_environment_references", ()) or ()
     if references:
@@ -835,7 +843,7 @@ def recorded_ignore_paths(
         _expiry_under_both_spellings(shown)
         shown = record_environment_references(shown, references, at=tuple(at))
         _expiry_folded_to_expires(entries, shown)
-    return {id(entry): fields for entry, fields in zip(entries, shown)}
+    return {id(entry): shown_fields for entry, shown_fields in zip(entries, shown)}
 
 
 def check_for_expiring_suppressions(

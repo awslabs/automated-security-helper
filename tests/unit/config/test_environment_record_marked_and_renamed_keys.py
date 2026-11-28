@@ -11,6 +11,9 @@
 * A marked record replaced the value's part of a string the load changed with
   the whole written reference, so the text the file wrote after the reference
   appeared twice.
+* A string the loader marked as read from the environment, at a place where the
+  only reference is another variable's, had part of its text replaced and the
+  rest of the value shown.
 """
 
 from __future__ import annotations
@@ -18,12 +21,15 @@ from __future__ import annotations
 import pytest
 
 from automated_security_helper.config.environment_record import (
+    UNKNOWN_INDEX,
+    EnvironmentReference,
     environment_marker,
     environment_references,
     record_environment_references,
     recorded_names,
     written_without_tag,
 )
+from automated_security_helper.utils.redacted_model import env_resolved_scalar
 
 pytestmark = pytest.mark.unit
 
@@ -139,3 +145,103 @@ def test_a_view_of_a_path_the_load_anchored_marks_the_value_once(
     )
 
     assert shown == {"ignore_paths": ["/work/cfg/<from ${ASH_VAR_X}>/sub"]}
+
+
+# A string carrying the loader's mark is shown by the reference its own mark
+# carries unless a candidate resolved to it as a whole. A part of it that another
+# variable's reference describes is never replaced alone: the replacement makes a
+# plain string of the marked one, and the rest of the value would be shown.
+def test_a_marked_string_is_shown_by_its_own_mark_where_another_reference_matches_a_part(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The string is read from ASH_VAR_A. The only reference at its place is
+    ASH_VAR_B's, whose value ("test") is inside the string: the walk shows the
+    string's own reference, and no part of the value is in the result."""
+    monkeypatch.setenv("ASH_VAR_B", "test")
+    marked = env_resolved_scalar("eu-test-7", "ASH_VAR_A")
+    other = EnvironmentReference(("options", "region"), "${ASH_VAR_B}", "test", "test")
+
+    shown = record_environment_references(
+        {"options": {"region": marked}}, [other], mark=environment_marker
+    )
+
+    assert shown == {"options": {"region": "<from ${ASH_VAR_A}>"}}
+
+
+def test_a_marked_string_is_shown_by_the_reference_that_resolved_to_all_of_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The control: a reference at the string's place that resolved to the whole
+    string describes it, whatever the string's own mark says."""
+    monkeypatch.setenv("ASH_VAR_B", "eu-test-7")
+    marked = env_resolved_scalar("eu-test-7", "ASH_VAR_A")
+    whole = EnvironmentReference(
+        ("options", "region"), "${ASH_VAR_B}", "eu-test-7", "eu-test-7"
+    )
+
+    shown = record_environment_references(
+        {"options": {"region": marked}}, [whole], mark=environment_marker
+    )
+
+    assert shown == {"options": {"region": "<from ${ASH_VAR_B}>"}}
+
+
+def test_a_marked_set_member_is_shown_by_its_own_mark_where_another_reference_matches_a_part(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same for a member of a set: ASH_VAR_B's reference sits at the set's
+    place at the unknown index, and its value ends the member after a path
+    prefix, which a reference at an unknown position reads into. The member is
+    read from ASH_VAR_A."""
+    monkeypatch.setenv("ASH_VAR_B", "test")
+    marked = env_resolved_scalar("/cfg/test", "ASH_VAR_A")
+    other = EnvironmentReference(
+        ("options", "regions", UNKNOWN_INDEX), "${ASH_VAR_B}", "test", "test"
+    )
+
+    shown = record_environment_references(
+        {"options": {"regions": {marked}}}, [other], mark=environment_marker
+    )
+
+    assert shown == {"options": {"regions": {"<from ${ASH_VAR_A}>"}}}
+
+
+# Two keys of one mapping that differ only in case are two keys: a reference
+# written at one of them describes that key alone.
+def test_a_reference_at_one_of_two_keys_that_differ_in_case_is_read_into_it_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``AWS_Region`` and ``aws_region`` sit in one mapping, and the reference
+    for ASH_VAR_B (value "test") was written at ``AWS_Region``. The text of
+    ``aws_region`` holds "test" too, and is left as it is."""
+    monkeypatch.setenv("ASH_VAR_B", "test")
+    reference = EnvironmentReference(
+        ("options", "AWS_Region"), "${ASH_VAR_B}", "test", "test"
+    )
+
+    shown = record_environment_references(
+        {"options": {"AWS_Region": "test", "aws_region": "eu-test-7"}},
+        [reference],
+        mark=environment_marker,
+    )
+
+    assert shown == {
+        "options": {"AWS_Region": "<from ${ASH_VAR_B}>", "aws_region": "eu-test-7"}
+    }
+
+
+def test_a_reference_is_read_into_a_key_in_another_case_where_no_key_collides(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The control: with one key only, the record keys a section by its field
+    name, so the reference written at ``AWS_Region`` is read into ``aws_region``."""
+    monkeypatch.setenv("ASH_VAR_B", "test")
+    reference = EnvironmentReference(
+        ("options", "AWS_Region"), "${ASH_VAR_B}", "test", "test"
+    )
+
+    shown = record_environment_references(
+        {"options": {"aws_region": "test"}}, [reference], mark=environment_marker
+    )
+
+    assert shown == {"options": {"aws_region": "<from ${ASH_VAR_B}>"}}

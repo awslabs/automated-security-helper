@@ -41,6 +41,7 @@ from automated_security_helper.config.ash_config import (
     _PluginConfigSegment,
     env_reference_left_as_written,
     env_reference_value,
+    list_made_of,
     load_config_yaml,
     plugin_key_lookup_names,
     read_env_reference,
@@ -48,6 +49,7 @@ from automated_security_helper.config.ash_config import (
 )
 from automated_security_helper.config.environment_record import (
     ENVIRONMENT_VALUE_SHOWN,
+    UNKNOWN_INDEX,
     EnvironmentReference,
     environment_references,
     with_environment_values_shown,
@@ -2699,7 +2701,13 @@ class EnvironmentRewrite(typing.NamedTuple):
     variable's value gave, and ``reference`` the text the file wrote for that
     part: where the record's string is not ``resolved`` as a whole (a value
     the model normalized), only that part is replaced. A path is a tuple of
-    the file's keys and list indices.
+    the file's keys and list indices. ``anchored`` is set for a relative path
+    the load took from its file's directory: where the record's string is that
+    text, whole, it is written as the directory and the reference. ``literal``
+    marks the rewrite of a relative path that a file whose own path the
+    environment chose wrote itself: nothing was read at its place, so it names no
+    part (``environment_part`` is empty) and the record holds ``written``, the
+    path as the file wrote it after ``<value>/``, where it holds ``resolved``.
     """
 
     kind: str
@@ -2708,6 +2716,18 @@ class EnvironmentRewrite(typing.NamedTuple):
     written: str
     environment_part: str
     reference: str
+    #: For a relative path the load took from its file's directory: the text the
+    #: anchoring made of it and that directory
+    #: (``environment_record.EnvironmentReference.anchored``), at the place this
+    #: rewrite names. None otherwise.
+    anchored: Optional[Tuple[str, str]] = None
+    #: Set for a relative path that a file whose own path the environment chose
+    #: wrote itself (``environment_record.EnvironmentReference.literal``):
+    #: ``resolved`` is the text the anchoring made of it, which holds that file's
+    #: directory, ``written`` the text a view shows (``<value>/`` and the path as
+    #: written), and ``environment_part`` is empty, since nothing was read at its
+    #: place.
+    literal: bool = False
 
 
 def _rewrite_for(
@@ -2719,6 +2739,17 @@ def _rewrite_for(
         return EnvironmentRewrite(kind, path, resolved, written, resolved, written)
     part = _environment_part(resolved, reference.rest)
     return EnvironmentRewrite(kind, path, resolved, written, part, reference.text)
+
+
+def anchored_needles(rewrite: EnvironmentRewrite) -> List[str]:
+    """The text the anchoring made of a relative path, as a needle, where it no
+    longer contains the variable's part (a ".." or "./" folded, or a separator
+    the platform rewrote): the needles of the resolved string and the part miss
+    it there."""
+    if rewrite.anchored is None or not rewrite.environment_part:
+        return []
+    text = rewrite.anchored[0]
+    return [] if rewrite.environment_part in text else [text]
 
 
 def _environment_part(resolved: str, rest: str) -> str:
@@ -3107,6 +3138,51 @@ def reads_back_as(
     return bool(rebuilt == current)
 
 
+def respelled_from(config: Any) -> Callable[[Tuple[Any, ...], Any, str], bool]:
+    """A test for a place a reference names in ``config``: whether ``text``, the
+    string the place holds, is what ``config``'s own model makes of ``resolved``,
+    the reference's text, at ``path`` (a validator that respells what it reads:
+    unused-suppressions' ``output_format`` lowercases it, and ``tool_version``
+    takes the canonical form of a specifier set, or the option's default for one
+    it refuses).
+
+    Always against ``config``'s own dump, never a caller's document: a dump keyed
+    by field names is one the rebuilt model cannot be followed through, and a
+    runtime patch's document is the client's, which a client could make invalid to
+    turn the test off. The dump is made at the first question, and each answer is
+    kept for the life of the test. A question the test cannot answer is answered
+    False, which leaves the place as it is."""
+    canonical: List[Any] = []
+    answers: Dict[Tuple[Any, ...], bool] = {}
+
+    def test(path: Tuple[Any, ...], resolved: Any, text: str) -> bool:
+        if (
+            not path
+            or not isinstance(text, str)
+            or not isinstance(resolved, str)
+            or text == resolved
+            or any(segment is UNKNOWN_INDEX for segment in path)
+        ):
+            return False
+        key = (tuple(path), resolved, text)
+        if key not in answers:
+            try:
+                if not canonical:
+                    canonical.append(config.model_dump(mode="json", by_alias=True))
+                answers[key] = canonical[0] is not None and reads_back_as(
+                    config, canonical[0], tuple(path), resolved, text
+                )
+            except Exception:
+                # A view, a repr, a session copy or a results file must be
+                # written whatever this test can answer.
+                if not canonical:
+                    canonical.append(None)
+                answers[key] = False
+        return answers[key]
+
+    return test
+
+
 def _resolves_back_to(written: str, current: str) -> bool:
     """Whether the loader reads ``written`` from the environment as ``current``,
     by the loader's own rule (resolve_env_references)."""
@@ -3169,8 +3245,46 @@ def _unused_key(container: Dict[Any, Any], base: str) -> str:
     return f"{base}#{number}"
 
 
+def _record_unknown_position(
+    config: Any,
+    record: Any,
+    rewrite: EnvironmentRewrite,
+    marked: Callable[[str], Any],
+) -> None:
+    """Apply ``rewrite``, a value rewrite whose last path segment is the unknown
+    index (``environment_record.UNKNOWN_INDEX``), to ``record``, a copy of a
+    dump.
+
+    The part of ``record`` at the rest of the path is a list, a tuple, a set or
+    a frozenset (a JSON-mode dump holds a set as a list). Each entry or member
+    that equals ``rewrite.resolved`` as a whole is written as
+    ``marked(rewrite.written)``, and the container keeps its type. A part of an
+    entry is never replaced: nothing says which entry the rewrite names, so only
+    one that is the value itself is the reference.
+    """
+    if len(rewrite.path) < 2:
+        return
+    parent, model = _record_container(config, record, rewrite.path[:-2])
+    if parent is _MISSING_IN_RECORD:
+        return
+    key, _ = _record_child(model, parent, rewrite.path[-2])
+    if key is _MISSING_IN_RECORD:
+        return
+    members = parent[key]
+    if not isinstance(members, (list, tuple, set, frozenset)):
+        return
+    parent[key] = type(members)(
+        marked(rewrite.written) if member == rewrite.resolved else member
+        for member in members
+    )
+
+
 def record_of_config(
-    config: Any, dumped: Any, mark: Optional[Callable[[str], Any]] = None
+    config: Any,
+    dumped: Any,
+    mark: Optional[Callable[[str], Any]] = None,
+    *,
+    for_results: bool = False,
 ) -> Any:
     """``dumped``, a dump of ``config``, as the record of ``config``: each value
     and key its files read from the environment as the file wrote it, never the
@@ -3185,13 +3299,52 @@ def record_of_config(
     whole, only the part the variable gave is replaced. Without ``mark``, a
     number there that a model typed from the value ("067" read as 67) is
     replaced as the value is: a scanner's dump of its own config
-    (ScannerPluginBase._config_as_written). A config loaded any
-    other way (AshConfig.from_file, a results file) has no rewrites, and its
-    dump is returned as it is.
+    (ScannerPluginBase._config_as_written). So is a string there that
+    ``config``'s own model makes of the value, with or without ``mark``: a field
+    whose validator respells what it reads (a reporter's ``output_format``
+    lowercases it, a ``tool_version`` takes the canonical form of a specifier
+    set, or the option's default for one it refuses) holds a text that is
+    neither the value nor contains it (``respelled_from``). A rewrite whose last
+    path segment is the unknown index (``environment_record.UNKNOWN_INDEX``)
+    names a set's members, or the entries of a list at an unknown position
+    (``_record_unknown_position``): each one that is the resolved value as a
+    whole is written as the reference, and no part of one is replaced. A config
+    loaded any other way (AshConfig.from_file, a results file) has no rewrites,
+    so only the paragraph below changes its dump, and one that holds no marked
+    string is returned as it is.
+
+    A relative path the load took from its file's directory, whose text no
+    longer holds the variable's part (a ``..`` or ``./`` folded, a separator the
+    platform rewrote), is matched as a whole by the text its rewrite recorded at
+    the anchoring (``EnvironmentRewrite.anchored``). Without ``mark`` it is
+    recorded as that directory and the reference, the shape a path kept whole
+    has. With ``mark`` the text stays, and the writer refuses it
+    (config_writer): a file loaded again reads a reference only at the start of
+    a string. Where the file's own path came from the environment, the directory
+    is ``<value>`` for a reference's path, a path the anchoring kept whole
+    included, and for a relative path the file writes itself
+    (``EnvironmentRewrite.literal``), recorded as ``<value>/`` and the path as the
+    file wrote it, so the record never holds the directory of such a file. A file
+    written to be loaded again keeps that text as the configuration holds it,
+    which the writer refuses.
+
+    ``for_results``, for the results file and the off-host payload, records a
+    list the field made of one reference's text (``output_formats: ${VAR}``) as
+    a list that holds the reference in place of the entries its text made,
+    followed by any entry a later step appended. Those are read back with
+    nothing resolved, where the reference is one entry the field refuses
+    (``recorded_config``) and never the names, and a scalar would split at a
+    comma in a default and leave pieces that are not references. A JSON file
+    written to be loaded again (config_writer) is not recorded this way: it is
+    not interpolated, and that list would not load. The document a runtime
+    patch's ``test`` op compares against is recorded this way (``runtime_patch``):
+    it is never loaded or validated, and the reference in the list answers every
+    guess of the names alike.
 
     ``mark``, for a file written to be loaded again (config_writer), is applied
-    to each string a rewrite puts in the record, value or key, and to nothing
-    else, so a string that only looks like a reference stays text. With it, a
+    to each string a rewrite puts in the record, value or key, and to each
+    string the paragraph below writes as a reference, and to nothing else, so a
+    string that only looks like a reference stays text. With it, a
     string that holds the value with other text (one the model changed) is
     written as the reference only when the loader resolves that back to the
     same string (resolve_env_references), and then with an explicit ``!ENV``
@@ -3200,14 +3353,40 @@ def record_of_config(
     write as text (config_writer): a reference made of it would read as other
     text, or another variable. A client's patch is not one: a runtime patch
     drops the rewrite of a value an op wrote over (runtime_patch).
+
+    After the rewrites, every string, mapping key and set member of the record
+    that still carries the loader's mark (``EnvResolvedScalar.from_environment``)
+    is written as ``marked(x.shown)``, the reference its own mark carries, sets
+    walked too, with or without rewrites. That reads a python-mode dump only: a
+    JSON-mode dump (a results file, ``ash config get``) holds every string as a
+    plain ``str`` and a set as a list, so there only a rewrite describes a value.
+    That is why every set member a load read gets a rewrite at the unknown
+    index when the load ends (``resolve_config.load_config_file_for_run``, by
+    ``resolve_config._take_destination_references`` with ``sets``), and why
+    the confinement gives every value it copies from another place one
+    (``resolve_config._take_confined_references``,
+    ``reporter_trust.confine_declared_reporter_destinations``, by the same
+    function). A value neither a rewrite nor a mark describes is a literal the
+    file wrote.
     """
     rewrites = list(getattr(config, "_written_references", None) or [])
-    if not rewrites or not isinstance(dumped, dict):
+    if not isinstance(dumped, dict):
         return dumped
     marked = mark if mark is not None else (lambda text: text)
+    if not rewrites:
+        return _loader_marked_shown(dumped, marked)
     record = copy.deepcopy(dumped)
+    respelled = respelled_from(config)
     for rewrite in rewrites:
         if rewrite.kind != "value" or not rewrite.path:
+            continue
+        if rewrite.literal and mark is not None:
+            # A file written to be loaded again (config_writer) cannot hold
+            # `<value>/` as a path: the text stays as the configuration holds it,
+            # and the writer refuses it.
+            continue
+        if rewrite.path[-1] is UNKNOWN_INDEX:
+            _record_unknown_position(config, record, rewrite, marked)
             continue
         container, model = _record_container(config, record, rewrite.path[:-1])
         if container is _MISSING_IN_RECORD:
@@ -3216,6 +3395,18 @@ def record_of_config(
         if key is _MISSING_IN_RECORD:
             continue
         current = container[key]
+        # A relative path of a file whose own path the environment chose, as the
+        # record holds it: anchored at ``<value>``. It is recorded as that
+        # directory and the reference whether the anchoring folded it or kept
+        # it whole (below), so the part replace never writes the directory of
+        # that file, which holds part of what the variable gave.
+        under_a_shown_directory = (
+            mark is None
+            and isinstance(current, str)
+            and rewrite.anchored is not None
+            and rewrite.anchored[1] == ENVIRONMENT_VALUE_SHOWN
+            and current == rewrite.anchored[0]
+        )
         if current == rewrite.resolved or (
             # A dump of a section a plugin's model typed: the number it read
             # from the variable's text. Not for a file written to be loaded
@@ -3225,6 +3416,18 @@ def record_of_config(
             container[key] = marked(rewrite.written)
         elif (
             isinstance(current, str)
+            and not rewrite.literal
+            and not (rewrite.anchored is not None and current == rewrite.anchored[0])
+            and respelled(rewrite.path, rewrite.resolved, current)
+        ):
+            # A value its field's own validation respelled (unused-suppressions'
+            # output_format lowercases what it reads): the configuration's model
+            # makes this string of the reference's text, so the place is the
+            # reference, as on an exact match.
+            container[key] = marked(rewrite.written)
+        elif (
+            isinstance(current, str)
+            and not under_a_shown_directory
             and rewrite.environment_part
             and rewrite.environment_part in current
         ):
@@ -3259,6 +3462,24 @@ def record_of_config(
                 # it is written plain.
                 container[key] = mark("!ENV " + replaced)
         elif (
+            isinstance(current, str)
+            and rewrite.anchored is not None
+            and current == rewrite.anchored[0]
+        ):
+            # A relative path the load took from its file's directory, whose text
+            # no longer holds the variable's part (a ".." or "./" folded, a
+            # separator the platform rewrote): matched as a whole, and recorded
+            # as that directory and the reference, the shape a path kept whole
+            # has. A file written to be loaded again (``mark``) cannot hold that
+            # (a reference is read only at a string's start), so there the text
+            # stays and the writer refuses it.
+            if mark is None:
+                container[key] = (
+                    os.path.join(rewrite.anchored[1], "")
+                    + rewrite.reference
+                    + rewrite.resolved[len(rewrite.environment_part) :]
+                )
+        elif (
             mark is not None
             and current is not None
             and not isinstance(current, str)
@@ -3268,6 +3489,21 @@ def record_of_config(
             # A value the model made something else of, a list from one string
             # (output_formats: ${VAR}): the reference, which loads back as it.
             container[key] = mark(rewrite.written)
+        elif (
+            mark is None
+            and for_results
+            and isinstance(current, (list, tuple))
+            and list_made_of(rewrite.resolved, current)
+        ):
+            # A list the field made of one reference's text (output_formats:
+            # ${VAR}), in a results file or an off-host payload: a list holding
+            # the reference in place of the entries its text made, then any entry
+            # a later step appended. Read back with nothing resolved, the
+            # reference is one refused entry (recorded_config), never the names;
+            # a scalar would split at a comma in a default and leave pieces that
+            # are not references.
+            count = list_made_of(rewrite.resolved, current)
+            container[key] = [rewrite.written, *list(current)[count:]]
     # Keys last, deepest first: a value's path holds the key as it was read.
     keys = [rewrite for rewrite in rewrites if rewrite.kind == "key"]
     for rewrite in sorted(keys, key=lambda item: len(item.path), reverse=True):
@@ -3294,7 +3530,47 @@ def record_of_config(
         }
         container.clear()
         container.update(renamed)
-    return record
+    return _loader_marked_shown(record, marked)
+
+
+def _loader_marked(text: Any) -> bool:
+    """Whether ``text`` is a string the loader read from the environment."""
+    return isinstance(text, str) and bool(getattr(text, "from_environment", False))
+
+
+def _holds_loader_mark(node: Any) -> bool:
+    if isinstance(node, dict):
+        return any(
+            _loader_marked(key) or _holds_loader_mark(value)
+            for key, value in node.items()
+        )
+    if isinstance(node, (list, tuple, set, frozenset)):
+        return any(_holds_loader_mark(item) for item in node)
+    return _loader_marked(node)
+
+
+def _loader_marked_shown(node: Any, marked: Callable[[str], Any]) -> Any:
+    """``node`` with each string, mapping key and set member that still carries
+    the loader's mark (``EnvResolvedScalar.from_environment``) written as
+    ``marked(x.shown)``, the reference its own mark carries; sets are walked
+    too. A copy where it changes anything, else ``node`` itself.
+
+    No rewrite replaced such a value (a rewrite leaves a plain string in its
+    place), so no reference of the record describes it: a value no rewrite
+    describes is never recorded in clear.
+    """
+    if not _holds_loader_mark(node):
+        return node
+    if isinstance(node, dict):
+        return {
+            (marked(key.shown) if _loader_marked(key) else key): _loader_marked_shown(
+                value, marked
+            )
+            for key, value in node.items()
+        }
+    if isinstance(node, (list, tuple, set, frozenset)):
+        return type(node)(_loader_marked_shown(item, marked) for item in node)
+    return marked(node.shown)
 
 
 def record_of_metadata(config: Any, dumped: Any) -> Any:
@@ -3427,7 +3703,9 @@ def environment_record_read(
     chain: Iterable[Path],
     reads: Dict[Path, Any],
     texts: Optional[Dict[Path, str]] = None,
-    places: Optional[Dict[Tuple[Any, ...], List[Tuple[Any, ...]]]] = None,
+    places: Optional[
+        Dict[Tuple[Any, ...], List[Tuple[Tuple[Any, ...], Optional[Tuple[str, str]]]]]
+    ] = None,
 ) -> Tuple[List[str], List[EnvironmentRewrite]]:
     """The values and keys the files of a resolved chain read from the
     environment, and how to record each value as the file wrote it, for a chain
@@ -3502,7 +3780,9 @@ def environment_record_read(
         for rewrite in _written_rewrites(written, resolved):
             place = ((key, tuple(rewrite.path)), rewrite.kind == "key", rewrite.written)
             if places is not None and place in places:
-                rewrites += [rewrite._replace(path=at) for at in places[place]]
+                for at, anchored in places[place]:
+                    rewrites.append(rewrite._replace(path=at, anchored=anchored))
+                    values += anchored_needles(rewrites[-1])
             else:
                 rewrites += _placed_rewrites([rewrite], resolved)
     return values, rewrites
@@ -3532,12 +3812,49 @@ def environment_record_of_references(
             tuple(reference.path),
             reference.written,
             reference.resolved,
-        )
+        )._replace(anchored=getattr(reference, "anchored", None))
         rewrites.append(rewrite)
         for value in dict.fromkeys((rewrite.resolved, rewrite.environment_part)):
             if value:
                 values.append(value)
                 values += _typed_spellings(value)
+        values += anchored_needles(rewrite)
+    return values, rewrites
+
+
+def literal_rewrites(
+    literals: Iterable[Any],
+) -> Tuple[List[str], List[EnvironmentRewrite]]:
+    """The rewrites and redaction values for ``literals``, display-only entries of
+    the relative paths a file whose own path the environment chose wrote itself
+    (``environment_record.EnvironmentReference.literal``): each place holding the
+    text the anchoring made of such a path is recorded as the view shows it,
+    ``<value>/`` and the path as the file wrote it, and that text, which holds the
+    chosen file's directory, joins the values.
+
+    Entries that are not literals are left out, so a caller can pass the whole of
+    ``ResolvedConfigDocument.displayed_environment_references``."""
+    values: List[str] = []
+    rewrites: List[EnvironmentRewrite] = []
+    for literal in literals:
+        if not getattr(literal, "literal", False):
+            continue
+        anchored = getattr(literal, "anchored", None)
+        text = anchored[0] if anchored is not None else literal.resolved
+        rewrites.append(
+            EnvironmentRewrite(
+                kind="value",
+                path=tuple(literal.path),
+                resolved=text,
+                written=literal.written,
+                environment_part="",
+                reference=literal.written,
+                anchored=anchored,
+                literal=True,
+            )
+        )
+        if text:
+            values.append(text)
     return values, rewrites
 
 

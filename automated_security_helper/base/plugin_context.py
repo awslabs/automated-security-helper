@@ -302,17 +302,20 @@ class PluginContext(BaseModel):
 
     # Private, like _scan_id: per-run state no dump or schema carries.
     _warned_unmatched_engines: Set[str] = PrivateAttr(default_factory=set)
-    _warned_rule_less_suppressions: Set[int] = PrivateAttr(default_factory=set)
+    _warned_rule_less_suppressions: Dict[int, Any] = PrivateAttr(default_factory=dict)
 
     @property
-    def warned_rule_less_suppressions(self) -> Set[int]:
+    def warned_rule_less_suppressions(self) -> Dict[int, Any]:
         """This run's warn-once receipts for a rule-less suppression covering
-        npm-audit findings (``sarif_utils._apply_config_suppression``), keyed by
-        the entry's ``id()``; the entries live on this context's config, so the
-        ids are stable for the run. On the context for the same reason as
-        ``warned_unmatched_engines`` below: the context is the one object built
-        per run and shared with every phase, so one entry warns once per scan
-        (the docs' "once per entry per run"), not once per report pass.
+        npm-audit findings (``sarif_utils._apply_config_suppression``): each
+        entry's ``id()`` mapped to the entry. An id is a receipt only for the
+        entry it maps to, and the mapping keeps the entry for the run, so its
+        address is never reused while the receipt stands and no other entry is
+        read as already warned, whatever replaced this context's config. On the
+        context for the same reason as ``warned_unmatched_engines`` below: the
+        context is the one object built per run and shared with every phase, so
+        one entry warns once per scan (the docs' "once per entry per run"), not
+        once per report pass.
         """
         return self._warned_rule_less_suppressions
 

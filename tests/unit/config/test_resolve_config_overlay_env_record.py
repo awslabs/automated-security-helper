@@ -11,12 +11,20 @@ payload an off-host reporter sends and the free-text redaction read
 ``_written_references`` and ``_environment_values``; a load that put the
 overlay's reads only in ``_environment_references`` left the record and the
 redaction with the resolved values.
+
+The overlay is also merged over a project's own document after the project's
+chain placed its references. A project reference at a place the overlay writes
+leaves the record and the displayed set, as a base's reference under a later
+file of the chain does: the configuration holds the operator's value there, and
+the record keeps it as the operator wrote it, whatever the project's variable
+holds. The project's reads still mask their values.
 """
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -26,7 +34,12 @@ from automated_security_helper.config.config_validator import (
     record_of_config,
     redact_values,
 )
+from automated_security_helper.config.environment_record import (
+    environment_marker,
+    record_environment_references,
+)
 from automated_security_helper.config.resolve_config import resolve_config
+from automated_security_helper.models.asharp_model import AshAggregatedResults
 
 pytestmark = pytest.mark.unit
 
@@ -145,3 +158,167 @@ def test_a_project_with_no_config_takes_the_overlay_alone_with_its_reads(
     assert len(_reason_rewrites(config)) == 1
     record = record_of_config(config, config.model_dump(mode="json"))
     assert VALUE not in json.dumps(record, default=str)
+
+
+# ---------------------------------------------------------------------------
+# A project's reference at a place the operator's file writes
+# ---------------------------------------------------------------------------
+
+
+def _workspace(root: Path, project: str, operator: str) -> dict[str, Path]:
+    """A workspace at ``root/ws`` with one project, ``repo``, whose own config is
+    ``.ash.yaml``, and the operator's file outside the workspace."""
+    repo = root / "ws" / "repo"
+    repo.mkdir(parents=True)
+    (repo / ".ash.yaml").write_text(project, encoding="utf-8")
+    operator_file = root / "operator" / "ash.yaml"
+    operator_file.parent.mkdir(parents=True)
+    operator_file.write_text(operator, encoding="utf-8")
+    return {
+        "project": repo / ".ash.yaml",
+        "repo": repo,
+        "workspace": root / "ws",
+        "operator": operator_file,
+    }
+
+
+def _resolve_in_a_workspace(where: dict[str, Path]):
+    """The resolve a workspace scan makes for a project with its own config, with
+    the operator's file as the trusted base and the overlay."""
+    return resolve_config(
+        config_path=where["project"],
+        source_dir=where["repo"],
+        fallback_to_default=True,
+        config_overrides=[],
+        scanned_root=where["workspace"],
+        trusted_config_path=where["operator"],
+        overlay_config_path=where["operator"],
+    )
+
+
+def _recorded(config) -> dict[str, Any]:
+    """The configuration as the results file holds it."""
+    return json.loads(
+        AshAggregatedResults(ash_config=config).model_dump_json(by_alias=True)
+    )["ash_config"]
+
+
+def _view(config) -> dict[str, Any]:
+    """The configuration as the get_config view writes it: the view function
+    over the config's displayed references, with no route that layers an
+    overlay."""
+    return record_environment_references(
+        config.model_dump(),
+        tuple(getattr(config, "_displayed_environment_references", ()) or ()),
+        mark=environment_marker,
+        exact_indices=True,
+    )
+
+
+def _read_its_own_value(config, value: str, place) -> None:
+    """The resolve read ``value`` at ``place``: one of the project's reads there
+    resolved to it, and the redaction masks it. The read stays among the
+    configuration's references when the operator's file writes over its place;
+    only the record's placement and the displayed set leave it."""
+    read = [
+        reference.resolved
+        for reference in (config._environment_references or ())
+        if not reference.key and tuple(reference.path) == place
+    ]
+    assert value in read, ("no read resolved to this resolve's value", place, read)
+    assert value in (config._environment_values or []), (
+        "the redaction does not mask the value read",
+        place,
+    )
+
+
+@pytest.mark.parametrize(
+    "held",
+    [
+        pytest.param("sarif,html", id="whole"),
+        pytest.param("sarif", id="prefix"),
+        pytest.param("markdown", id="control"),
+    ],
+)
+def test_a_projects_list_the_operators_file_writes_over_is_recorded_as_the_operator_wrote_it(
+    tmp_path, monkeypatch, held
+):
+    """A project reads ``output_formats`` from a variable and the operator's file,
+    which a workspace scan layers over the project's own, writes its own list
+    there. The scan runs with the operator's list, so the record, the payload
+    and the displayed set hold it as written and no reference of the project,
+    whatever the variable holds (``whole``: the names the operator's list holds;
+    ``prefix``: the first of them; ``control``: neither)."""
+    monkeypatch.setenv("ASH_PROBE_S2_FMT", held)
+    where = _workspace(
+        tmp_path,
+        "project_name: api\noutput_formats: ${ASH_PROBE_S2_FMT}\n",
+        "output_formats:\n  - sarif\n  - html\n",
+    )
+
+    config = _resolve_in_a_workspace(where)
+
+    # The controls: the resolve read its own value at the place, and the scan
+    # holds the operator's list.
+    _read_its_own_value(config, held, ("output_formats",))
+    held_formats = [getattr(entry, "value", entry) for entry in config.output_formats]
+    assert held_formats == ["sarif", "html"], held_formats
+    assert _recorded(config)["output_formats"] == ["sarif", "html"]
+    payload = AshAggregatedResults(ash_config=config).to_simple_dict()["ash_config"]
+    assert payload["output_formats"] == ["sarif", "html"]
+    shown = [
+        getattr(entry, "value", entry) for entry in _view(config)["output_formats"]
+    ]
+    assert shown == ["sarif", "html"], shown
+
+
+@pytest.mark.parametrize(
+    "held",
+    [
+        pytest.param("acme-prod-7c1e", id="equal"),
+        pytest.param("prod-7c1e", id="inside"),
+        pytest.param("other-7c1e", id="control"),
+    ],
+)
+def test_a_projects_text_the_operators_file_writes_over_is_recorded_as_the_operator_wrote_it(
+    tmp_path, monkeypatch, held
+):
+    """A project reads ``project_name`` from a variable and the operator's file
+    writes ``acme-prod-7c1e`` there. The record and the payload hold that text as
+    written, whatever the variable holds (``equal``: it is that text; ``inside``:
+    it is part of it; ``control``: it is neither), never ``${...}`` or
+    ``acme-${...}``."""
+    monkeypatch.setenv("ASH_PROBE_S2_PN", held)
+    where = _workspace(
+        tmp_path,
+        "project_name: ${ASH_PROBE_S2_PN}\n",
+        "project_name: acme-prod-7c1e\n",
+    )
+
+    config = _resolve_in_a_workspace(where)
+
+    # The controls: the resolve read its own value at the place, and the scan
+    # holds the operator's text.
+    _read_its_own_value(config, held, ("project_name",))
+    assert config.project_name == "acme-prod-7c1e"
+    assert _recorded(config)["project_name"] == "acme-prod-7c1e"
+    payload = AshAggregatedResults(ash_config=config).to_simple_dict()["ash_config"]
+    assert payload["project_name"] == "acme-prod-7c1e"
+
+
+def test_a_projects_reference_the_operators_file_leaves_alone_is_still_recorded(
+    tmp_path, monkeypatch
+):
+    """The control against leaving out too much: the operator's file writes
+    another setting, so the project's own reference is the configuration's and
+    the record still holds it as written."""
+    monkeypatch.setenv("ASH_PROBE_S2_PN", "api-7c1e")
+    where = _workspace(
+        tmp_path,
+        "project_name: ${ASH_PROBE_S2_PN}\n",
+        "output_formats:\n  - sarif\n",
+    )
+
+    config = _resolve_in_a_workspace(where)
+
+    assert _recorded(config)["project_name"] == "${ASH_PROBE_S2_PN}"

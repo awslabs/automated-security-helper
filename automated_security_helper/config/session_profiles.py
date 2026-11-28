@@ -318,9 +318,10 @@ def register_profiles(specs: List[str]) -> Dict[str, ProfileEntry]:
             # session's copy holds each such value as the file wrote it and the
             # scan reads it from the environment itself
             # (materialize_session_config). The one exception is a relative
-            # path read from the environment: anchored here, it is written as
-            # the path it now is (AshConfig.save), since the reference would
-            # resolve against the copy's directory instead.
+            # path read from the environment: anchored here, it is refused
+            # (EnvironmentValueInPath, from AshConfig.save), because written as
+            # the path it now is the copy would hold the value, and the
+            # reference would resolve against the copy's directory.
             document, cfg = load_config_file_for_run(
                 path, texts=texts, anchor_relative_paths=not_delivered_by_a_client
             )
@@ -935,14 +936,22 @@ def _stage_session_config(
     try:
         # Each value the profile's files read from the environment is written as
         # the file wrote it, never the value, except a relative path the load
-        # anchored to the operator's file's directory, which is written as the
-        # path it now is (AshConfig.save): the reference would resolve against
-        # this copy's directory. The operator's copy tags a reference !ENV, and
-        # the scan reads it from the environment when it loads the copy. The
-        # client's copy, in a directory where !ENV is not resolved
+        # anchored to the operator's file's directory, which is refused
+        # (EnvironmentValueInPath, from AshConfig.save): written as the path it
+        # now is the copy would hold the value, and the reference would resolve
+        # against this copy's directory. The operator's copy tags a reference
+        # !ENV, and the scan reads it from the environment when it loads the
+        # copy. The client's copy, in a directory where !ENV is not resolved
         # (config_sources), holds it as quoted text, which a scan fills from the
-        # operator's copy (is_client_copy_of, resolve_config).
-        if getattr(config, "_environment_references", ()):
+        # operator's copy (is_client_copy_of, resolve_config). A relative path
+        # that a file whose own path a variable chose wrote itself is refused too
+        # (EnvironmentDirectoryInPath, from AshConfig.save): no reference
+        # describes it, but the directory it is taken from is part of the value,
+        # so a profile that holds one is written the same way, to be refused.
+        if getattr(config, "_environment_references", ()) or any(
+            getattr(reference, "literal", False)
+            for reference in getattr(config, "_displayed_environment_references", ())
+        ):
             config.save(
                 partial,
                 exclude_unset=not client_patched,
