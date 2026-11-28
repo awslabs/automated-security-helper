@@ -231,6 +231,12 @@ GATE_OWNED_SCAN_OPTIONS = frozenset(
         # scanners.
         "--scanners",
         "--exclude-scanners",
+        # --only-scanners replaces the selection outright. Outside --mode precommit
+        # --add-scanners is joined to the config's default_scanners.only when that is
+        # set, and is otherwise the whole selection, as --scanners is -- which is the
+        # case under the {} this gate writes when no base config is given.
+        "--only-scanners",
+        "--add-scanners",
         "--python-only",
         "--python-based-scanners-only",
         "--python-based-plugins-only",
