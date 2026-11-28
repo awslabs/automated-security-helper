@@ -2938,9 +2938,23 @@ def is_search_share_anchor(tag: str, attrs: list[tuple[str, str | None]]) -> boo
     return all(found[name] == value for name, value in SEARCH_SHARE_FIXED.items())
 
 
+#: What a URL parser strips from both ends of a value: the C0 controls and the space.
+_URL_ENDS = "".join(chr(code) for code in range(0x21))
+
+
+def url_as_parsed(value: str) -> str:
+    """A URL attribute value as a browser's URL parser reads it before it looks for a
+    scheme or a host: tabs and line breaks are dropped wherever they are, controls
+    and spaces are stripped from the ends, and a backslash is a slash, because the
+    page's own scheme is one of the special ones."""
+    text = "".join(char for char in value if char not in "\t\n\r")
+    return text.strip(_URL_ENDS).replace("\\", "/")
+
+
 def is_external(src: str) -> bool:
-    """Whether a script URL leaves the site: it names a scheme or a host."""
-    value = src.strip()
+    """Whether a script URL leaves the site: read as a browser reads it, it names a
+    scheme or a host."""
+    value = url_as_parsed(src)
     return (
         value.startswith("//")
         or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", value) is not None
@@ -2948,12 +2962,17 @@ def is_external(src: str) -> bool:
 
 
 def is_javascript_url(value: str) -> bool:
-    """Whether a browser would read ``value`` as a ``javascript:`` URL: leading
-    control characters and spaces and any tab or newline are ignored."""
-    stripped = "".join(char for char in value if char not in "\t\n\r").lstrip(
-        "".join(chr(code) for code in range(0x21))
-    )
-    return stripped.lower().startswith("javascript:")
+    """Whether a browser would read ``value`` as a ``javascript:`` URL."""
+    return url_as_parsed(value).lower().startswith("javascript:")
+
+
+def first_attributes(attrs: list[tuple[str, str | None]]) -> dict[str, str | None]:
+    """A start tag's attributes as a browser reads them: the first of a repeated name
+    is the one it keeps."""
+    found: dict[str, str | None] = {}
+    for name, value in attrs:
+        found.setdefault(name, value)
+    return found
 
 
 class PageScanner(HTMLParser):
@@ -2985,7 +3004,11 @@ class PageScanner(HTMLParser):
                 self.problem(f"the {tag} element has the inline event handler {name!r}")
             elif value and not exempt and is_javascript_url(value):
                 self.problem(f"the {tag} element has a javascript: URL in {name!r}")
-        attributes = dict(attrs)
+        if tag in ("script", "meta"):
+            names = [name for name, _ in attrs]
+            for name in dict.fromkeys(n for n in names if names.count(n) > 1):
+                self.problem(f"the {tag} element repeats the attribute {name!r}")
+        attributes = first_attributes(attrs)
         if tag == "meta":
             self.meta(attributes)
         elif tag == "script":
@@ -3003,10 +3026,18 @@ class PageScanner(HTMLParser):
             self.charset_end = start + len(text)
 
     def script(self, attributes: dict[str, str | None]) -> None:
-        source = attributes.get("src")
-        if source is not None:
+        # An HTML script loads from src and an SVG script from href or xlink:href.
+        # A script with any of them takes its code from there, so it has no inline
+        # text to hash, and each address is held to the same rule.
+        loaded = False
+        for name in ("src", "href", "xlink:href"):
+            source = attributes.get(name)
+            if source is None:
+                continue
+            loaded = True
             if is_external(source):
                 self.problem(f"the page loads the external script {source!r}")
+        if loaded:
             self._text = None
             return
         kind = (attributes.get("type") or "").strip().lower()
