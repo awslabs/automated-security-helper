@@ -72,6 +72,7 @@ DOCX_SCRIPT = "scripts/generate_test_docx.py"
 TOOL_CONFIG_TRUST = "automated_security_helper/config/tool_config_trust.py"
 OPERATIONAL_FACETS = "automated_security_helper/base/scanner_operational_facets.py"
 FINDING_TREND_TEST = "tests/unit/utils/test_finding_trend.py"
+TRUST_GUARD_REMOVAL_TEST = "tests/unit/config/test_a_removal_keeps_each_trust_guard.py"
 HADOLINT_BEHAVIOR_TEST = (
     "tests/unit/plugin_modules/ash_hadolint_plugins/test_hadolint_scanner_behavior.py"
 )
@@ -142,6 +143,11 @@ _RANGED_PIN_MARKERS: dict[tuple[str, str], list[_Marker]] = {
     # The report-id helper's twelve-hex-digit default argument.
     ("API_KEY_OR_SECRET", FINDING_TREND_TEST): [
         _Marker((r"^def report_id\(second, token=",)),
+    ],
+    # The scanner-options case of the removal test's table, a fixture keyed by the
+    # detect-secrets scanner's name. The pattern names the option and its value.
+    ("API_KEY_OR_SECRET", TRUST_GUARD_REMOVAL_TEST): [
+        _Marker((r'"max_worker_output_mib": 4096\}\}\},$',)),
     ],
     # The two lines of .ash.yaml whose reasons quote a placeholder fixture; they
     # are the findings the self-scan reports on that file, and each is the one line of
@@ -666,6 +672,11 @@ def test_an_every_line_pattern_that_matches_nothing_is_reported():
             "def other_id(second, count=3):",
         ),
         (
+            ("API_KEY_OR_SECRET", TRUST_GUARD_REMOVAL_TEST),
+            '{"detect-' + 'secrets": {"options": {"max_worker_output_mib": 4096}}},',
+            '{"options": {"max_worker_output_mib": 2048}}}',
+        ),
+        (
             ("API_KEY_OR_SECRET", ".ash.yaml"),
             'HEAD = "' + "0123456789abcdef0123456789abcdef01234567" + '" and TOKEN =',
             'HEAD = "unset" and nothing else',
@@ -695,6 +706,7 @@ def test_an_every_line_pattern_that_matches_nothing_is_reported():
         "tool_config_trust",
         "operational_facets",
         "finding_trend_test",
+        "trust_guard_removal_test",
         "ash_yaml_head",
         "ash_yaml_secret",
         "B311",

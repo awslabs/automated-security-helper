@@ -575,7 +575,7 @@ global_settings:
         False positive. A shell variable named for a token, filled at run time
         from /dev/urandom as a per-run nonce. No value is stored in the file.
     # === Detections the alpha self-scan reports on files added after the entries above ===
-    # Measured with ferret-scan 2.6.1, gitleaks and GuardDog over the tree as the alpha
+    # Measured with ferret-scan 2.6.1 or 2.6.2, gitleaks and GuardDog over the tree as the alpha
     # self-scan runs it. Each was read at the reported line and is pinned to it.
     - path: automated_security_helper/base/scanner_operational_facets.py
       rule_id: API_KEY_OR_SECRET
@@ -584,6 +584,16 @@ global_settings:
       reason: >-
         False positive. An enum member whose name is a token word and whose value is a
         lowercase label of the same word; no credential is held.
+    - path: tests/unit/config/test_a_removal_keeps_each_trust_guard.py
+      rule_id: API_KEY_OR_SECRET
+      line_start: 102
+      line_end: 102
+      reason: >-
+        False positive. The scanner-options case of the removal test's table: a
+        configuration fixture keyed by the detect-secrets scanner's name, holding one of
+        its operator-only options and a number. The keyword is part of a tool name; no
+        credential is present. tests/unit/test_ci_ferret_self_scan_pins.py fails if the
+        case moves off the pinned line.
     - path: tests/unit/utils/test_finding_trend.py
       rule_id: API_KEY_OR_SECRET
       line_start: 23
