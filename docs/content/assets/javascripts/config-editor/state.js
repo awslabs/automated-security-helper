@@ -2,19 +2,38 @@
 //
 // The YAML text is the document. A form change is an edit (`set`, `delete` or
 // `append` at a path); the writer proposes the new text, and the re-read gate
-// reads that text again and compares it with what the edit meant, types and
-// reference tokens included. A line patch that fails the gate, or that the writer
-// cannot make, is retried by writing the smallest enclosing entry again; if that
-// fails the gate too, nothing is written and the edit is refused.
+// reads that text again and checks two things.
+//
+// - The typed tree of the new text is the typed tree of the old text with the edit
+//   applied: every integer, float, string, boolean, null, date and reference as ASH's
+//   loader builds it, every mapping key by what it resolves to (the key 1, the key
+//   "1", null and `on` are four keys), and every list and mapping in full.
+// - Every byte outside the lines the edit may reach, which are the lines of the
+//   smallest block that holds it (see `editBound` in yaml-write.js), is as it was,
+//   comments included.
+//
+// A line patch that fails the gate, or that the writer cannot make, is retried by
+// writing the smallest block that holds the edit again; if that fails the gate too,
+// nothing is written and the edit is refused.
 //
 // DOM-free. Imports only its siblings.
 
 import { readYaml } from "./yaml-read.js";
-import { applyToValue, formatPath, planPatch, planReemit, sameValue } from "./yaml-write.js";
+import { applyToValue, editBound, formatPath, planPatch, planReemit, sameValue } from "./yaml-write.js";
 
-function passesGate(text, intended) {
+// Whether every byte before `from` and from `to` on is as it was.
+function unchangedOutside(before, after, bound) {
+  if (bound === null) {
+    return true;
+  }
+  const [from, to] = bound;
+  const tail = before.slice(to);
+  return after.length >= from + tail.length && after.startsWith(before.slice(0, from)) && after.endsWith(tail);
+}
+
+function passesGate(before, text, intended, bound) {
   const reread = readYaml(text);
-  return reread.ok && sameValue(intended, reread.value);
+  return reread.ok && sameValue(intended, reread.typed) && unchangedOutside(before, text, bound);
 }
 
 function refused(reason, message) {
@@ -45,15 +64,16 @@ export function applyEdit(text, edit, options = {}) {
   if (!doc.ok) {
     return refused("unreadable", "The YAML cannot be read, so the form leaves it alone.");
   }
-  const intended = applyToValue(doc.value, edit);
-  if (first.ok && passesGate(first.text, intended)) {
+  const intended = applyToValue(doc.typed, edit);
+  const bound = editBound(doc, edit);
+  if (first.ok && passesGate(text, first.text, intended, bound)) {
     return { ok: true, how: "patch", text: first.text, droppedComments: first.droppedComments };
   }
   const second = reemit(doc, edit);
   if (!second.ok && second.final) {
     return refused(second.reason, second.message);
   }
-  if (second.ok && passesGate(second.text, intended)) {
+  if (second.ok && passesGate(text, second.text, intended, bound)) {
     const kept = second.droppedComments === 0;
     return {
       ok: true,

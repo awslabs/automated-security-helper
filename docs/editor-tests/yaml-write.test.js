@@ -5,10 +5,19 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { readYaml } from '../content/assets/javascripts/config-editor/yaml-read.js';
-import { Reference, Timestamp, resolvePlain } from '../content/assets/javascripts/config-editor/yaml-scalars.js';
+import {
+  Float,
+  Reference,
+  Timestamp,
+  TypedMap,
+  makeMap,
+  resolvePlain,
+} from '../content/assets/javascripts/config-editor/yaml-scalars.js';
 import {
   applyToValue,
+  editBound,
   emitBlock,
+  formatFloat,
   formatNumber,
   formatPath,
   formatScalar,
@@ -53,6 +62,32 @@ test('a number is written so that ASH reads the same number back', () => {
   }
 });
 
+test('a float is written with a dot, so that ASH reads a float and never an integer', () => {
+  const cases = [
+    [1, '1.0'],
+    [2500, '2500.0'],
+    [1.5, '1.5'],
+    [-3, '-3.0'],
+    [0, '0.0'],
+    [-0, '-0.0'],
+    [1e-7, '1.0e-7'],
+    [1.5e300, '1.5e+300'],
+    [1e21, '1.0e+21'],
+    [123456789012345680000, '123456789012345680000.0'],
+    [2 ** 53, '9007199254740992.0'],
+    [NaN, '.nan'],
+    [Infinity, '.inf'],
+    [-Infinity, '-.inf'],
+  ];
+  for (const [number, text] of cases) {
+    assert.equal(formatFloat(number), text);
+    assert.equal(formatScalar(new Float(number)), text);
+    const read = resolvePlain(text);
+    assert.equal(read.type, 'float', text);
+    assert.ok(Object.is(read.value, number), text);
+  }
+});
+
 test('a string is written plain only where both readings agree, and keeps its quotes if it can', () => {
   assert.equal(formatString('hello'), 'hello');
   assert.equal(formatString('yes'), '"yes"');
@@ -69,6 +104,7 @@ test('every kind of scalar has a written form', () => {
   assert.equal(formatScalar(null), 'null');
   assert.equal(formatScalar(true), 'true');
   assert.equal(formatScalar(5), '5');
+  assert.equal(formatScalar(new Float(2)), '2.0');
   assert.equal(formatScalar(new Reference('${HOME}', false)), '${HOME}');
   assert.equal(formatScalar(new Reference('${HOME:x}', true)), '!ENV ${HOME:x}');
   assert.equal(formatScalar(new Reference('${HOME}', false), { inFlow: true }), '!ENV "${HOME}"');
@@ -96,7 +132,7 @@ test('block text keeps the indentation unit, the list style and the line ending 
   assert.equal(emitBlock([]), '[]');
 });
 
-test('what the emitter writes reads back as the same value', () => {
+test('what the emitter writes reads back as the same value, type for type', () => {
   const value = {
     name: 'x y',
     flag: false,
@@ -104,10 +140,33 @@ test('what the emitter writes reads back as the same value', () => {
     quoted: ['yes', '0755', '', 'k: v', 'a #b'],
     nested: { n: 3, f: 1.5, ref: new Reference('${HOME:x}', true), list: [{ a: 1, b: [2] }, {}] },
     'odd key': 'v',
+    floats: [new Float(1), new Float(2500), 1.5, new Float(-0), new Float(Infinity)],
+    keys: makeMap([
+      [1, 'int'],
+      ['1', 'text'],
+      [null, 'null'],
+      [new Float(1.5), 'float'],
+      [new Timestamp('date', '2026-12-31'), 'date'],
+      [new Reference('${KEY}', false), 'reference'],
+      ['${KEY}', 'quoted reference'],
+    ]),
+    flags: makeMap([
+      [true, 'a'],
+      [false, 'b'],
+    ]),
   };
+  assert.ok(value.keys instanceof TypedMap);
   const doc = readYaml(`${emitBlock(value)}\n`);
   assert.ok(doc.ok, doc.refusal && doc.refusal.message);
-  assert.equal(sameValue(value, doc.value), true);
+  assert.equal(sameValue(value, doc.typed), true);
+  assert.equal(
+    emitBlock(value.keys),
+    '1: int\n"1": text\nnull: null\n1.5: float\n2026-12-31: date\n${KEY}: reference\n"${KEY}": quoted reference',
+  );
+  assert.equal(emitBlock(value.flags), 'true: a\nfalse: b');
+  // An integer where a float was is a different value, and so is text where a key was.
+  assert.equal(sameValue(value, { ...value, floats: [1, 2500, 1.5, -0, Infinity] }), false);
+  assert.equal(sameValue(value.keys, makeMap([[1, 'int'], ['1', 'text']])), false);
 });
 
 test('a new file is the schema comment, the project name, and nothing else', () => {
@@ -145,6 +204,23 @@ test('an edit applied to a value tree creates, replaces, deletes and appends', (
   assert.deepStrictEqual(before, { a: { b: 1 } });
 });
 
+test('an edit reaches into a mapping with typed keys by its string keys only', () => {
+  const typed = { m: makeMap([[1, 'a'], ['1', 'b'], ['l', 'x']]) };
+  const set = applyToValue(typed, { op: 'set', path: ['m', '1'], value: 'c' });
+  assert.deepStrictEqual(set.m.pairs, [[1, 'a'], ['1', 'c'], ['l', 'x']]);
+  const added = applyToValue(typed, { op: 'set', path: ['m', 'z', 'y'], value: 2 });
+  assert.deepStrictEqual(added.m.pairs, [[1, 'a'], ['1', 'b'], ['l', 'x'], ['z', { y: 2 }]]);
+  const removed = applyToValue(typed, { op: 'delete', path: ['m', 'l'] });
+  assert.deepStrictEqual(removed.m.pairs, [[1, 'a'], ['1', 'b']]);
+  const appended = applyToValue({ m: makeMap([[1, 'a'], ['l', ['x']]]) }, { op: 'append', path: ['m', 'l'], value: 'y' });
+  assert.deepStrictEqual(appended.m.pairs, [[1, 'a'], ['l', ['x', 'y']]]);
+  assert.deepStrictEqual(typed.m.pairs, [[1, 'a'], ['1', 'b'], ['l', 'x']]);
+  // A path cannot name a key that is not a string, so such a key is never removed by one.
+  const kept = applyToValue({ m: makeMap([[null, 1], ['b', 2]]) }, { op: 'delete', path: ['m', 'b'] });
+  assert.deepStrictEqual(kept.m.pairs, [[null, 1]]);
+  assert.deepStrictEqual(applyToValue(typed, { op: 'delete', path: ['m', 'nothing'] }), typed);
+});
+
 test('two value trees are the same when types and reference texts agree', () => {
   assert.equal(sameValue({ a: 1, b: [1, 2] }, { b: [1, 2], a: 1 }), true);
   assert.equal(sameValue(new Reference('${A}', true), new Reference('${A}', false)), true);
@@ -162,6 +238,37 @@ test('two value trees are the same when types and reference texts agree', () => 
   assert.equal(sameValue(new Timestamp('date', '2026-12-31'), '2026-12-31'), false);
   assert.equal(sameValue({ a: 1 }, { a: 1, b: 2 }), false);
   assert.equal(sameValue([1], [1, 2]), false);
+});
+
+test('two value trees are told apart by the type of every number and every key', () => {
+  // An integer is not a float, whatever the value; a JavaScript number is one or the
+  // other as it is written, and a BigInt is an integer.
+  assert.equal(sameValue(1, new Float(1)), false);
+  assert.equal(sameValue(new Float(1.5), 1.5), true);
+  assert.equal(sameValue(new Float(NaN), NaN), true);
+  assert.equal(sameValue(new Float(0), new Float(-0)), false);
+  assert.equal(sameValue(5, 5n), true);
+  assert.equal(sameValue(2 ** 53, new Float(2 ** 53)), true);
+  assert.equal(sameValue({ a: [1.5, 2] }, { a: [new Float(1.5), 2] }), true);
+  assert.equal(sameValue({ a: [new Float(2)] }, { a: [2] }), false);
+  // The key 1, the key "1", true, null and the text null are different keys.
+  const keys = [[1, 'x'], ['1', 'x'], [null, 'x'], ['null', 'x'], [new Float(1.5), 'x'], [true, 'x']];
+  for (const left of keys) {
+    for (const right of keys) {
+      const same = left === right;
+      assert.equal(sameValue(makeMap([left]), makeMap([right])), same, `${String(left[0])} against ${String(right[0])}`);
+    }
+  }
+  // Python makes `yes` and `true` one key, and a mapping's key order does not matter.
+  assert.equal(sameValue(makeMap([[true, 'x']]), makeMap([[true, 'x']])), true);
+  assert.equal(sameValue(makeMap([[1, 'a'], [null, 'b']]), makeMap([[null, 'b'], [1, 'a']])), true);
+  assert.equal(sameValue(makeMap([[1, 'a']]), { 1: 'a' }), false);
+  assert.equal(sameValue(makeMap([[1, 'a']]), makeMap([[1, 'b']])), false);
+  assert.equal(sameValue(makeMap([[new Reference('${K}', false), 'a']]), makeMap([['${K}', 'a']])), false);
+  assert.equal(
+    sameValue(makeMap([[new Reference('${K}', false), 'a']]), makeMap([[new Reference('${K}', true), 'a']])),
+    true,
+  );
 });
 
 test('a path is written the way people write it', () => {
@@ -298,15 +405,52 @@ test('a block-only path is written again as the list item that holds the edit, n
 });
 
 test('writing an entry again names it and counts the comments it held', () => {
-  const text = 'scanners:\n  checkov:\n    # note\n    a: 1\n    b: 2\nother: 1\n';
-  const result = reemit(text, { op: 'set', path: ['scanners', 'checkov', 'a'], value: 5 });
+  const text = 'scanners:\n  checkov:\n    # note\n    a: [1, 2] # inline\n    b: 2\nother: 1\n';
+  const result = reemit(text, { op: 'append', path: ['scanners', 'checkov', 'a'], value: 3 });
   assert.deepEqual(result, {
     ok: true,
     how: 'reemit',
-    text: 'scanners:\n  checkov:\n    a: 5\n    b: 2\nother: 1\n',
+    text: 'scanners:\n  checkov:\n    # note\n    a:\n      - 1\n      - 2\n      - 3\n    b: 2\nother: 1\n',
     droppedComments: 1,
-    label: 'scanners.checkov',
+    label: 'scanners.checkov.a',
   });
+});
+
+test('a block-only path is written again as the entry the edit changes, or the one that holds a deleted entry', () => {
+  const text = 'scanners:\n  checkov:\n    # note\n    a: 1\n    b: 2\nother: 1\n';
+  const set = reemit(text, { op: 'set', path: ['scanners', 'checkov', 'a'], value: 5 });
+  assert.equal(set.label, 'scanners.checkov.a');
+  assert.equal(set.text, 'scanners:\n  checkov:\n    # note\n    a: 5\n    b: 2\nother: 1\n');
+  assert.equal(set.droppedComments, 0);
+  const created = reemit(text, { op: 'set', path: ['scanners', 'checkov', 'c'], value: 3 });
+  assert.equal(created.label, 'scanners.checkov');
+  assert.equal(created.text, 'scanners:\n  checkov:\n    a: 1\n    b: 2\n    c: 3\nother: 1\n');
+  assert.equal(created.droppedComments, 1);
+  const deleted = reemit(text, { op: 'delete', path: ['scanners', 'checkov', 'a'] });
+  assert.equal(deleted.label, 'scanners.checkov');
+  assert.equal(deleted.text, 'scanners:\n  checkov:\n    b: 2\nother: 1\n');
+  const top = reemit(text, { op: 'delete', path: ['other'] });
+  assert.equal(top.ok, false);
+  assert.equal(top.final, false);
+});
+
+test('an edit may reach the lines of the smallest block that holds it, and no further', () => {
+  const text = 'a:\n  - x: 1\n    y: 2\n  # next\n  - x: 3\n    y: 4\nb: [1]\n';
+  const lines = text.split('\n');
+  const start = (line) => lines.slice(0, line).join('\n').length + (line > 0 ? 1 : 0);
+  const bound = (edit) => editBound(readYaml(text), edit);
+  // A key of an item: its own lines, with the line breaks before and after.
+  assert.deepEqual(bound({ op: 'set', path: ['a', 1, 'y'], value: 5 }), [start(5) - 1, start(6)]);
+  // The first key of an item is deleted from the item, which holds the dash line too.
+  assert.deepEqual(bound({ op: 'delete', path: ['a', 1, 'x'] }), [start(4) - 1, start(6)]);
+  // A whole item is deleted from the list's entry.
+  assert.deepEqual(bound({ op: 'delete', path: ['a', 1] }), [start(0), start(6)]);
+  // Inside a flow collection the block is the entry that holds it.
+  assert.deepEqual(bound({ op: 'append', path: ['b'], value: 2 }), [start(6) - 1, start(7)]);
+  // A new top-level key may go anywhere at the end of the file, so there is no bound.
+  assert.equal(bound({ op: 'set', path: ['c'], value: 1 }), null);
+  assert.equal(editBound(readYaml('{a: 1}\n'), { op: 'set', path: ['b'], value: 1 }), null);
+  assert.equal(editBound(readYaml('a: [\n'), { op: 'set', path: ['a'], value: 1 }), null);
 });
 
 test('a flow document is written again as a whole', () => {

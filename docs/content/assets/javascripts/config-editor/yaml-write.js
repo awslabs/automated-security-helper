@@ -9,14 +9,22 @@
 // is told how many comments that dropped.
 //
 // This module only proposes text. Reading the text back and comparing it with
-// what the edit meant is the caller's job (state.js).
+// what the edit meant is the caller's job (state.js), which is also why the module
+// exports how far an edit may reach (`editBound`) and how two values are compared
+// (`sameValue`).
 //
 // DOM-free. Imports only its siblings.
 
 import {
+  Float,
   Reference,
   Timestamp,
+  TypedMap,
+  keyIdentity,
+  keyKind,
+  makeMap,
   matchReference,
+  numberKind,
   plainSafe,
   plainSyntaxOk,
   quoteDouble,
@@ -24,6 +32,12 @@ import {
 } from "./yaml-scalars.js";
 
 // Values.
+//
+// A value is null, a boolean, a number, a BigInt, a string, a Reference, a Timestamp, a
+// Float, a list, a plain object (every key a string) or a TypedMap (a mapping with a key
+// that is not a plain string). A JavaScript number is an integer when it is a safe
+// integer and a float otherwise, which is how it is written; a Float is how a whole
+// float such as 1.0 is asked for and how the reader gives one back.
 
 function isPlainObject(value) {
   return (
@@ -31,16 +45,30 @@ function isPlainObject(value) {
     typeof value === "object" &&
     !Array.isArray(value) &&
     !(value instanceof Reference) &&
-    !(value instanceof Timestamp)
+    !(value instanceof Timestamp) &&
+    !(value instanceof Float) &&
+    !(value instanceof TypedMap)
   );
 }
 
+function isMapping(value) {
+  return isPlainObject(value) || value instanceof TypedMap;
+}
+
 function isCollection(value) {
-  return Array.isArray(value) || isPlainObject(value);
+  return Array.isArray(value) || isMapping(value);
+}
+
+// The pairs of a mapping: the keys are strings for a plain object and the keys as they
+// resolve for a TypedMap.
+function pairsOf(mapping) {
+  return mapping instanceof TypedMap
+    ? mapping.pairs
+    : Object.keys(mapping).map((key) => [key, mapping[key]]);
 }
 
 function isEmptyCollection(value) {
-  return Array.isArray(value) ? value.length === 0 : Object.keys(value).length === 0;
+  return Array.isArray(value) ? value.length === 0 : pairsOf(value).length === 0;
 }
 
 function own(object, key) {
@@ -64,6 +92,17 @@ function copyObject(object) {
   return copy;
 }
 
+// The value under a string key, or undefined. A path step is a string or a list
+// position, so it never names a key that is not a string: in a TypedMap the key 1 and
+// the key "1" are two pairs, and the step "1" reaches the second.
+function lookup(mapping, key) {
+  if (mapping instanceof TypedMap) {
+    const pair = mapping.pairs.find(([name]) => name === key);
+    return pair === undefined ? undefined : pair[1];
+  }
+  return isPlainObject(mapping) ? own(mapping, key) : undefined;
+}
+
 function getAt(node, path) {
   let current = node;
   for (const step of path) {
@@ -73,10 +112,10 @@ function getAt(node, path) {
       }
       current = current[step];
     } else {
-      if (!isPlainObject(current) || own(current, step) === undefined) {
+      current = lookup(current, step);
+      if (current === undefined) {
         return undefined;
       }
-      current = own(current, step);
     }
   }
   return current;
@@ -91,6 +130,16 @@ function setAt(node, path, value) {
     const items = Array.isArray(node) ? [...node] : [];
     items[head] = setAt(items[head], rest, value);
     return items;
+  }
+  if (node instanceof TypedMap) {
+    const pairs = node.pairs.map(([name, item]) => [name, item]);
+    const at = pairs.findIndex(([name]) => name === head);
+    if (at === -1) {
+      pairs.push([head, setAt(undefined, rest, value)]);
+    } else {
+      pairs[at][1] = setAt(pairs[at][1], rest, value);
+    }
+    return new TypedMap(pairs);
   }
   const mapping = isPlainObject(node) ? copyObject(node) : {};
   define(mapping, head, setAt(own(mapping, head), rest, value));
@@ -110,6 +159,19 @@ function deleteAt(node, path) {
       items.splice(head, 1);
     }
     return items;
+  }
+  if (node instanceof TypedMap) {
+    const at = node.pairs.findIndex(([name]) => name === head);
+    if (at === -1) {
+      return node;
+    }
+    const pairs = node.pairs.map(([name, item]) => [name, item]);
+    if (rest.length > 0) {
+      pairs[at][1] = deleteAt(pairs[at][1], rest);
+    } else {
+      pairs.splice(at, 1);
+    }
+    return makeMap(pairs);
   }
   if (!isPlainObject(node) || own(node, head) === undefined) {
     return node;
@@ -145,9 +207,18 @@ export function applyToValue(root, edit) {
 }
 
 /**
- * Whether two value trees mean the same: types and reference tokens included.
- * A reference counts by its text, so the plain and the tagged form of one
- * reference are the same.
+ * Whether two value trees mean the same to ASH's loader, type for type:
+ *
+ * - an integer is not a float, whatever their values (1 and 1.0 differ; a safe
+ *   integer and a BigInt of the same value are the same integer);
+ * - a key is the same key when Python makes it one (true is 1 is 1.0) and has the
+ *   same type, so the key 1, the key "1", `null` and "null" are four keys;
+ * - a reference is not the text it is written with, and counts by its text, so the
+ *   plain and the tagged form of one reference are the same;
+ * - a date is not a string, and a mapping's keys are compared whatever their order.
+ *
+ * It takes the trees the reader gives (`typed` of a reading) and the values an edit
+ * carries alike.
  */
 export function sameValue(expected, actual) {
   if (expected instanceof Reference || actual instanceof Reference) {
@@ -163,6 +234,18 @@ export function sameValue(expected, actual) {
       expected.iso === actual.iso
     );
   }
+  const kind = numberKind(expected);
+  if (kind !== null || numberKind(actual) !== null) {
+    if (kind !== numberKind(actual)) {
+      return false;
+    }
+    if (kind === "int") {
+      return BigInt(expected) === BigInt(actual);
+    }
+    const left = expected instanceof Float ? expected.value : expected;
+    const right = actual instanceof Float ? actual.value : actual;
+    return Object.is(left, right);
+  }
   if (Array.isArray(expected) || Array.isArray(actual)) {
     return (
       Array.isArray(expected) &&
@@ -171,18 +254,23 @@ export function sameValue(expected, actual) {
       expected.every((item, index) => sameValue(item, actual[index]))
     );
   }
-  if (isPlainObject(expected) || isPlainObject(actual)) {
-    if (!isPlainObject(expected) || !isPlainObject(actual)) {
+  if (isMapping(expected) || isMapping(actual)) {
+    if (!isMapping(expected) || !isMapping(actual)) {
       return false;
     }
-    const keys = Object.keys(expected);
-    return (
-      keys.length === Object.keys(actual).length &&
-      keys.every((key) => own(actual, key) !== undefined && sameValue(expected[key], actual[key]))
-    );
-  }
-  if (typeof expected === "number" && typeof actual === "number") {
-    return Object.is(expected, actual);
+    const left = pairsOf(expected);
+    const right = pairsOf(actual);
+    if (left.length !== right.length) {
+      return false;
+    }
+    const byKey = new Map(right.map((pair) => [keyIdentity(pair[0]), pair]));
+    if (byKey.size !== right.length) {
+      return false;
+    }
+    return left.every(([key, item]) => {
+      const other = byKey.get(keyIdentity(key));
+      return other !== undefined && keyKind(key) === keyKind(other[0]) && sameValue(item, other[1]);
+    });
   }
   return expected === actual;
 }
@@ -230,6 +318,31 @@ export function formatNumber(number) {
 }
 
 /**
+ * A float as a YAML scalar that ASH's loader reads back as the same float: a whole
+ * float keeps its dot (1.0, 2500.0) so that it is never read as an integer, and an
+ * exponent form has one too (1.0e-7).
+ */
+export function formatFloat(number) {
+  if (Number.isNaN(number)) {
+    return ".nan";
+  }
+  if (number === Infinity) {
+    return ".inf";
+  }
+  if (number === -Infinity) {
+    return "-.inf";
+  }
+  if (Object.is(number, -0)) {
+    return "-0.0";
+  }
+  const text = String(number);
+  if (text.includes("e")) {
+    return text.includes(".") ? text : text.replace("e", ".0e");
+  }
+  return text.includes(".") ? text : `${text}.0`;
+}
+
+/**
  * A string as a scalar: plain only when ASH's loader and a YAML 1.2 reader both
  * read the plain form as the same string, otherwise quoted. `preferred` keeps
  * the quote style the old value had ("single" or "double") where it can.
@@ -257,7 +370,7 @@ function formatReference(reference, inFlow) {
   return `!ENV ${!inFlow && plainSyntaxOk(text) ? text : quoteDouble(text)}`;
 }
 
-/** A null, boolean, number, string, reference or date as the text of a scalar. */
+/** A null, boolean, number, float, string, reference or date as the text of a scalar. */
 export function formatScalar(value, options = {}) {
   const { preferred = null, inFlow = false } = options;
   if (value === null || value === undefined) {
@@ -268,6 +381,9 @@ export function formatScalar(value, options = {}) {
   }
   if (typeof value === "number" || typeof value === "bigint") {
     return formatNumber(value);
+  }
+  if (value instanceof Float) {
+    return formatFloat(value.value);
   }
   if (typeof value === "string") {
     return formatString(value, preferred, inFlow);
@@ -285,14 +401,20 @@ function formatInline(value, preferred = null) {
   if (Array.isArray(value)) {
     return "[]";
   }
-  if (isPlainObject(value)) {
+  if (isMapping(value)) {
     return "{}";
   }
   return formatScalar(value, { preferred });
 }
 
+// A string key is plain where both readings agree and double-quoted otherwise, so the
+// key "1" never reads back as the integer 1. A key that is not a string is written as
+// the scalar it is: 1, true, null, 1.5, a date, a reference.
 function formatKey(key) {
-  return plainSafe(key) ? key : quoteDouble(key);
+  if (typeof key === "string") {
+    return plainSafe(key) ? key : quoteDouble(key);
+  }
+  return formatScalar(key);
 }
 
 // Writing blocks.
@@ -315,11 +437,15 @@ function entryLines(head, value, indent, context) {
   return [`${head} ${formatInline(value)}`];
 }
 
-function mapLines(object, indent, context) {
+function mapLines(mapping, indent, context) {
   const pad = " ".repeat(indent);
   const lines = [];
-  for (const key of orderedKeys(object, context.order)) {
-    lines.push(...entryLines(`${pad}${formatKey(key)}:`, object[key], indent, context));
+  const pairs =
+    mapping instanceof TypedMap
+      ? mapping.pairs
+      : orderedKeys(mapping, context.order).map((key) => [key, mapping[key]]);
+  for (const [key, item] of pairs) {
+    lines.push(...entryLines(`${pad}${formatKey(key)}:`, item, indent, context));
   }
   return lines;
 }
@@ -401,6 +527,12 @@ function countComments(doc, from, to) {
 
 // Finding the path in the nodes.
 
+// A path step is a string, so it names a key that is text: not the integer 1, not true
+// for `yes`, not null and not a reference, which are keys of their own.
+function isTextKey(key) {
+  return key.kind === "scalar" && (key.type === "str" || key.type === "value");
+}
+
 function locate(root, path) {
   const trail = [];
   let node = root;
@@ -408,9 +540,7 @@ function locate(root, path) {
     const step = path[depth];
     let hit = null;
     if (node !== null && node.kind === "map" && typeof step === "string") {
-      const entries = node.entries.filter(
-        (entry) => entry.key.kind === "scalar" && entry.key.type !== "merge" && entry.key.text === step,
-      );
+      const entries = node.entries.filter((entry) => isTextKey(entry.key) && entry.key.text === step);
       if (entries.length > 0) {
         const entry = entries[entries.length - 1];
         hit = { parent: node, entry, node: entry.value, ambiguous: entries.length > 1 };
@@ -671,13 +801,28 @@ function patchAppend(doc, loc, edit, context) {
   return patchSet(doc, loc, { ...edit, op: "set", value: [edit.value] }, context);
 }
 
+// Where the child after this one starts, or null when it is the last.
+function nextChildStart(hit) {
+  const parent = hit.parent;
+  if (hit.entry) {
+    const next = parent.entries[parent.entries.indexOf(hit.entry) + 1];
+    return next === undefined ? null : next.start;
+  }
+  const next = parent.items[hit.index + 1];
+  return next === undefined ? null : next.dash;
+}
+
 function removeChild(doc, hit) {
   const text = doc.text;
   const childStart = hit.entry ? hit.entry.start : hit.node.dash;
   const childEnd = hit.entry ? hit.entry.end : nodeEnd(hit.node);
   const start = lineStartOf(text, childStart);
   if (text.slice(start, childStart).trim() !== "") {
-    return UNSUPPORTED;
+    // The first key of a list item, or the first item of a list in a list, shares its
+    // line with the dash before it. The child that follows moves up into its place, so
+    // the dash keeps a child and nothing outside the item changes.
+    const next = nextChildStart(hit);
+    return next === null ? UNSUPPORTED : patched(doc, childStart, next, "");
   }
   const end = lineEndOf(text, childEnd);
   const length = breakLengthAt(text, end);
@@ -741,12 +886,64 @@ function isFlowCollection(node) {
   return node.kind !== "scalar" && node.style === "flow";
 }
 
+// Which hit of the trail the smallest block that holds an edit starts at: the entry or
+// list item the edit changes (a delete changes the one that holds the deleted child),
+// or, where the path runs through a flow collection, the entry that holds the outermost
+// one, since nothing inside a flow collection can be changed line by line. -1 means no
+// block is smaller than the whole file.
+function blockIndex(loc, edit) {
+  const last = loc.trail.length - 1;
+  let index = edit.op === "delete" ? last - 1 : last;
+  const flow = loc.trail.findIndex((hit) => isFlowCollection(hit.node));
+  if (flow !== -1) {
+    index = Math.min(index, flow);
+  }
+  return index;
+}
+
+// The lines a hit takes up, with the line break before them and after them.
+function extentOf(doc, hit) {
+  const text = doc.text;
+  const start = lineStartOf(text, hit.entry ? hit.entry.start : hit.node.dash);
+  const end = lineEndOf(text, hit.entry ? hit.entry.end : nodeEnd(hit.node));
+  return [start - breakLengthBefore(text, start), end + breakLengthAt(text, end)];
+}
+
+function breakLengthBefore(text, index) {
+  if (index >= 2 && text.startsWith("\r\n", index - 2)) {
+    return 2;
+  }
+  return index > 0 ? 1 : 0;
+}
+
 /**
- * The text after an edit with the smallest enclosing entry written again in block
- * style: the entry that holds the first flow collection on the path, or, when the
- * path runs through blocks only, the entry two levels down (a plugin section).
- * Everything outside that entry stays. Returns the same shapes as `planPatch`,
- * with `label` naming the entry and `droppedComments` counting the comments in it.
+ * How far an edit may reach in the text: `[from, to]`, the lines of the smallest block
+ * that holds it, as the writer defines that block (the entry or list item the edit
+ * changes, or the one that holds the deleted entry, and not below the outermost flow
+ * collection on the path), with the line break on each side. Every byte outside it must
+ * stay as it was, comments included. Null when the edit may reach the whole file: a new
+ * top-level key, a flow collection as the top level, an unreadable file.
+ */
+export function editBound(doc, edit) {
+  const checked = check(doc, edit);
+  if (checked.problem || doc.root === null || isFlowCollection(doc.root)) {
+    return null;
+  }
+  const { loc } = checked;
+  if (loc.trail.length === 0) {
+    return null;
+  }
+  return extentOf(doc, loc.trail[Math.max(blockIndex(loc, edit), 0)]);
+}
+
+/**
+ * The text after an edit with the smallest block that holds it written again in block
+ * style: the entry or list item the edit changes (for a delete, the one that holds the
+ * deleted child), or, where the path runs through a flow collection, the entry that
+ * holds the outermost one. Never a list that only contains the item. Everything outside
+ * it stays. Returns the same shapes as `planPatch`, with `label` naming the block and
+ * `droppedComments` counting the comments in it. It writes from the typed tree
+ * (`doc.typed`), so floats, keys of every type and references come back as they were.
  */
 export function planReemit(doc, edit) {
   const checked = check(doc, edit);
@@ -756,20 +953,13 @@ export function planReemit(doc, edit) {
   const { loc } = checked;
   const { path } = edit;
   const context = styleContext(doc);
-  const intended = applyToValue(doc.value, edit);
   if (doc.root !== null && isFlowCollection(doc.root)) {
+    const intended = applyToValue(doc.typed, edit);
     const range = [doc.root.start, lineEndOf(doc.text, doc.root.end)];
     const text = emitBlock(intended, { unit: context.unit, seq: context.seq, newline: doc.newline });
     return reemitted(doc, range, text, "the top level");
   }
-  let index = loc.trail.findIndex((hit) => isFlowCollection(hit.node));
-  if (index === -1) {
-    index = Math.min(1, loc.trail.length - 1);
-  }
-  if (edit.op === "delete") {
-    index = Math.min(index, path.length - 2);
-  }
-  index = Math.min(index, loc.trail.length - 1);
+  const index = blockIndex(loc, edit);
   if (index < 0) {
     return UNSUPPORTED;
   }
@@ -781,7 +971,7 @@ export function planReemit(doc, edit) {
     );
   }
   const subPath = path.slice(0, index + 1);
-  const sub = applyToValue(getAt(doc.value, subPath), { ...edit, path: path.slice(index + 1) });
+  const sub = applyToValue(getAt(doc.typed, subPath), { ...edit, path: path.slice(index + 1) });
   const label = formatPath(subPath);
   if (hit.entry) {
     const key = doc.text.slice(hit.entry.key.start, hit.entry.key.end);

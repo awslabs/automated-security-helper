@@ -18,10 +18,8 @@ import { fileURLToPath } from 'node:url';
 
 import { applyEdit } from '../content/assets/javascripts/config-editor/state.js';
 import { mappingPairs, readYaml } from '../content/assets/javascripts/config-editor/yaml-read.js';
-import * as scalars from '../content/assets/javascripts/config-editor/yaml-scalars.js';
+import { Float, Reference, Timestamp, TypedMap, makeMap } from '../content/assets/javascripts/config-editor/yaml-scalars.js';
 import { emitBlock } from '../content/assets/javascripts/config-editor/yaml-write.js';
-
-const { Reference, Timestamp, Float, TypedMap, makeMap } = scalars;
 
 const FIXTURES = fileURLToPath(new URL('./fixtures/', import.meta.url));
 const REPOSITORY_CONFIG = fileURLToPath(new URL('../../.ash.yaml', import.meta.url));
@@ -274,14 +272,6 @@ for (const testCase of READING_CASES) {
 // map. With `typed` the tree is doc.typed instead, where a float is a Float and an
 // integer is never one.
 
-function isFloat(value) {
-  return Float !== undefined && value instanceof Float;
-}
-
-function isTypedMap(value) {
-  return TypedMap !== undefined && value instanceof TypedMap;
-}
-
 function isPlainObject(value) {
   return (
     value !== null &&
@@ -289,8 +279,8 @@ function isPlainObject(value) {
     !Array.isArray(value) &&
     !(value instanceof Reference) &&
     !(value instanceof Timestamp) &&
-    !isFloat(value) &&
-    !isTypedMap(value)
+    !(value instanceof Float) &&
+    !(value instanceof TypedMap)
   );
 }
 
@@ -305,17 +295,17 @@ function describe(value) {
   if (value instanceof Timestamp) {
     return `the ${value.kind} ${value.iso}`;
   }
-  if (isTypedMap(value)) {
+  if (value instanceof TypedMap) {
     return `a map with typed keys and ${value.pairs.length} pairs`;
   }
-  if (isFloat(value)) {
+  if (value instanceof Float) {
     return `the float ${value.value}`;
   }
   return short(value);
 }
 
 function pairsDifference(pairs, actual, typed, where) {
-  if (isTypedMap(actual)) {
+  if (actual instanceof TypedMap) {
     if (actual.pairs.length !== pairs.length) {
       return `${where}: expected ${pairs.length} pairs, the reader gave ${actual.pairs.length}`;
     }
@@ -373,7 +363,7 @@ function treeDifference(expected, actual, typed, where = 'value') {
     return null;
   }
   if ('$float' in expected) {
-    const number = typed ? (isFloat(actual) ? actual.value : undefined) : actual;
+    const number = typed ? (actual instanceof Float ? actual.value : undefined) : actual;
     return typeof number === 'number' && Object.is(number, floatFrom(expected.$float)) ? null : wrong();
   }
   if ('$int' in expected) {
@@ -420,6 +410,18 @@ for (const testCase of READING_CASES) {
   });
 }
 
+for (const testCase of READING_CASES) {
+  if ('refuse' in testCase) {
+    continue;
+  }
+  test(`the typed tree for ${testCase.id} says what the corpus says, floats and integers apart`, () => {
+    const doc = readYaml(caseText(testCase));
+    assert.ok(doc.ok, refusalOf(doc));
+    const found = treeDifference(testCase.value, doc.typed, true);
+    assert.equal(found, null, found ?? '');
+  });
+}
+
 // The block emitter: what it writes for each value the corpus holds reads back as the
 // same, type for type: an integer stays an integer, a float a float, a key keeps its type.
 
@@ -431,7 +433,7 @@ for (const testCase of READING_CASES) {
     const doc = readYaml(caseText(testCase));
     assert.ok(doc.ok, refusalOf(doc));
     for (const [unit, seq] of [[2, 'indented'], [4, 'indentless']]) {
-      const text = `${emitBlock(doc.value, { unit, seq })}\n`;
+      const text = `${emitBlock(doc.typed, { unit, seq })}\n`;
       const back = readYaml(text);
       assert.ok(back.ok, `the written text is refused: ${refusalOf(back)}\n${text.slice(0, 300)}`);
       const found = difference(projectDoc(doc), projectDoc(back));
@@ -446,10 +448,10 @@ function editValue(raw) {
   if (raw !== null && typeof raw === 'object' && '$ref' in raw) {
     return new Reference(raw.$ref, Boolean(raw.explicit));
   }
-  if (raw !== null && typeof raw === 'object' && '$float' in raw && Float !== undefined) {
+  if (raw !== null && typeof raw === 'object' && '$float' in raw) {
     return new Float(floatFrom(raw.$float));
   }
-  if (raw !== null && typeof raw === 'object' && '$map' in raw && makeMap !== undefined) {
+  if (raw !== null && typeof raw === 'object' && '$map' in raw) {
     return makeMap(raw.$map.map(([key, item]) => [editValue(key), editValue(item)]));
   }
   if (Array.isArray(raw)) {
