@@ -45,7 +45,7 @@ ANY_FINDING = [pytest.param(None, id="absent"), *FINDING]
 def _high() -> dict[str, Any]:
     """A HIGH finding of the scanner the notes below name."""
     return {
-        "ruleId": "F1",
+        "ruleId": "R-HIGH",
         "level": "error",
         "properties": {"scanner_name": "trivy", "issue_severity": "HIGH"},
     }

@@ -100,7 +100,7 @@ def _result(
 
 
 def _high() -> dict[str, Any]:
-    return _result("F1", None, level="error", severity="HIGH")
+    return _result("R-HIGH", None, level="error", severity="HIGH")
 
 
 # variant -> (threshold, results of a kind, expected exit code, expected actionable)

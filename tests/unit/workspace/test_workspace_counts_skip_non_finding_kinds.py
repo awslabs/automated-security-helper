@@ -77,7 +77,7 @@ def _sarif(note_kind: str | None, *, suppressed: bool = False) -> dict[str, Any]
             {
                 "tool": {"driver": {"name": "ASH"}},
                 "results": [
-                    _result("F1", None, level="error"),
+                    _result("R-HIGH", None, level="error"),
                     _result("N1", note_kind, level="none", suppressed=suppressed),
                 ],
                 "invocations": [],

@@ -47,7 +47,7 @@ THRESHOLDS = {"": "ALL", "trivy": "ALL"}
 def _high() -> dict[str, Any]:
     """A HIGH finding of the scanner the notes below name."""
     return {
-        "ruleId": "F1",
+        "ruleId": "R-HIGH",
         "level": "error",
         "properties": {"scanner_name": "trivy", "issue_severity": "HIGH"},
     }
@@ -147,14 +147,14 @@ def test_the_same_result_at_level_error_counts_at_low(kind):
 def test_the_actionable_view_drops_a_result_that_states_no_finding(kind):
     kept = _rule_ids(filter_actionable_only(_document(_note(kind))))
 
-    assert kept == ["F1"]
+    assert kept == ["R-HIGH"]
 
 
 @pytest.mark.parametrize("kind", ANY_FINDING)
 def test_the_actionable_view_keeps_the_same_result_when_it_asserts_a_finding(kind):
     kept = _rule_ids(filter_actionable_only(_document(_note(kind))))
 
-    assert kept == ["F1", "N1"]
+    assert kept == ["N1", "R-HIGH"]
 
 
 @pytest.mark.parametrize("kind", NON_FINDING)
